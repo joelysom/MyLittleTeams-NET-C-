@@ -1,129 +1,161 @@
-﻿<Window x:Class="MeuAppWPF.MainWindow"
+<mah:MetroWindow x:Class="MeuApp.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Teams Modern" Height="720" Width="1280"
+        xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+        Title="MyApp - Modern Chat" Height="720" Width="1280"
         WindowState="Maximized"
-        Background="#FFFFFF">
+        Background="#F5F5F5"
+        GlowBrush="#0078D4" 
+        BorderThickness="0">
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="PrimaryBlue">#0078D4</SolidColorBrush>
-        <SolidColorBrush x:Key="DarkBlue">#004578</SolidColorBrush>
-        <SolidColorBrush x:Key="LightGray">#F3F3F3</SolidColorBrush>
-        <SolidColorBrush x:Key="DarkGray">#616161</SolidColorBrush>
-        <SolidColorBrush x:Key="White">#FFFFFF</SolidColorBrush>
-        <SolidColorBrush x:Key="BorderGray">#E1E1E1</SolidColorBrush>
-
-        <Style x:Key="SidebarButtonStyle" TargetType="Button">
+    <mah:MetroWindow.Resources>
+        <Style x:Key="NavButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#616161"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="Foreground" Value="#424242"/>
             <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Margin" Value="8,2"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#E7E7E7"/>
+                    <Setter Property="Background" Value="#E8F4F8"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="IconTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+
+        <Style x:Key="TopBarIconButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#333333"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="Width" Value="48"/>
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="8,0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#E8E8E8"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
 
         <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource PrimaryBlue}"/>
-            <Setter Property="Foreground" Value="{StaticResource White}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="20,10"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{StaticResource DarkBlue}"/>
-                </Trigger>
-            </Style.Triggers>
         </Style>
-    </Window.Resources>
 
-    <Grid>
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#0078D4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="BorderBrush" Value="#0078D4"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </mah:MetroWindow.Resources>
+
+    <Grid Background="#F5F5F5">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="250"/>
+            <ColumnDefinition Width="260"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- SIDEBAR -->
-        <Border Grid.Column="0" Background="{StaticResource White}" BorderBrush="{StaticResource BorderGray}" BorderThickness="0,0,1,0">
+        <Border Grid.Column="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0">
             <StackPanel Orientation="Vertical">
                 <!-- Header Sidebar -->
-                <Border Background="{StaticResource PrimaryBlue}" Padding="16,16">
+                <Border Background="#0078D4" Padding="16,20">
                     <StackPanel Orientation="Vertical">
-                        <TextBlock Text="MyApp" FontSize="20" FontWeight="Bold" Foreground="{StaticResource White}" Margin="0,0,0,4"/>
-                        <TextBlock Text="Chat e Colaboracao" FontSize="11" Foreground="{StaticResource White}" Opacity="0.9"/>
+                        <TextBlock Text="🔵 MyApp" FontSize="18" FontWeight="ExtraBold" Foreground="White" Margin="0,0,0,4"/>
+                        <TextBlock Text="Chat Moderno" FontSize="11" Foreground="White" Opacity="0.9"/>
                     </StackPanel>
                 </Border>
 
-                <Separator Background="{StaticResource BorderGray}" Height="1" Margin="0"/>
+                <Separator Background="#E8E8E8" Height="1" Margin="0"/>
 
-                <!-- Botoes Navegacao -->
-                <StackPanel Orientation="Vertical" Margin="0,8,0,0">
-                    <Button Content="Chats" Style="{StaticResource SidebarButtonStyle}" Click="NavButton_Click" Tag="Chats"/>
-                    <Button Content="Equipes" Style="{StaticResource SidebarButtonStyle}" Click="NavButton_Click" Tag="Equipes"/>
-                    <Button Content="Calendario" Style="{StaticResource SidebarButtonStyle}" Click="NavButton_Click" Tag="Calendario"/>
-                    <Button Content="Arquivos" Style="{StaticResource SidebarButtonStyle}" Click="NavButton_Click" Tag="Arquivos"/>
-                    <Button Content="Configuracoes" Style="{StaticResource SidebarButtonStyle}" Click="NavButton_Click" Tag="Configuracoes"/>
+                <!-- Botões de Navegação -->
+                <StackPanel Orientation="Vertical" Margin="8,12,8,0">
+                    <Button x:Name="ChatsNavButton" Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Chats" FontWeight="SemiBold" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="💬" Style="{StaticResource IconTextStyle}"/>
+                            <TextBlock Text="Chats" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Equipes" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="👥" Style="{StaticResource IconTextStyle}"/>
+                            <TextBlock Text="Equipes" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Calendario" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📅" Style="{StaticResource IconTextStyle}"/>
+                            <TextBlock Text="Calendario" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Arquivos" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="📁" Style="{StaticResource IconTextStyle}"/>
+                            <TextBlock Text="Arquivos" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Configuracoes" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="⚙️" Style="{StaticResource IconTextStyle}"/>
+                            <TextBlock Text="Configuracoes" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
-                <Separator Background="{StaticResource BorderGray}" Height="1" Margin="0,16,0,0"/>
+                <Separator Background="#E8E8E8" Height="1" Margin="0,16,0,0"/>
 
                 <!-- Conversas Recentes -->
-                <TextBlock Text="RECENTES" FontSize="11" FontWeight="Bold" Foreground="{StaticResource DarkGray}" Margin="16,16,16,8"/>
+                <TextBlock Text="RECENTES" FontSize="10" FontWeight="ExtraBold" Foreground="#999999" Margin="16,16,16,10"/>
                 
-                <StackPanel Orientation="Vertical" Margin="8,0,8,0">
-                    <Border Background="{StaticResource LightGray}" Padding="12,10" Margin="0,4" CornerRadius="4">
-                        <TextBlock Text="Joao Silva" FontSize="13"/>
-                    </Border>
-                    <Border Background="{StaticResource LightGray}" Padding="12,10" Margin="0,4" CornerRadius="4">
-                        <TextBlock Text="Maria Santos" FontSize="13"/>
-                    </Border>
-                    <Border Background="{StaticResource LightGray}" Padding="12,10" Margin="0,4" CornerRadius="4">
-                        <TextBlock Text="Equipe Dev" FontSize="13"/>
-                    </Border>
-                </StackPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Orientation="Vertical" Margin="8,0,8,0">
+                        <Button Content="🧑 Joao Silva" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
+                        <Button Content="👩 Maria Santos" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
+                        <Button Content="👨‍💼 Equipe Dev" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
+                    </StackPanel>
+                </ScrollViewer>
 
-                <!-- Profile -->
-                <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" Height="80">
-                    <Separator Background="{StaticResource BorderGray}" Height="1" Margin="0"/>
-                    <Border Padding="12,12" Background="Transparent">
-                        <Grid>
+                <!-- Profile Section -->
+                <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" Height="90" Margin="0,8,0,0">
+                    <Separator Background="#E8E8E8" Height="1" Margin="0"/>
+                    <Button Padding="12" HorizontalAlignment="Stretch" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                        <Grid HorizontalAlignment="Left" Width="240">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="40"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Width="40" Height="40" Background="{StaticResource PrimaryBlue}" CornerRadius="20">
-                                <TextBlock Text="U" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White"/>
-                            </Border>
+                            <Ellipse Grid.Column="0" Width="40" Height="40" Fill="#0078D4"/>
+                            <TextBlock Grid.Column="0" Text="U" FontSize="18" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold"/>
                             <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="Seu Nome" FontSize="12" FontWeight="SemiBold"/>
-                                <TextBlock Text="Online" FontSize="11" Foreground="{StaticResource DarkGray}"/>
+                                <TextBlock Text="Usuario" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                                <TextBlock Text="🟢 Online" FontSize="11" Foreground="#107C10"/>
                             </StackPanel>
                         </Grid>
-                    </Border>
+                    </Button>
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -135,8 +167,8 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- HEADER TOP BAR -->
-            <Border Grid.Row="0" Background="{StaticResource White}" BorderBrush="{StaticResource BorderGray}" BorderThickness="0,0,0,1" Padding="24,0">
+            <!-- TOP BAR -->
+            <Border Grid.Row="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="24,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -145,96 +177,156 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock Grid.Column="0" Text="Bem-vindo ao Chat" FontSize="18" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="👋" FontSize="18" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Bem-vindo" FontSize="16" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                    </StackPanel>
 
-                    <!-- Botoes Header -->
-                    <Button Grid.Column="1" Content="Pesquisar" Foreground="{StaticResource DarkGray}" Background="Transparent" 
-                            BorderThickness="0" Margin="0,0,12,0" Padding="12,8" FontSize="12" Cursor="Hand"/>
-                    <Button Grid.Column="2" Content="Notificacoes" Foreground="{StaticResource DarkGray}" Background="Transparent" 
-                            BorderThickness="0" Margin="0,0,12,0" Padding="12,8" FontSize="12" Cursor="Hand"/>
-                    <Button Grid.Column="3" Content="Menu" Foreground="{StaticResource DarkGray}" Background="Transparent" 
-                            BorderThickness="0" Padding="12,8" FontSize="12" Cursor="Hand"/>
+                    <mah:ToggleSwitch Grid.Column="1" Width="45" Margin="12,0" IsOn="True" IsEnabled="True" VerticalAlignment="Center"/>
+                    <Button Grid.Column="2" Content="🔔" Style="{StaticResource TopBarIconButtonStyle}"/>
+                    <Button Grid.Column="3" Content="⋮" Style="{StaticResource TopBarIconButtonStyle}" FontSize="22"/>
                 </Grid>
             </Border>
 
-            <!-- AREAS CONTEUDO -->
-            <Grid Grid.Row="1">
-                <!-- Conteudo Chats -->
-                <StackPanel x:Name="ChatsContent" Orientation="Vertical" Margin="24,24">
-                    <TextBlock Text="Conversas Ativas" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
+            <!-- AREAS DE CONTEUDO -->
+            <Grid Grid.Row="1" Background="#F5F5F5">
+                <!-- Chats -->
+                <StackPanel x:Name="ChatsContent" Orientation="Vertical" Margin="24,20">
+                    <TextBlock Text="Conversas Ativas" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
                     
-                    <Border Background="{StaticResource LightGray}" Padding="16" CornerRadius="8" Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Joao Silva" FontSize="14" FontWeight="SemiBold"/>
-                            <TextBlock Text="Ultima mensagem: Otimo! Vamos nos encontrar amanha..." FontSize="12" Foreground="{StaticResource DarkGray}" Margin="0,4,0,0"/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Background="{StaticResource LightGray}" Padding="16" CornerRadius="8" Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Maria Santos" FontSize="14" FontWeight="SemiBold"/>
-                            <TextBlock Text="Ultima mensagem: Recebi o documento, obrigada!" FontSize="12" Foreground="{StaticResource DarkGray}" Margin="0,4,0,0"/>
-                        </StackPanel>
-                    </Border>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,24,0,0">
-                        <Button Content="Nova Conversa" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,12,0" Click="Button_Click"/>
-                        <Button Content="Iniciar Chamada" Background="{StaticResource LightGray}" Foreground="{StaticResource DarkGray}" BorderThickness="1" BorderBrush="{StaticResource BorderGray}" Padding="20,10" FontSize="12" Cursor="Hand"/>
-                    </StackPanel>
-                </StackPanel>
-
-                <!-- Conteudo Equipes -->
-                <StackPanel x:Name="TeamsContent" Orientation="Vertical" Margin="24,24" Visibility="Collapsed">
-                    <TextBlock Text="Minhas Equipes" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
-                    
-                    <Border Background="{StaticResource LightGray}" Padding="16" CornerRadius="8" Margin="0,0,0,12">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Border Width="50" Height="50" Background="{StaticResource PrimaryBlue}" CornerRadius="4">
-                                <TextBlock Text="D" FontSize="24" FontWeight="Bold" Foreground="{StaticResource White}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Ellipse Width="32" Height="32" Fill="#0078D4" Margin="0,0,12,0"/>
+                                        <TextBlock Text="J" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-32,0,0,0"/>
+                                        <TextBlock Text="Joao Silva" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Ultima mensagem: Otimo! Vamos nos encontrar amanha..." FontSize="12" Foreground="#666666" Margin="44,0,0,6"/>
+                                    <TextBlock Text="Hoje as 14:30" FontSize="11" Foreground="#999999" Margin="44,0,0,0"/>
+                                </StackPanel>
                             </Border>
-                            <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
-                                <TextBlock Text="Equipe Desenvolvimento" FontSize="14" FontWeight="SemiBold"/>
-                                <TextBlock Text="8 membros - 24 canais" FontSize="12" Foreground="{StaticResource DarkGray}" Margin="0,4,0,0"/>
+
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Ellipse Width="32" Height="32" Fill="#107C10" Margin="0,0,12,0"/>
+                                        <TextBlock Text="M" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-32,0,0,0"/>
+                                        <TextBlock Text="Maria Santos" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Ultima mensagem: Recebi o documento, obrigada!" FontSize="12" Foreground="#666666" Margin="44,0,0,6"/>
+                                    <TextBlock Text="Hoje as 12:15" FontSize="11" Foreground="#999999" Margin="44,0,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                                <Button Content="➕ Nova Conversa" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,12,0"/>
+                                <Button Content="📞 Iniciar Chamada" Style="{StaticResource SecondaryButtonStyle}"/>
                             </StackPanel>
-                        </Grid>
-                    </Border>
-
-                    <Button Content="Criar Equipe" Style="{StaticResource PrimaryButtonStyle}" Width="150" HorizontalAlignment="Left" Margin="0,24,0,0"/>
+                        </StackPanel>
+                    </ScrollViewer>
                 </StackPanel>
 
-                <!-- Conteudo Calendario -->
-                <StackPanel x:Name="CalendarContent" Orientation="Vertical" Margin="24,24" Visibility="Collapsed">
-                    <TextBlock Text="Calendario" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
-                    <TextBlock Text="Nenhum evento agendado para hoje" FontSize="14" Foreground="{StaticResource DarkGray}"/>
-                </StackPanel>
-
-                <!-- Conteudo Arquivos -->
-                <StackPanel x:Name="FilesContent" Orientation="Vertical" Margin="24,24" Visibility="Collapsed">
-                    <TextBlock Text="Arquivos" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
-                    <TextBlock Text="Nenhum arquivo compartilhado recentemente" FontSize="14" Foreground="{StaticResource DarkGray}"/>
-                </StackPanel>
-
-                <!-- Conteudo Configuracoes -->
-                <StackPanel x:Name="SettingsContent" Orientation="Vertical" Margin="24,24" Visibility="Collapsed">
-                    <TextBlock Text="Configuracoes" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
+                <!-- Equipes -->
+                <StackPanel x:Name="TeamsContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
+                    <TextBlock Text="Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
                     
-                    <StackPanel Orientation="Vertical" Margin="0,0,0,16">
-                        <TextBlock Text="Notificacoes" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <CheckBox Content="Ativar notificacoes por som" Margin="0,4" FontSize="12"/>
-                        <CheckBox Content="Ativar notificacoes push" Margin="0,4" FontSize="12"/>
-                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <Ellipse Width="50" Height="50" Fill="#0078D4" Margin="0,0,16,0"/>
+                                        <TextBlock Text="D" FontSize="22" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-50,0,0,0"/>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Equipe Desenvolvimento" FontSize="14" FontWeight="SemiBold" Foreground="#333333"/>
+                                            <TextBlock Text="8 membros  24 canais" FontSize="12" Foreground="#666666" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
 
-                    <StackPanel Orientation="Vertical">
-                        <TextBlock Text="Aparencia" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                        <RadioButton Content="Modo Claro" IsChecked="True" Margin="0,4" FontSize="12"/>
-                        <RadioButton Content="Modo Escuro" Margin="0,4" FontSize="12"/>
-                    </StackPanel>
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <Ellipse Width="50" Height="50" Fill="#107C10" Margin="0,0,16,0"/>
+                                        <TextBlock Text="P" FontSize="22" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-50,0,0,0"/>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="Projeto Marketing" FontSize="14" FontWeight="SemiBold" Foreground="#333333"/>
+                                            <TextBlock Text="5 membros  12 canais" FontSize="12" Foreground="#666666" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Button Content="➕ Criar Equipe" Style="{StaticResource PrimaryButtonStyle}" Width="150" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </StackPanel>
+
+                <!-- Calendario -->
+                <StackPanel x:Name="CalendarContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
+                    <TextBlock Text="Calendario" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
+                    <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" CornerRadius="8">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,40,0,40">
+                            <TextBlock Text="📅" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                            <TextBlock Text="Nenhum evento agendado" FontSize="16" FontWeight="SemiBold" Foreground="#333333" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Voce esta em dia com seus compromissos!" FontSize="12" Foreground="#666666" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Arquivos -->
+                <StackPanel x:Name="FilesContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
+                    <TextBlock Text="Arquivos" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
+                    <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" CornerRadius="8">
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,40,0,40">
+                            <TextBlock Text="📁" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                            <TextBlock Text="Nenhum arquivo compartilhado" FontSize="16" FontWeight="SemiBold" Foreground="#333333" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Comece a compartilhar arquivos com sua equipe" FontSize="12" Foreground="#666666" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Configuracoes -->
+                <StackPanel x:Name="SettingsContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
+                    <TextBlock Text="Configuracoes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
+                    
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <TextBlock Text="🔔 Notificacoes" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                                        <mah:ToggleSwitch IsOn="True" Margin="12,0,0,0" HorizontalAlignment="Right"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Ativar notificacoes de mensagens" FontSize="12" Foreground="#666666"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                        <TextBlock Text="🎨 Aparencia" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
+                                        <mah:ToggleSwitch IsOn="True" Margin="12,0,0,0" HorizontalAlignment="Right"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Modo claro ativado" FontSize="12" Foreground="#666666"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
+                                <StackPanel>
+                                    <TextBlock Text="🔐 Privacidade" FontSize="14" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Sua privacidade e importante para nos" FontSize="12" Foreground="#666666"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Button Content="💾 Salvar Configuracoes" Style="{StaticResource PrimaryButtonStyle}" Width="200" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                        </StackPanel>
+                    </ScrollViewer>
                 </StackPanel>
             </Grid>
         </Grid>
     </Grid>
-</Window>
+</mah:MetroWindow>

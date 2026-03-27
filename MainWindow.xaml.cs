@@ -1,18 +1,20 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using MahApps.Metro.Controls;
 
-namespace MeuAppWPF
+namespace MeuApp
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : MetroWindow
     {
         public MainWindow()
         {
             InitializeComponent();
+            this.GlowBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 212));
         }
 
         private void Button_Click(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("Funcionou 🔥");
+            MessageBox.Show("Funcionou!");
         }
 
         private void NavButton_Click(object sender, RoutedEventArgs e)
@@ -20,15 +22,8 @@ namespace MeuAppWPF
             if (sender is Button button)
             {
                 string tag = button.Tag?.ToString() ?? "";
+                ResetNavigation();
                 
-                // Oculta todo conteúdo
-                ChatsContent.Visibility = Visibility.Collapsed;
-                TeamsContent.Visibility = Visibility.Collapsed;
-                CalendarContent.Visibility = Visibility.Collapsed;
-                FilesContent.Visibility = Visibility.Collapsed;
-                SettingsContent.Visibility = Visibility.Collapsed;
-
-                // Mostra o conteúdo correspondente
                 switch (tag)
                 {
                     case "Chats":
@@ -48,6 +43,15 @@ namespace MeuAppWPF
                         break;
                 }
             }
+        }
+
+        private void ResetNavigation()
+        {
+            ChatsContent.Visibility = Visibility.Collapsed;
+            TeamsContent.Visibility = Visibility.Collapsed;
+            CalendarContent.Visibility = Visibility.Collapsed;
+            FilesContent.Visibility = Visibility.Collapsed;
+            SettingsContent.Visibility = Visibility.Collapsed;
         }
     }
 }
