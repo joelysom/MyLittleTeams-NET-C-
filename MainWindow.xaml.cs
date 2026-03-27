@@ -12,6 +12,19 @@ namespace MeuApp
             this.GlowBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 212));
         }
 
+        public MainWindow(UserProfile profile) : this()
+        {
+            ApplyUserProfile(profile);
+        }
+
+        private void ApplyUserProfile(UserProfile profile)
+        {
+            WelcomeText.Text = $"Bem-vindo, {profile.Name}";
+            SidebarUserName.Text = profile.Name;
+            SidebarUserEmail.Text = profile.Email;
+            SidebarUserRole.Text = $"{profile.Course} | Matrícula: {profile.Registration}";
+        }
+
         private void Button_Click(object sender, RoutedEventArgs e)
         {
             MessageBox.Show("Funcionou!");
@@ -23,7 +36,7 @@ namespace MeuApp
             {
                 string tag = button.Tag?.ToString() ?? "";
                 ResetNavigation();
-                
+
                 switch (tag)
                 {
                     case "Chats":

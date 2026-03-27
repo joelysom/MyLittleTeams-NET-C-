@@ -13,4 +13,8 @@
     <PackageReference Include="FluentWPF" Version="0.9.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="img\TesseractLogin.png" />
+  </ItemGroup>
+
 </Project>
