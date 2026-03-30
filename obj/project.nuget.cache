@@ -1,14 +1,14 @@
 {
   "version": 2,
-  "dgSpecHash": "KMClVHXJdvo=",
+  "dgSpecHash": "LNI2b8ZPA6k=",
   "success": true,
-  "projectFilePath": "C:\\Users\\JOELYSONALCANTARADAS\\Documents\\.NetC#\\MeuApp.csproj",
+  "projectFilePath": "F:\\react-js\\vite-react-js\\Net&C\\MeuApp\\MeuApp.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\JOELYSONALCANTARADAS\\.nuget\\packages\\controlzex\\4.4.0\\controlzex.4.4.0.nupkg.sha512",
-    "C:\\Users\\JOELYSONALCANTARADAS\\.nuget\\packages\\fluentwpf\\0.9.0\\fluentwpf.0.9.0.nupkg.sha512",
-    "C:\\Users\\JOELYSONALCANTARADAS\\.nuget\\packages\\mahapps.metro\\2.4.10\\mahapps.metro.2.4.10.nupkg.sha512",
-    "C:\\Users\\JOELYSONALCANTARADAS\\.nuget\\packages\\microsoft.xaml.behaviors.wpf\\1.1.19\\microsoft.xaml.behaviors.wpf.1.1.19.nupkg.sha512",
-    "C:\\Users\\JOELYSONALCANTARADAS\\.nuget\\packages\\system.text.json\\4.7.2\\system.text.json.4.7.2.nupkg.sha512"
+    "C:\\Users\\PC\\.nuget\\packages\\controlzex\\4.4.0\\controlzex.4.4.0.nupkg.sha512",
+    "C:\\Users\\PC\\.nuget\\packages\\fluentwpf\\0.9.0\\fluentwpf.0.9.0.nupkg.sha512",
+    "C:\\Users\\PC\\.nuget\\packages\\mahapps.metro\\2.4.10\\mahapps.metro.2.4.10.nupkg.sha512",
+    "C:\\Users\\PC\\.nuget\\packages\\microsoft.xaml.behaviors.wpf\\1.1.19\\microsoft.xaml.behaviors.wpf.1.1.19.nupkg.sha512",
+    "C:\\Users\\PC\\.nuget\\packages\\system.text.json\\4.7.2\\system.text.json.4.7.2.nupkg.sha512"
   ],
   "logs": []
 }

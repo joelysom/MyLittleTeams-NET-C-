@@ -1,0 +1,67 @@
+[2026-03-29 10:29:18.483] === App started at 2026-03-29 10:29:18.456 ===
+[2026-03-29 10:29:18.487] Startup completed successfully
+[2026-03-29 10:32:52.562] === App started at 2026-03-29 10:32:52.535 ===
+[2026-03-29 10:32:52.565] Startup completed successfully
+[2026-03-29 10:38:07.762] === App started at 2026-03-29 10:38:07.735 ===
+[2026-03-29 10:38:07.766] Startup completed successfully
+[2026-03-29 10:42:06.396] === App started at 2026-03-29 10:42:06.368 ===
+[2026-03-29 10:42:06.401] Startup completed successfully
+[2026-03-29 10:48:05.301] === App started at 2026-03-29 10:48:05.277 ===
+[2026-03-29 10:48:05.304] Startup completed successfully
+[2026-03-29 10:54:36.136] === App started at 2026-03-29 10:54:36.110 ===
+[2026-03-29 10:54:36.139] Startup completed successfully
+[2026-03-29 10:55:21.382] === App started at 2026-03-29 10:55:21.356 ===
+[2026-03-29 10:55:21.384] Startup completed successfully
+[2026-03-30 09:54:27.844] === App started at 2026-03-30 09:54:27.817 ===
+[2026-03-30 09:54:27.869] Startup completed successfully
+[2026-03-30 10:02:35.251] === App started at 2026-03-30 10:02:35.225 ===
+[2026-03-30 10:02:35.256] Startup completed successfully
+[2026-03-30 10:08:25.242] === App started at 2026-03-30 10:08:25.215 ===
+[2026-03-30 10:08:25.245] Startup completed successfully
+[2026-03-30 10:08:49.249] [UI_ERROR] Espaço insuficiente no disco. : 'C:\Users\PC\Desktop\AppDebug.log'
+   at System.IO.RandomAccess.WriteAtOffset(SafeFileHandle handle, ReadOnlySpan`1 buffer, Int64 fileOffset)
+   at System.IO.Strategies.OSFileStreamStrategy.Write(ReadOnlySpan`1 buffer)
+   at System.IO.Strategies.OSFileStreamStrategy.Write(Byte[] buffer, Int32 offset, Int32 count)
+   at System.IO.Strategies.BufferedFileStreamStrategy.FlushWrite()
+   at System.IO.Strategies.BufferedFileStreamStrategy.Flush(Boolean flushToDisk)
+   at System.IO.StreamWriter.Flush(Boolean flushStream, Boolean flushEncoder)
+   at System.IO.StreamWriter.WriteLine(String value)
+   at MeuApp.DebugHelper.WriteLine(String message) in F:\react-js\vite-react-js\Net&C\MeuApp\DebugHelper.cs:line 92
+   at MeuApp.ChatService.SendMessageAsync(String contactId, String senderName, String content) in F:\react-js\vite-react-js\Net&C\MeuApp\ChatService.cs:line 86
+   at MeuApp.MainWindow.<>c__DisplayClass20_0.<<RenderChatScreen>b__1>d.MoveNext() in F:\react-js\vite-react-js\Net&C\MeuApp\MainWindow.xaml.cs:line 597
+--- End of stack trace from previous location ---
+   at System.Threading.Tasks.Task.<>c.<ThrowAsync>b__128_0(Object state)
+   at System.Windows.Threading.ExceptionWrapper.InternalRealCall(Delegate callback, Object args, Int32 numArgs)
+   at System.Windows.Threading.ExceptionWrapper.TryCatchWhen(Object source, Delegate callback, Object args, Int32 numArgs, Delegate catchHandler)
+[2026-03-30 10:17:16.446] === App started at 2026-03-30 10:17:16.418 ===
+[2026-03-30 10:17:16.449] Startup completed successfully
+[2026-03-30 10:18:12.774] === App started at 2026-03-30 10:18:12.749 ===
+[2026-03-30 10:18:12.777] Startup completed successfully
+[2026-03-30 10:23:58.527] === App started at 2026-03-30 10:23:58.502 ===
+[2026-03-30 10:23:58.530] Startup completed successfully
+[2026-03-30 10:31:20.722] === App started at 2026-03-30 10:31:20.693 ===
+[2026-03-30 10:31:20.726] Startup completed successfully
+[2026-03-30 10:31:58.852] === App started at 2026-03-30 10:31:58.826 ===
+[2026-03-30 10:31:58.856] Startup completed successfully
+[2026-03-30 10:35:29.170] === App started at 2026-03-30 10:35:29.145 ===
+[2026-03-30 10:35:29.174] Startup completed successfully
+[2026-03-30 10:35:57.161] === App started at 2026-03-30 10:35:57.133 ===
+[2026-03-30 10:35:57.165] Startup completed successfully
+[2026-03-30 10:40:17.677] === App started at 2026-03-30 10:40:17.653 ===
+[2026-03-30 10:40:17.681] Startup completed successfully
+[2026-03-30 10:45:05.948] === App started at 2026-03-30 10:45:05.923 ===
+[2026-03-30 10:45:05.952] Startup completed successfully
+[2026-03-30 10:49:32.041] === App started at 2026-03-30 10:49:32.012 ===
+[2026-03-30 10:49:32.045] Startup completed successfully
+[2026-03-30 10:54:39.218] === App started at 2026-03-30 10:54:39.187 ===
+[2026-03-30 10:54:39.224] Startup completed successfully
+[2026-03-30 10:56:41.064] === App started at 2026-03-30 10:56:41.035 ===
+[2026-03-30 10:56:41.068] Startup completed successfully
+[2026-03-30 11:00:32.850] === App started at 2026-03-30 11:00:32.822 ===
+[2026-03-30 11:00:32.854] Startup completed successfully
+[2026-03-30 11:03:48.476] === App started at 2026-03-30 11:03:48.443 ===
+[2026-03-30 11:03:48.480] Startup completed successfully
+[2026-03-30 11:05:46.101] === App started at 2026-03-30 11:05:46.077 ===
+[2026-03-30 11:05:46.104] Startup completed successfully
+[2026-03-30 11:09:53.441] === App started at 2026-03-30 11:09:53.411 ===
+[2026-03-30 11:09:53.445] Startup completed successfully

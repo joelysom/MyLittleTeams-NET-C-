@@ -77,7 +77,7 @@ namespace MeuApp
                 };
             }
 
-            var mainWindow = new MainWindow(profile);
+            var mainWindow = new MainWindow(profile, loginResult.IdToken);
             mainWindow.Show();
             this.Close();
         }
@@ -136,7 +136,7 @@ namespace MeuApp
                 UserId = signupResult.LocalId!, Name = name, Email = email, Phone = phone, Course = course, Registration = registration
             };
 
-            var mainWindow = new MainWindow(profile);
+            var mainWindow = new MainWindow(profile, signupResult.IdToken);
             mainWindow.Show();
             this.Close();
         }
@@ -235,6 +235,13 @@ namespace MeuApp
                     phone = new { stringValue = phone },
                     course = new { stringValue = course },
                     registration = new { stringValue = registration },
+                    nickname = new { stringValue = string.Empty },
+                    professionalTitle = new { stringValue = string.Empty },
+                    bio = new { stringValue = string.Empty },
+                    skills = new { stringValue = string.Empty },
+                    programmingLanguages = new { stringValue = string.Empty },
+                    portfolioLink = new { stringValue = string.Empty },
+                    linkedInLink = new { stringValue = string.Empty },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -279,8 +286,25 @@ namespace MeuApp
                 Email = fields.GetProperty("email").GetProperty("stringValue").GetString() ?? "",
                 Phone = fields.GetProperty("phone").GetProperty("stringValue").GetString() ?? "",
                 Course = fields.GetProperty("course").GetProperty("stringValue").GetString() ?? "",
-                Registration = fields.GetProperty("registration").GetProperty("stringValue").GetString() ?? ""
+                Registration = fields.GetProperty("registration").GetProperty("stringValue").GetString() ?? "",
+                Nickname = TryGetStringField(fields, "nickname"),
+                ProfessionalTitle = TryGetStringField(fields, "professionalTitle"),
+                Bio = TryGetStringField(fields, "bio"),
+                Skills = TryGetStringField(fields, "skills"),
+                ProgrammingLanguages = TryGetStringField(fields, "programmingLanguages"),
+                PortfolioLink = TryGetStringField(fields, "portfolioLink"),
+                LinkedInLink = TryGetStringField(fields, "linkedInLink")
             };
+        }
+
+        private string TryGetStringField(JsonElement fields, string fieldName)
+        {
+            if (fields.TryGetProperty(fieldName, out var field) && field.TryGetProperty("stringValue", out var value))
+            {
+                return value.GetString() ?? string.Empty;
+            }
+
+            return string.Empty;
         }
     }
 
@@ -292,6 +316,13 @@ namespace MeuApp
         public string Phone { get; set; } = string.Empty;
         public string Course { get; set; } = string.Empty;
         public string Registration { get; set; } = string.Empty;
+        public string Nickname { get; set; } = string.Empty;
+        public string ProfessionalTitle { get; set; } = string.Empty;
+        public string Bio { get; set; } = string.Empty;
+        public string Skills { get; set; } = string.Empty;
+        public string ProgrammingLanguages { get; set; } = string.Empty;
+        public string PortfolioLink { get; set; } = string.Empty;
+        public string LinkedInLink { get; set; } = string.Empty;
     }
 
     public class AuthResult

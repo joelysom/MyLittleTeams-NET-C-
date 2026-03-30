@@ -4,156 +4,142 @@
         xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
         Title="Observatório de Projetos Integradores" Height="720" Width="1280"
         WindowState="Maximized"
-        Background="#F5F5F5"
-        GlowBrush="#0078D4" 
+        Background="{DynamicResource WindowBackgroundBrush}"
+        GlowBrush="#FF0078D4"
         BorderThickness="0">
 
     <mah:MetroWindow.Resources>
-        <Style x:Key="NavButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#424242"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="Medium"/>
-            <Setter Property="Padding" Value="12,10"/>
-            <Setter Property="Margin" Value="8,2"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#E8F4F8"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FFF7F9FC"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="SidebarBorderBrush" Color="#FFE8E8E8"/>
+        <SolidColorBrush x:Key="TopBarBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="MainContentBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="SearchBackgroundBrush" Color="#FFF5F5F5"/>
+        <SolidColorBrush x:Key="SearchBorderBrush" Color="#FFE0E0E0"/>
+        <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FF333333"/>
+        <SolidColorBrush x:Key="SecondaryTextBrush" Color="#FF666666"/>
+        <SolidColorBrush x:Key="TertiaryTextBrush" Color="#FF94A3B8"/>
+        <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="MutedCardBackgroundBrush" Color="#FFF8FAFC"/>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#FFE2E8F0"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#FF0078D4"/>
+        <SolidColorBrush x:Key="AccentMutedBrush" Color="#FFEAF4FF"/>
+        <SolidColorBrush x:Key="ToggleTrackOffBrush" Color="#FFD7DEE7"/>
+        <SolidColorBrush x:Key="ToggleTrackOnBrush" Color="#FF0EA5E9"/>
+        <SolidColorBrush x:Key="ToggleThumbBrush" Color="#FFFFFFFF"/>
 
-        <Style x:Key="IconTextStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="18"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,0,8,0"/>
-        </Style>
-
-        <Style x:Key="TopBarIconButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#333333"/>
-            <Setter Property="FontSize" Value="20"/>
-            <Setter Property="Width" Value="48"/>
-            <Setter Property="Height" Value="48"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Margin" Value="8,0"/>
-            <Setter Property="BorderThickness" Value="0"/>
+        <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">
+            <Setter Property="Width" Value="54"/>
+            <Setter Property="Height" Value="30"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#E8E8E8"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#0078D4"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="14,8"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-        </Style>
-
-        <Style x:Key="SecondaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="#0078D4"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="14,8"/>
-            <Setter Property="BorderBrush" Value="#0078D4"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Width="54" Height="30">
+                            <Border x:Name="Track"
+                                    Background="{DynamicResource ToggleTrackOffBrush}"
+                                    CornerRadius="15"/>
+                            <Border x:Name="Thumb"
+                                    Width="24"
+                                    Height="24"
+                                    Margin="3,0,0,0"
+                                    Background="{DynamicResource ToggleThumbBrush}"
+                                    CornerRadius="12"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{DynamicResource ToggleTrackOnBrush}"/>
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Thumb" Property="Margin" Value="0,0,3,0"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="Opacity" Value="0.92"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Track" Property="Opacity" Value="0.5"/>
+                                <Setter TargetName="Thumb" Property="Opacity" Value="0.6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </mah:MetroWindow.Resources>
 
-    <Grid Background="#F5F5F5">
+    <Grid Background="{DynamicResource WindowBackgroundBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="260"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- SIDEBAR -->
-        <Border Grid.Column="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,1,0">
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource SidebarBorderBrush}" BorderThickness="0,0,1,0">
             <StackPanel Orientation="Vertical">
                 <!-- Header Sidebar -->
-                <Border Background="#0078D4" Padding="16,20">
+                <Border Padding="16,20" Background="#FF0078D4">
                     <StackPanel Orientation="Vertical">
-                        <TextBlock Text="🔵 obsseract" FontSize="18" FontWeight="ExtraBold" Foreground="White" Margin="0,0,0,4"/>
-                        <TextBlock Text="Observatório de Projetos Integradores" FontSize="11" Foreground="White" Opacity="0.9"/>
+                        <TextBlock Text="🔵 obsseract" FontSize="16" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,4"/>
+                        <TextBlock Text="Observatório" FontSize="10" Foreground="White" Opacity="0.9"/>
                     </StackPanel>
                 </Border>
 
-                <Separator Background="#E8E8E8" Height="1" Margin="0"/>
+                <Separator Background="{DynamicResource SidebarBorderBrush}" Height="1"/>
 
-                <!-- Botões de Navegação -->
-                <StackPanel Orientation="Vertical" Margin="8,12,8,0">
-                    <Button x:Name="ChatsNavButton" Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Chats" FontWeight="SemiBold" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="💬" Style="{StaticResource IconTextStyle}"/>
-                            <TextBlock Text="Chats" VerticalAlignment="Center"/>
-                        </StackPanel>
+                <!-- Navigation Buttons -->
+                <StackPanel Orientation="Vertical" Margin="8,12">
+                    <Button x:Name="ChatsNavButton" Click="NavButton_Click" Tag="Chats" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="💬 Chats" VerticalAlignment="Center"/>
+
+                            <Border x:Name="ChatsUnreadBadge"
+                                    Grid.Column="1"
+                                    Background="#FF0078D4"
+                                    CornerRadius="10"
+                                    Padding="7,2"
+                                    Margin="10,0,0,0"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center">
+                                <TextBlock x:Name="ChatsUnreadCountText"
+                                           Text="0"
+                                           Foreground="White"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"/>
+                            </Border>
+                        </Grid>
                     </Button>
-                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Equipes" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="👥" Style="{StaticResource IconTextStyle}"/>
-                            <TextBlock Text="Equipes" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Calendario" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="📅" Style="{StaticResource IconTextStyle}"/>
-                            <TextBlock Text="Calendario" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Arquivos" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="📁" Style="{StaticResource IconTextStyle}"/>
-                            <TextBlock Text="Arquivos" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Style="{StaticResource NavButtonStyle}" Click="NavButton_Click" Tag="Configuracoes" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="⚙️" Style="{StaticResource IconTextStyle}"/>
-                            <TextBlock Text="Configuracoes" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
+                    <Button Click="NavButton_Click" Tag="Equipes" Content="👥 Equipes" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
+                    <Button Click="NavButton_Click" Tag="Calendario" Content="📅 Calendario" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
+                    <Button Click="NavButton_Click" Tag="Arquivos" Content="📁 Arquivos" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
+                    <Button Click="NavButton_Click" Tag="Configuracoes" Content="⚙️ Configuracoes" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
                 </StackPanel>
 
-                <Separator Background="#E8E8E8" Height="1" Margin="0,16,0,0"/>
-
-                <!-- Conversas Recentes -->
-                <TextBlock Text="RECENTES" FontSize="10" FontWeight="ExtraBold" Foreground="#999999" Margin="16,16,16,10"/>
-                
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Orientation="Vertical" Margin="8,0,8,0">
-                        <Button Content="🧑 Joao Silva" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
-                        <Button Content="👩 Maria Santos" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
-                        <Button Content="👨‍💼 Equipe Dev" Style="{StaticResource NavButtonStyle}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"/>
-                    </StackPanel>
-                </ScrollViewer>
+                <Separator Background="{DynamicResource SidebarBorderBrush}" Height="1" Margin="0,12,0,0"/>
 
                 <!-- Profile Section -->
                 <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" Height="120" Margin="0,8,0,0">
-                    <Separator Background="#E8E8E8" Height="1" Margin="0"/>
                     <Button Padding="12" HorizontalAlignment="Stretch" Background="Transparent" BorderThickness="0" Cursor="Hand">
                         <Grid HorizontalAlignment="Left" Width="240">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="40"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Ellipse Grid.Column="0" Width="40" Height="40" Fill="#0078D4"/>
+                            <Ellipse Grid.Column="0" Width="40" Height="40" Fill="#FF0078D4"/>
                             <TextBlock Grid.Column="0" Text="U" FontSize="18" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold"/>
                             <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
-                                <TextBlock x:Name="SidebarUserName" Text="Usuário" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
-                                <TextBlock x:Name="SidebarUserRole" Text="Aluno" FontSize="11" Foreground="#107C10"/>
-                                <TextBlock x:Name="SidebarUserEmail" Text="email@dominio.com" FontSize="11" Foreground="#999999"/>
+                                <TextBlock x:Name="SidebarUserName" Text="Usuário" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                <TextBlock x:Name="SidebarUserRole" Text="Aluno" FontSize="11" Foreground="#FF107C10"/>
+                                <TextBlock x:Name="SidebarUserEmail" Text="email@dominio.com" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"/>
                             </StackPanel>
                         </Grid>
                     </Button>
@@ -161,7 +147,7 @@
             </StackPanel>
         </Border>
 
-        <!-- CONTEUDO PRINCIPAL -->
+        <!-- MAIN CONTENT AREA -->
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="60"/>
@@ -169,164 +155,268 @@
             </Grid.RowDefinitions>
 
             <!-- TOP BAR -->
-            <Border Grid.Row="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="24,0">
+            <Border Grid.Row="0" Background="{DynamicResource TopBarBackgroundBrush}" BorderBrush="{DynamicResource SidebarBorderBrush}" BorderThickness="0,0,0,1" Padding="24,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="300"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
+                    
+                    <TextBlock x:Name="WelcomeText" Grid.Column="0" Text="👋 Bem-vindo" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" VerticalAlignment="Center"/>
+                    
+                    <!-- SEARCH BAR -->
+                    <Border Grid.Column="1" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" BorderThickness="1" CornerRadius="20" Padding="12,0" Margin="0,0,16,0" VerticalAlignment="Center" Height="40">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="🔍 Pesquisar amigos..."/>
+                            <Button Grid.Column="1" Content="🔍" Background="Transparent" Foreground="{DynamicResource AccentBrush}" FontSize="14" Padding="8" Width="40" Cursor="Hand" BorderThickness="0" Click="SearchFriends_Click"/>
+                        </Grid>
+                    </Border>
 
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="👋" FontSize="18" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                        <TextBlock x:Name="WelcomeText" Text="Bem-vindo" FontSize="16" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <Button x:Name="TestFirebaseButton" Grid.Column="2" Content="🧪" Background="Transparent" Foreground="{DynamicResource AccentBrush}" FontSize="18" Padding="0" Width="48" Height="48" Cursor="Hand" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="TestFirebase_Click" ToolTip="Teste de conexão Firebase"/>
+                    
+                    <Button x:Name="AccountSettingsButton" Grid.Column="3" Content="⋯" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="24" Padding="0" Width="48" Height="48" Cursor="Hand" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="OpenSettings_Click" ToolTip="Configurar conta"/>
 
-                    <mah:ToggleSwitch Grid.Column="1" Width="45" Margin="12,0" IsOn="True" IsEnabled="True" VerticalAlignment="Center"/>
-                    <Button Grid.Column="2" Content="🔔" Style="{StaticResource TopBarIconButtonStyle}"/>
-                    <Button Grid.Column="3" Content="⋮" Style="{StaticResource TopBarIconButtonStyle}" FontSize="22"/>
                 </Grid>
             </Border>
 
-            <!-- AREAS DE CONTEUDO -->
-            <Grid Grid.Row="1" Background="#F5F5F5">
-                <!-- Chats -->
-                <StackPanel x:Name="ChatsContent" Orientation="Vertical" Margin="24,20">
-                    <TextBlock Text="Conversas Ativas" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
-                    
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <!-- CONTENT PANELS -->
+            <Grid Grid.Row="1" Background="{DynamicResource MainContentBackgroundBrush}" Margin="24,20">
+                    <!-- Chats -->
+                    <Grid x:Name="ChatsContent">
+                        <StackPanel VerticalAlignment="Top">
+                            <TextBlock Text="💬 Conversas Ativas" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                            <TextBlock Text="Selecione uma conversa para começar" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Teams -->
+                    <StackPanel x:Name="TeamsContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
+                        <TextBlock Text="👥 Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Você não faz parte de nenhuma equipe ainda" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </StackPanel>
+
+                    <!-- Calendar -->
+                    <StackPanel x:Name="CalendarContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
+                        <TextBlock Text="📅 Calendario" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Nenhum evento agendado" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </StackPanel>
+
+                    <!-- Files -->
+                    <StackPanel x:Name="FilesContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
+                        <TextBlock Text="📁 Arquivos" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Nenhum arquivo compartilhado" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </StackPanel>
+
+                    <!-- Settings -->
+                    <ScrollViewer x:Name="SettingsContent" Visibility="Collapsed" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
                         <StackPanel Orientation="Vertical">
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                        <Ellipse Width="32" Height="32" Fill="#0078D4" Margin="0,0,12,0"/>
-                                        <TextBlock Text="J" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-32,0,0,0"/>
-                                        <TextBlock Text="Joao Silva" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Ultima mensagem: Otimo! Vamos nos encontrar amanha..." FontSize="12" Foreground="#666666" Margin="44,0,0,6"/>
-                                    <TextBlock Text="Hoje as 14:30" FontSize="11" Foreground="#999999" Margin="44,0,0,0"/>
-                                </StackPanel>
-                            </Border>
+                        <TextBlock Text="⚙️ Configurações" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                        <TextBlock Text="Gerencie sua sessão, notificações e atalhos do ambiente colaborativo." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,0,0,18"/>
 
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                        <Ellipse Width="32" Height="32" Fill="#107C10" Margin="0,0,12,0"/>
-                                        <TextBlock Text="M" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-32,0,0,0"/>
-                                        <TextBlock Text="Maria Santos" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Ultima mensagem: Recebi o documento, obrigada!" FontSize="12" Foreground="#666666" Margin="44,0,0,6"/>
-                                    <TextBlock Text="Hoje as 12:15" FontSize="11" Foreground="#999999" Margin="44,0,0,0"/>
-                                </StackPanel>
-                            </Border>
+                        <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14">
+                            <StackPanel>
+                                <TextBlock Text="Perfil profissional" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                <TextBlock Text="Complete sua apresentação acadêmica e profissional. O nome da conta permanece fixo, mas você pode enriquecer o restante do perfil." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,18" TextWrapping="Wrap"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-                                <Button Content="➕ Nova Conversa" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,12,0"/>
-                                <Button Content="📞 Iniciar Chamada" Style="{StaticResource SecondaryButtonStyle}"/>
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Nome da conta" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="14,12">
+                                            <TextBlock x:Name="AccountNameText" Text="Usuário" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                        <TextBlock Text="Nickname profissional" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="NicknameTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Descrição curta" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="ProfessionalTitleTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                        <TextBlock Text="Linguagens de programação" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="ProgrammingLanguageInput"
+                                                      Grid.Column="0"
+                                                      Height="44"
+                                                      IsEditable="True"
+                                                      IsTextSearchEnabled="True"
+                                                      StaysOpenOnEdit="True"
+                                                      Padding="12,8"
+                                                      Background="{DynamicResource SearchBackgroundBrush}"
+                                                      BorderBrush="{DynamicResource SearchBorderBrush}"
+                                                      Foreground="{DynamicResource PrimaryTextBrush}"
+                                                      FontSize="13"
+                                                      KeyDown="ProgrammingLanguageInput_KeyDown"/>
+                                            <Button Grid.Column="1"
+                                                    Content="Adicionar"
+                                                    Margin="10,0,0,0"
+                                                    Padding="16,10"
+                                                    MinWidth="96"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Foreground="White"
+                                                    BorderThickness="0"
+                                                    FontWeight="SemiBold"
+                                                    Cursor="Hand"
+                                                    Click="AddProgrammingLanguage_Click"/>
+                                        </Grid>
+                                        <TextBlock Text="Digite ou selecione uma linguagem e pressione Enter. Ela aparecerá como tag removível logo abaixo." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
+                                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="12" MinHeight="58">
+                                            <WrapPanel x:Name="ProgrammingLanguagesTagsPanel" ItemHeight="34" ItemWidth="Auto"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Margin="0,0,0,12">
+                                    <TextBlock Text="Bio" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="BioTextBox" Height="92" Padding="12,12" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                </StackPanel>
+
+                                <StackPanel Margin="0,0,0,12">
+                                    <TextBlock Text="Habilidades" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="SkillsTextBox" Height="76" Padding="12,12" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                </StackPanel>
+
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Link do portfólio" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="PortfolioLinkTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                        <TextBlock Text="Link do LinkedIn" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="LinkedInLinkTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="SaveProfessionalProfileButton"
+                                            Content="Salvar perfil profissional"
+                                            Width="220"
+                                            Height="44"
+                                            Background="{DynamicResource AccentBrush}"
+                                            Foreground="White"
+                                            BorderThickness="0"
+                                            FontWeight="SemiBold"
+                                            Cursor="Hand"
+                                            Click="SaveProfessionalProfile_Click"/>
+                                    <TextBlock x:Name="ProfessionalProfileStatusText"
+                                               Text=""
+                                               Margin="16,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               FontSize="12"/>
+                                </StackPanel>
                             </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="20" Margin="0,0,0,14">
+                            <StackPanel>
+                            <TextBlock Text="Sessão Atual" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                            <TextBlock Text="Use esta área para encerrar sua sessão com segurança e retornar à tela de login." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
+                                <Button x:Name="LogoutButton"
+                                        Content="Sair da conta"
+                                        Width="160"
+                                        Height="42"
+                                        HorizontalAlignment="Left"
+                                        Background="#FFDC2626"
+                                        Foreground="White"
+                                        BorderThickness="0"
+                                        Cursor="Hand"
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Click="LogoutButton_Click"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="20">
+                            <StackPanel>
+                                <TextBlock Text="Preferências rápidas" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                <TextBlock Text="Base de notificações e monitoramento do observatório." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16"/>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Alertas de mensagens" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <TextBlock Text="Receba avisos quando novas interações chegarem." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="Ativo" Foreground="#FF0F766E" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Sincronização em tempo real" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <TextBlock Text="Mantém conversas e salas sempre atualizadas." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="Online" Foreground="#FF2563EB" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Contato acadêmico" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <TextBlock Text="Professor orientador e canal de suporte do projeto." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="Disponível" Foreground="#FF7C3AED" FontWeight="Bold" VerticalAlignment="Center"/>
+                                </Grid>
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                            <TextBlock Text="Modo escuro do aplicativo" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            <TextBlock Text="Escurece toda a interface do app, incluindo sidebar, topo, áreas de conteúdo e conversas." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" TextWrapping="Wrap" MaxWidth="360"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChatDarkModeToggle"
+                                              Grid.Column="1"
+                                              VerticalAlignment="Center"
+                                              Margin="16,0,0,0"
+                                                Style="{StaticResource ToggleSwitchStyle}"
+                                              Checked="ChatDarkModeToggle_Changed"
+                                              Unchecked="ChatDarkModeToggle_Changed"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                         </StackPanel>
                     </ScrollViewer>
-                </StackPanel>
-
-                <!-- Equipes -->
-                <StackPanel x:Name="TeamsContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
-                    <TextBlock Text="Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
-                    
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Orientation="Vertical">
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <Ellipse Width="50" Height="50" Fill="#0078D4" Margin="0,0,16,0"/>
-                                        <TextBlock Text="D" FontSize="22" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-50,0,0,0"/>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="Equipe Desenvolvimento" FontSize="14" FontWeight="SemiBold" Foreground="#333333"/>
-                                            <TextBlock Text="8 membros  24 canais" FontSize="12" Foreground="#666666" Margin="0,4,0,0"/>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <Ellipse Width="50" Height="50" Fill="#107C10" Margin="0,0,16,0"/>
-                                        <TextBlock Text="P" FontSize="22" VerticalAlignment="Center" HorizontalAlignment="Center" Foreground="White" FontWeight="Bold" Margin="-50,0,0,0"/>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="Projeto Marketing" FontSize="14" FontWeight="SemiBold" Foreground="#333333"/>
-                                            <TextBlock Text="5 membros  12 canais" FontSize="12" Foreground="#666666" Margin="0,4,0,0"/>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Border>
-
-                            <Button Content="➕ Criar Equipe" Style="{StaticResource PrimaryButtonStyle}" Width="150" HorizontalAlignment="Left" Margin="0,16,0,0"/>
-                        </StackPanel>
-                    </ScrollViewer>
-                </StackPanel>
-
-                <!-- Calendario -->
-                <StackPanel x:Name="CalendarContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
-                    <TextBlock Text="Calendario" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
-                    <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" CornerRadius="8">
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,40,0,40">
-                            <TextBlock Text="📅" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,16"/>
-                            <TextBlock Text="Nenhum evento agendado" FontSize="16" FontWeight="SemiBold" Foreground="#333333" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Voce esta em dia com seus compromissos!" FontSize="12" Foreground="#666666" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-
-                <!-- Arquivos -->
-                <StackPanel x:Name="FilesContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
-                    <TextBlock Text="Arquivos" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
-                    <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" CornerRadius="8">
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="0,40,0,40">
-                            <TextBlock Text="📁" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,16"/>
-                            <TextBlock Text="Nenhum arquivo compartilhado" FontSize="16" FontWeight="SemiBold" Foreground="#333333" HorizontalAlignment="Center"/>
-                            <TextBlock Text="Comece a compartilhar arquivos com sua equipe" FontSize="12" Foreground="#666666" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-
-                <!-- Configuracoes -->
-                <StackPanel x:Name="SettingsContent" Orientation="Vertical" Margin="24,20" Visibility="Collapsed">
-                    <TextBlock Text="Configuracoes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="#333333"/>
-                    
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Orientation="Vertical">
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <TextBlock Text="🔔 Notificacoes" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
-                                        <mah:ToggleSwitch IsOn="True" Margin="12,0,0,0" HorizontalAlignment="Right"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Ativar notificacoes de mensagens" FontSize="12" Foreground="#666666"/>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                        <TextBlock Text="🎨 Aparencia" FontSize="14" FontWeight="SemiBold" Foreground="#333333" VerticalAlignment="Center"/>
-                                        <mah:ToggleSwitch IsOn="True" Margin="12,0,0,0" HorizontalAlignment="Right"/>
-                                    </StackPanel>
-                                    <TextBlock Text="Modo claro ativado" FontSize="12" Foreground="#666666"/>
-                                </StackPanel>
-                            </Border>
-
-                            <Border Background="White" BorderBrush="#E8E8E8" BorderThickness="1" Padding="16" Margin="0,0,0,12" CornerRadius="8">
-                                <StackPanel>
-                                    <TextBlock Text="🔐 Privacidade" FontSize="14" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,0,8"/>
-                                    <TextBlock Text="Sua privacidade e importante para nos" FontSize="12" Foreground="#666666"/>
-                                </StackPanel>
-                            </Border>
-
-                            <Button Content="💾 Salvar Configuracoes" Style="{StaticResource PrimaryButtonStyle}" Width="200" HorizontalAlignment="Left" Margin="0,12,0,0"/>
-                        </StackPanel>
-                    </ScrollViewer>
-                </StackPanel>
             </Grid>
         </Grid>
     </Grid>

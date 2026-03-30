@@ -11,24 +11,32 @@
         ResizeMode="NoResize">
 
     <mah:MetroWindow.Resources>
+        <SolidColorBrush x:Key="PrimaryColor" Color="#FF0078D4"/>
+        <SolidColorBrush x:Key="SurfaceColor" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="BackgroundColor" Color="#FFF3F3F3"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#FF1F1F1F"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#FF717171"/>
+        
         <Style x:Key="LoginInputStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="#F5F5F5"/>
-            <Setter Property="Foreground" Value="#333333"/>
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Padding" Value="16,12"/>
-            <Setter Property="BorderBrush" Value="#E0E0E0"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Margin" Value="0,8,0,0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
-                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Background="{TemplateBinding Background}">
+                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Background="{TemplateBinding Background}">
                             <ScrollViewer Margin="0" x:Name="PART_ContentHost"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsFocused" Value="True">
-                                <Setter Property="BorderBrush" Value="#0078D4"/>
+                                <Setter Property="BorderBrush" Value="#FF0078D4"/>
                                 <Setter Property="BorderThickness" Value="2"/>
+                                <Setter Property="Background" Value="White"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -37,37 +45,39 @@
         </Style>
 
         <Style x:Key="LoginPasswordStyle" TargetType="PasswordBox">
-            <Setter Property="Background" Value="#F5F5F5"/>
-            <Setter Property="Foreground" Value="#333333"/>
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="14"/>
-            <Setter Property="Padding" Value="16,12"/>
-            <Setter Property="BorderBrush" Value="#E0E0E0"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Margin" Value="0,8,0,0"/>
         </Style>
 
         <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#0078D4"/>
+            <Setter Property="Background" Value="#FF0078D4"/>
             <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="16,12"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="0,20,0,0"/>
-            <Setter Property="Height" Value="40"/>
+            <Setter Property="Height" Value="42"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#005A9E"/>
+                                <Setter Property="Background" Value="#FF106EBE"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter Property="Background" Value="#004578"/>
+                                <Setter Property="Background" Value="#FF0063B1"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -77,24 +87,26 @@
 
         <Style x:Key="SecondaryButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="#0078D4"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="#FF0078D4"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderBrush" Value="#0078D4"/>
+            <Setter Property="BorderBrush" Value="#FFD0D0D0"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="0,20,0,0"/>
-            <Setter Property="Height" Value="40"/>
+            <Setter Property="Height" Value="42"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#F5F5F5"/>
+                                <Setter Property="Background" Value="#FFF3F3F3"/>
+                                <Setter Property="BorderBrush" Value="#FFA0A0A0"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -104,13 +116,15 @@
 
         <Style x:Key="TabButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#999999"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#FF717171"/>
+            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontSize" Value="15"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="0,0"/>
-            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0,8,0,8"/>
+            <Setter Property="BorderThickness" Value="0,0,0,2"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="0,0,24,0"/>
+            <Setter Property="Margin" Value="0,0,32,0"/>
         </Style>
     </mah:MetroWindow.Resources>
 
@@ -132,7 +146,10 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                     <!-- Logo/Título -->
-                    <TextBlock Text="🔵 obsseract" FontSize="28" FontWeight="ExtraBold" Foreground="#0078D4" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12" VerticalAlignment="Center">
+                        <Image Source="pack://application:,,,/img/tesseractICO.png" Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="obsseract" FontSize="28" FontWeight="ExtraBold" Foreground="#0078D4" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <TextBlock Text="Observatório de Projetos Integradores" FontSize="14" Foreground="#999999" Margin="0,0,0,32"/>
 
                     <!-- Tabs -->
@@ -142,12 +159,12 @@
                     </StackPanel>
 
                     <!-- Linha divisória -->
-                    <Rectangle Height="2" Fill="#E0E0E0" Margin="0,0,0,24"/>
+                    <Rectangle Height="2" Fill="#FFE0E0E0" Margin="0,0,0,24"/>
 
                     <!-- LOGIN CONTENT -->
                     <StackPanel x:Name="LoginContent" Orientation="Vertical">
                         <TextBlock Text="Email ou Telefone" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" Text="seu@email.com" Foreground="#999999"/>
+                        <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
 
                         <TextBlock Text="Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <PasswordBox x:Name="LoginPassword" Style="{StaticResource LoginPasswordStyle}"/>
@@ -163,19 +180,19 @@
                     <!-- SIGNUP CONTENT -->
                     <StackPanel x:Name="SignupContent" Orientation="Vertical" Visibility="Collapsed">
                         <TextBlock Text="Nome Completo" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <TextBox x:Name="SignupName" Style="{StaticResource LoginInputStyle}" Text="Seu Nome"/>
+                        <TextBox x:Name="SignupName" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seu Nome"/>
 
                         <TextBlock Text="Email" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupEmail" Style="{StaticResource LoginInputStyle}" Text="seu@email.com"/>
+                        <TextBox x:Name="SignupEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
 
                         <TextBlock Text="Telefone" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupPhone" Style="{StaticResource LoginInputStyle}" Text="(XX) 9XXXX-XXXX"/>
+                        <TextBox x:Name="SignupPhone" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="(XX) 9XXXX-XXXX"/>
 
                         <TextBlock Text="Curso" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupCourse" Style="{StaticResource LoginInputStyle}" Text="Engenharia de Software"/>
+                        <TextBox x:Name="SignupCourse" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software"/>
 
                         <TextBlock Text="Matrícula" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupRegistration" Style="{StaticResource LoginInputStyle}" Text="202400123"/>
+                        <TextBox x:Name="SignupRegistration" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="202400123"/>
 
                         <TextBlock Text="Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <PasswordBox x:Name="SignupPassword" Style="{StaticResource LoginPasswordStyle}"/>

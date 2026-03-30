@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Resource Include="img\TesseractLogin.png" />
+    <Resource Include="img\tesseractICO.png" />
   </ItemGroup>
 
 </Project>

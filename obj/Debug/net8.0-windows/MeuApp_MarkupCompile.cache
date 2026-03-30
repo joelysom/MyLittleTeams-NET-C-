@@ -4,17 +4,17 @@
 winexe
 C#
 .cs
-C:\Users\JOELYSONALCANTARADAS\Documents\.NetC#\obj\Debug\net8.0-windows\
+F:\react-js\vite-react-js\Net&C\MeuApp\obj\Debug\net8.0-windows\
 MeuApp
 none
 false
 TRACE;DEBUG;NET;NET8_0;NETCOREAPP
-C:\Users\JOELYSONALCANTARADAS\Documents\.NetC#\App.xaml
-2-216653475
+F:\react-js\vite-react-js\Net&C\MeuApp\App.xaml
+4-190900003
 
-5291395063
-2021602977149
-LoginWindow.xaml;MainWindow.xaml;
+142069931129
+202427501065
+ChatWindow.xaml;LoginWindow.xaml;MainWindow.xaml;SearchResultsWindow.xaml;
 
 False
 
