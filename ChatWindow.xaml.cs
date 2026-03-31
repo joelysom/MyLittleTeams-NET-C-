@@ -12,8 +12,8 @@ namespace MeuApp
     public partial class ChatWindow : MetroWindow
     {
         private UserProfile? _currentUser;
-        private string _contactId;
-        private string _contactName;
+        private string _contactId = string.Empty;
+        private string _contactName = string.Empty;
         private List<ChatMessage> _messages = new();
         private ChatService? _chatService;
         private string _idToken = "";
@@ -352,7 +352,7 @@ namespace MeuApp
 
         private async void SendButton_Click(object? sender, RoutedEventArgs? e)
         {
-            string messageText = MessageInput.Text?.Trim();
+            var messageText = MessageInput.Text?.Trim() ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(messageText))
             {
@@ -410,9 +410,9 @@ namespace MeuApp
 
     public class ChatMessage
     {
-        public string SenderId { get; set; }
-        public string SenderName { get; set; }
-        public string Content { get; set; }
+        public string SenderId { get; set; } = string.Empty;
+        public string SenderName { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
         public bool IsOwn { get; set; }
     }

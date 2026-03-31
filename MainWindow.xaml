@@ -196,10 +196,283 @@
                     </Grid>
 
                     <!-- Teams -->
-                    <StackPanel x:Name="TeamsContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
-                        <TextBlock Text="👥 Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
-                        <TextBlock Text="Você não faz parte de nenhuma equipe ainda" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
-                    </StackPanel>
+                    <ScrollViewer x:Name="TeamsContent" Visibility="Collapsed" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <Grid Margin="0,0,0,18">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel>
+                                    <TextBlock Text="👥 Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Gerencie grupos de projeto, convites e materiais compartilhados sem poluir a tela inicial." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <Button x:Name="TeamEntryOptionsButton"
+                                        Grid.Column="1"
+                                        Content="+"
+                                        Width="46"
+                                        Height="46"
+                                        Background="{DynamicResource AccentBrush}"
+                                        Foreground="White"
+                                        BorderThickness="0"
+                                        FontSize="24"
+                                        FontWeight="SemiBold"
+                                        Cursor="Hand"
+                                        Click="OpenTeamEntryOptions_Click"/>
+                            </Grid>
+
+                            <Popup x:Name="TeamEntryOptionsPopup"
+                                   PlacementTarget="{Binding ElementName=TeamEntryOptionsButton}"
+                                   Placement="Bottom"
+                                   HorizontalOffset="-84"
+                                   VerticalOffset="10"
+                                   AllowsTransparency="True"
+                                   StaysOpen="False">
+                                <Border Background="{DynamicResource CardBackgroundBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="16"
+                                        Padding="14"
+                                        Width="220">
+                                    <StackPanel>
+                                        <Button Content="Ingressar em equipe"
+                                                Margin="0,0,0,8"
+                                                Padding="14,10"
+                                                Background="{DynamicResource MutedCardBackgroundBrush}"
+                                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                                BorderThickness="0"
+                                                HorizontalContentAlignment="Left"
+                                                FontWeight="SemiBold"
+                                                Cursor="Hand"
+                                                Click="ShowJoinTeam_Click"/>
+                                        <Button Content="Criar equipe"
+                                                Padding="14,10"
+                                                Background="{DynamicResource AccentBrush}"
+                                                Foreground="White"
+                                                BorderThickness="0"
+                                                HorizontalContentAlignment="Left"
+                                                FontWeight="SemiBold"
+                                                Cursor="Hand"
+                                                Click="ShowCreateTeam_Click"/>
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+
+                            <Border x:Name="TeamsEmptyStateCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="24" Margin="0,0,0,14">
+                                <StackPanel HorizontalAlignment="Center" Width="420">
+                                    <TextBlock Text="Sem equipes ativas" FontSize="22" FontWeight="ExtraBold" Foreground="{DynamicResource PrimaryTextBrush}" TextAlignment="Center" Margin="0,0,0,10"/>
+                                    <TextBlock Text="Quando voce criar uma equipe ou ingressar por codigo, o painel completo aparecera aqui com integrantes, UCs e a central de materiais do projeto." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,18"/>
+                                    <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="16">
+                                        <TextBlock Text="Use o botao + no canto superior para escolher entre criar uma nova equipe ou entrar em uma equipe existente por codigo." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="TeamJoinCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="Ingressar em equipe" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Cole o codigo da equipe para vincular seu perfil ao grupo e abrir o painel compartilhado." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,18" TextWrapping="Wrap"/>
+
+                                    <TextBlock Text="Codigo da equipe" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TeamJoinCodeTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                        <Button Content="Ingressar agora"
+                                                Width="170"
+                                                Height="44"
+                                                Background="{DynamicResource AccentBrush}"
+                                                Foreground="White"
+                                                BorderThickness="0"
+                                                FontWeight="SemiBold"
+                                                Cursor="Hand"
+                                                Click="JoinTeamByCode_Click"/>
+                                        <Button Content="Cancelar"
+                                                Width="120"
+                                                Height="44"
+                                                Margin="10,0,0,0"
+                                                Background="{DynamicResource MutedCardBackgroundBrush}"
+                                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                                BorderBrush="{DynamicResource CardBorderBrush}"
+                                                FontWeight="SemiBold"
+                                                Cursor="Hand"
+                                                Click="CancelTeamEntry_Click"/>
+                                        <TextBlock x:Name="TeamJoinStatusText"
+                                                   Text=""
+                                                   Margin="16,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   FontSize="12"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="TeamCreationCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14" Visibility="Collapsed">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Text="Criar equipe" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <Button Grid.Column="1"
+                                                Content="Cancelar"
+                                                Padding="14,8"
+                                                Background="{DynamicResource MutedCardBackgroundBrush}"
+                                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                                BorderBrush="{DynamicResource CardBorderBrush}"
+                                                Cursor="Hand"
+                                                Click="CancelTeamEntry_Click"/>
+                                    </Grid>
+
+                                    <TextBlock Text="Defina os dados academicos e adicione os integrantes antes de abrir o painel completo da equipe." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,18" TextWrapping="Wrap"/>
+
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Margin="0,0,10,0">
+                                            <TextBlock Text="Nome da equipe" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <TextBox x:Name="TeamNameTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                            <TextBlock Text="Curso" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <ComboBox x:Name="TeamCourseComboBox" Height="44" Padding="12,8" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" IsEditable="True"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Margin="0,0,10,0">
+                                            <TextBlock Text="Turma" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <ComboBox x:Name="TeamClassComboBox" Height="44" Padding="12,8" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" IsEditable="True"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                            <TextBlock Text="ID da turma" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <TextBox x:Name="TeamClassIdTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <StackPanel Margin="0,0,0,12">
+                                        <TextBlock Text="UCs" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="TeamUcInput"
+                                                      Grid.Column="0"
+                                                      Height="44"
+                                                      IsEditable="True"
+                                                      IsTextSearchEnabled="True"
+                                                      StaysOpenOnEdit="True"
+                                                      Padding="12,8"
+                                                      Background="{DynamicResource SearchBackgroundBrush}"
+                                                      BorderBrush="{DynamicResource SearchBorderBrush}"
+                                                      Foreground="{DynamicResource PrimaryTextBrush}"
+                                                      FontSize="13"
+                                                      KeyDown="TeamUcInput_KeyDown"/>
+                                            <Button Grid.Column="1"
+                                                    Content="Adicionar UC"
+                                                    Margin="10,0,0,0"
+                                                    Padding="16,10"
+                                                    MinWidth="110"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Foreground="White"
+                                                    BorderThickness="0"
+                                                    FontWeight="SemiBold"
+                                                    Cursor="Hand"
+                                                    Click="AddTeamUc_Click"/>
+                                        </Grid>
+                                        <TextBlock Text="Adicione uma ou mais unidades curriculares vinculadas a esta equipe." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
+                                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="12" MinHeight="58">
+                                            <WrapPanel x:Name="TeamUcsPanel" ItemHeight="34" ItemWidth="Auto"/>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,0,0,18">
+                                        <TextBlock Text="Adicionar alunos" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox x:Name="TeamMemberInput"
+                                                      Grid.Column="0"
+                                                      Height="44"
+                                                      IsEditable="True"
+                                                      IsTextSearchEnabled="False"
+                                                      StaysOpenOnEdit="True"
+                                                      DisplayMemberPath="DisplayLabel"
+                                                      Padding="12,8"
+                                                      Background="{DynamicResource SearchBackgroundBrush}"
+                                                      BorderBrush="{DynamicResource SearchBorderBrush}"
+                                                      Foreground="{DynamicResource PrimaryTextBrush}"
+                                                      FontSize="13"
+                                                      SelectionChanged="TeamMemberInput_SelectionChanged"
+                                                      KeyDown="TeamMemberInput_KeyDown"/>
+                                            <Button Grid.Column="1"
+                                                    Content="Adicionar aluno"
+                                                    Margin="10,0,0,0"
+                                                    Padding="16,10"
+                                                    MinWidth="126"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    Foreground="White"
+                                                    BorderThickness="0"
+                                                    FontWeight="SemiBold"
+                                                    Cursor="Hand"
+                                                    Click="AddTeamMember_Click"/>
+                                        </Grid>
+                                        <TextBlock Text="Digite o nome ou selecione um colega para incluir na equipe." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
+                                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="12" MinHeight="58">
+                                            <WrapPanel x:Name="TeamMembersPanel" ItemHeight="34" ItemWidth="Auto"/>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="CreateTeamButton"
+                                                Content="Criar equipe"
+                                                Width="180"
+                                                Height="44"
+                                                Background="{DynamicResource AccentBrush}"
+                                                Foreground="White"
+                                                BorderThickness="0"
+                                                FontWeight="SemiBold"
+                                                Cursor="Hand"
+                                                Click="CreateTeam_Click"/>
+                                        <TextBlock x:Name="TeamCreationStatusText"
+                                                   Text=""
+                                                   Margin="16,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   FontSize="12"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="TeamListCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="Equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Selecione uma equipe para abrir os detalhes, materiais e painéis de gestão." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
+                                    <StackPanel x:Name="TeamListPanel"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="TeamWorkspaceCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="0" Visibility="Collapsed">
+                                <ContentControl x:Name="TeamWorkspaceHost"/>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <!-- Calendar -->
                     <StackPanel x:Name="CalendarContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">

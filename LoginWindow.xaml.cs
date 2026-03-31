@@ -77,7 +77,7 @@ namespace MeuApp
                 };
             }
 
-            var mainWindow = new MainWindow(profile, loginResult.IdToken);
+            var mainWindow = new MainWindow(profile, loginResult.IdToken ?? string.Empty);
             mainWindow.Show();
             this.Close();
         }
@@ -136,7 +136,7 @@ namespace MeuApp
                 UserId = signupResult.LocalId!, Name = name, Email = email, Phone = phone, Course = course, Registration = registration
             };
 
-            var mainWindow = new MainWindow(profile, signupResult.IdToken);
+            var mainWindow = new MainWindow(profile, signupResult.IdToken ?? string.Empty);
             mainWindow.Show();
             this.Close();
         }

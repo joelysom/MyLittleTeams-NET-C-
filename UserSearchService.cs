@@ -16,6 +16,16 @@ namespace MeuApp
         public string Email { get; set; } = "";
         public string Registration { get; set; } = "";
         public string Course { get; set; } = "";
+
+        public string DisplayLabel
+        {
+            get
+            {
+                var registration = string.IsNullOrWhiteSpace(Registration) ? "Sem matricula" : Registration;
+                var email = string.IsNullOrWhiteSpace(Email) ? "Sem email" : Email;
+                return $"{Name} | {registration} | {email}";
+            }
+        }
     }
 
     public class UserSearchService

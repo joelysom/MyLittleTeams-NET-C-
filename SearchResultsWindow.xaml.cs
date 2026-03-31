@@ -12,7 +12,7 @@ namespace MeuApp
     {
         // Evento disparado quando usuário iniciar conversa
         public delegate void ConversationStartedEventHandler(UserInfo selectedUser);
-        public event ConversationStartedEventHandler OnConversationStarted;
+        public event ConversationStartedEventHandler? OnConversationStarted;
 
         public ObservableCollection<UserInfo> Results { get; set; }
         private string _searchQuery;
