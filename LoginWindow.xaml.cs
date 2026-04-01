@@ -242,6 +242,9 @@ namespace MeuApp
                     programmingLanguages = new { stringValue = string.Empty },
                     portfolioLink = new { stringValue = string.Empty },
                     linkedInLink = new { stringValue = string.Empty },
+                    avatarBody = new { stringValue = string.Empty },
+                    avatarHair = new { stringValue = string.Empty },
+                    avatarAccessory = new { stringValue = string.Empty },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -293,7 +296,10 @@ namespace MeuApp
                 Skills = TryGetStringField(fields, "skills"),
                 ProgrammingLanguages = TryGetStringField(fields, "programmingLanguages"),
                 PortfolioLink = TryGetStringField(fields, "portfolioLink"),
-                LinkedInLink = TryGetStringField(fields, "linkedInLink")
+                LinkedInLink = TryGetStringField(fields, "linkedInLink"),
+                AvatarBody = TryGetStringField(fields, "avatarBody"),
+                AvatarHair = TryGetStringField(fields, "avatarHair"),
+                AvatarAccessory = TryGetStringField(fields, "avatarAccessory")
             };
         }
 
@@ -323,6 +329,9 @@ namespace MeuApp
         public string ProgrammingLanguages { get; set; } = string.Empty;
         public string PortfolioLink { get; set; } = string.Empty;
         public string LinkedInLink { get; set; } = string.Empty;
+        public string AvatarBody { get; set; } = string.Empty;
+        public string AvatarHair { get; set; } = string.Empty;
+        public string AvatarAccessory { get; set; } = string.Empty;
     }
 
     public class AuthResult

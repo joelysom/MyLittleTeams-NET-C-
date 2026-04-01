@@ -16,6 +16,7 @@ namespace MeuApp
         public string Email { get; set; } = "";
         public string Registration { get; set; } = "";
         public string Course { get; set; } = "";
+        public string? Role { get; set; } = "member";
 
         public string DisplayLabel
         {

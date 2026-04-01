@@ -218,11 +218,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "F:\\react-js\\vite-react-js\\Net&C\\MeuApp\\MeuApp.csproj",
+      "projectUniqueName": "D:\\react-js\\NETC#\\MeuApp.csproj",
       "projectName": "MeuApp",
-      "projectPath": "F:\\react-js\\vite-react-js\\Net&C\\MeuApp\\MeuApp.csproj",
+      "projectPath": "D:\\react-js\\NETC#\\MeuApp.csproj",
       "packagesPath": "C:\\Users\\PC\\.nuget\\packages\\",
-      "outputPath": "F:\\react-js\\vite-react-js\\Net&C\\MeuApp\\obj\\",
+      "outputPath": "D:\\react-js\\NETC#\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\PC\\AppData\\Roaming\\NuGet\\NuGet.Config",

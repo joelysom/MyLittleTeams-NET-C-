@@ -4,15 +4,15 @@
 winexe
 C#
 .cs
-F:\react-js\vite-react-js\Net&C\MeuApp\obj\Debug\net8.0-windows\
+D:\react-js\NETC#\obj\Debug\net8.0-windows\
 MeuApp
 none
 false
 TRACE;DEBUG;NET;NET8_0;NETCOREAPP
-F:\react-js\vite-react-js\Net&C\MeuApp\App.xaml
+D:\react-js\NETC#\App.xaml
 4-190900003
 
-142069931129
+16-1083974988
 202427501065
 ChatWindow.xaml;LoginWindow.xaml;MainWindow.xaml;SearchResultsWindow.xaml;
 

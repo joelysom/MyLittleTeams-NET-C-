@@ -9,6 +9,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using MahApps.Metro.Controls;
 using Microsoft.Win32;
@@ -39,6 +40,9 @@ namespace MeuApp
             "Cassandra CQL", "Cypher", "DAX", "EdgeQL", "GraphQL", "Gremlin", "HiveQL", "KQL", "LINQ", "MQL",
             "Pig Latin", "PQL", "PromQL", "SOQL", "Splunk SPL", "Transact-SQL"
         };
+        private static readonly string[] AvatarBodyOptions = { "1", "2", "3" };
+        private static readonly string[] AvatarHairOptions = { "1", "2", "3", "4", "5", "6" };
+        private static readonly string[] AvatarAccessoryOptions = { "1", "2", "3" };
         private static readonly string[] KnownTeamCourses =
         {
             "Analise e Desenvolvimento de Sistemas",
@@ -99,6 +103,7 @@ namespace MeuApp
         private TeamEntryMode _teamEntryMode = TeamEntryMode.None;
         private string _chatListFilter = string.Empty;
         private bool _appDarkModeEnabled = false;
+        private TeamService? _teamService = null;
 
         public MainWindow()
         {
@@ -116,8 +121,12 @@ namespace MeuApp
 
             if (!string.IsNullOrWhiteSpace(_idToken) && _currentProfile != null)
             {
+                // Inicializar TeamService
+                _teamService = new TeamService(_idToken, _currentProfile.UserId ?? "");
+
                 RenderChatsLoadingState();
                 await LoadActiveConversationsAsync();
+                await LoadTeamsFromDatabaseAsync();
             }
             else
             {
@@ -162,60 +171,8 @@ namespace MeuApp
             SidebarUserEmail.Text = profile.Email;
             SidebarUserRole.Text = $"{profile.Course} | Matrícula: {profile.Registration}";
             PopulateProfessionalProfileFields(profile);
+            RefreshAvatarUi(profile);
             SyncTeamDefaultsWithProfile(profile);
-        }
-
-        private sealed class TeamWorkspaceInfo
-        {
-            public string TeamName { get; set; } = string.Empty;
-            public string Course { get; set; } = string.Empty;
-            public string ClassName { get; set; } = string.Empty;
-            public string ClassId { get; set; } = string.Empty;
-            public List<UserInfo> Members { get; set; } = new List<UserInfo>();
-            public List<string> Ucs { get; set; } = new List<string>();
-            public List<TeamAssetInfo> Assets { get; set; } = new List<TeamAssetInfo>();
-            public List<TeamTaskColumnInfo> TaskColumns { get; set; } = new List<TeamTaskColumnInfo>();
-            public List<TeamNotificationInfo> Notifications { get; set; } = new List<TeamNotificationInfo>();
-            public TeamCsdBoardInfo CsdBoard { get; set; } = new TeamCsdBoardInfo();
-        }
-
-        private sealed class TeamAssetInfo
-        {
-            public string Category { get; set; } = string.Empty;
-            public string FileName { get; set; } = string.Empty;
-            public DateTime AddedAt { get; set; }
-        }
-
-        private sealed class TeamTaskColumnInfo
-        {
-            public string Id { get; set; } = Guid.NewGuid().ToString();
-            public string Title { get; set; } = string.Empty;
-            public Color AccentColor { get; set; }
-            public List<TeamTaskCardInfo> Cards { get; set; } = new List<TeamTaskCardInfo>();
-        }
-
-        private sealed class TeamTaskCardInfo
-        {
-            public string Id { get; set; } = Guid.NewGuid().ToString();
-            public string Title { get; set; } = string.Empty;
-            public string Description { get; set; } = string.Empty;
-            public string Priority { get; set; } = "Media";
-            public DateTime? DueDate { get; set; }
-            public List<string> AssignedUserIds { get; set; } = new List<string>();
-            public DateTime CreatedAt { get; set; } = DateTime.Now;
-        }
-
-        private sealed class TeamNotificationInfo
-        {
-            public string Message { get; set; } = string.Empty;
-            public DateTime CreatedAt { get; set; } = DateTime.Now;
-        }
-
-        private sealed class TeamCsdBoardInfo
-        {
-            public List<string> Certainties { get; set; } = new List<string>();
-            public List<string> Assumptions { get; set; } = new List<string>();
-            public List<string> Doubts { get; set; } = new List<string>();
         }
 
         private enum TeamEntryMode
@@ -319,41 +276,25 @@ namespace MeuApp
                 {
                     Title = "Backlog",
                     AccentColor = Color.FromRgb(59, 130, 246),
-                    Cards = new List<TeamTaskCardInfo>
-                    {
-                        new TeamTaskCardInfo
-                        {
-                            Title = "Definir escopo do projeto",
-                            Description = "Validar objetivos, entregas e publico alvo com a equipe.",
-                            Priority = "Alta",
-                            DueDate = DateTime.Today.AddDays(2)
-                        }
-                    }
+                    Cards = new List<TeamTaskCardInfo>()
                 },
                 new TeamTaskColumnInfo
                 {
                     Title = "Em andamento",
                     AccentColor = Color.FromRgb(245, 158, 11),
-                    Cards = new List<TeamTaskCardInfo>
-                    {
-                        new TeamTaskCardInfo
-                        {
-                            Title = "Montar prototipo navegavel",
-                            Description = "Organizar telas principais e fluxo de validacao.",
-                            Priority = "Alta",
-                            DueDate = DateTime.Today.AddDays(5)
-                        }
-                    }
+                    Cards = new List<TeamTaskCardInfo>()
                 },
                 new TeamTaskColumnInfo
                 {
                     Title = "Revisao",
-                    AccentColor = Color.FromRgb(168, 85, 247)
+                    AccentColor = Color.FromRgb(168, 85, 247),
+                    Cards = new List<TeamTaskCardInfo>()
                 },
                 new TeamTaskColumnInfo
                 {
                     Title = "Concluido",
-                    AccentColor = Color.FromRgb(16, 185, 129)
+                    AccentColor = Color.FromRgb(16, 185, 129),
+                    Cards = new List<TeamTaskCardInfo>()
                 }
             };
         }
@@ -362,26 +303,34 @@ namespace MeuApp
         {
             return new TeamCsdBoardInfo
             {
-                Certainties = new List<string>
-                {
-                    "O projeto precisa apoiar a rotina academica da equipe.",
-                    "As entregas devem ser acompanhadas com prazos claros."
-                },
-                Assumptions = new List<string>
-                {
-                    "Os usuarios preferem acompanhar tarefas em um quadro visual.",
-                    "A equipe vai compartilhar arquivos de forma recorrente."
-                },
-                Doubts = new List<string>
-                {
-                    "Quais integracoes externas serao realmente necessarias na entrega final?",
-                    "Qual formato de notificacao gera mais resposta da equipe?"
-                }
+                Certainties = new List<string>(),
+                Assumptions = new List<string>(),
+                Doubts = new List<string>()
             };
+        }
+
+        private List<TeamMilestoneInfo> CreateDefaultMilestones()
+        {
+            return new List<TeamMilestoneInfo>();
         }
 
         private TeamWorkspaceInfo EnsureTeamWorkspaceDefaults(TeamWorkspaceInfo team)
         {
+            team.TeamId = string.IsNullOrWhiteSpace(team.TeamId)
+                ? TeamService.GenerateTeamId(team.ClassId, team.TeamName)
+                : TeamService.NormalizeTeamCode(team.TeamId);
+            team.CreatedBy = string.IsNullOrWhiteSpace(team.CreatedBy)
+                ? _currentProfile?.UserId ?? string.Empty
+                : team.CreatedBy;
+            if (team.CreatedAt == default)
+            {
+                team.CreatedAt = DateTime.Now;
+            }
+            if (team.UpdatedAt == default)
+            {
+                team.UpdatedAt = DateTime.Now;
+            }
+
             team.Members = team.Members
                 .Where(member => member != null && !string.IsNullOrWhiteSpace(member.UserId))
                 .GroupBy(member => member.UserId, StringComparer.OrdinalIgnoreCase)
@@ -396,7 +345,11 @@ namespace MeuApp
                 .ToList();
 
             team.Assets ??= new List<TeamAssetInfo>();
+            team.Milestones ??= new List<TeamMilestoneInfo>();
             team.Notifications ??= new List<TeamNotificationInfo>();
+            team.ChatMessages ??= new List<TeamChatMessageInfo>();
+            team.ProjectProgress = Math.Max(0, Math.Min(100, team.ProjectProgress));
+            team.ProjectStatus = string.IsNullOrWhiteSpace(team.ProjectStatus) ? "Planejamento" : team.ProjectStatus;
 
             if (team.TaskColumns == null || team.TaskColumns.Count == 0)
             {
@@ -412,21 +365,54 @@ namespace MeuApp
                 team.CsdBoard.Certainties ??= new List<string>();
                 team.CsdBoard.Assumptions ??= new List<string>();
                 team.CsdBoard.Doubts ??= new List<string>();
-
-                if (team.CsdBoard.Certainties.Count == 0 &&
-                    team.CsdBoard.Assumptions.Count == 0 &&
-                    team.CsdBoard.Doubts.Count == 0)
-                {
-                    team.CsdBoard = CreateDefaultCsdBoard();
-                }
             }
 
-            if (team.Notifications.Count == 0)
+            if (team.Milestones.Count == 0)
             {
-                AddTeamNotification(team, $"Workspace profissional da equipe {team.TeamName} pronto para operacao.");
+                team.Milestones = CreateDefaultMilestones();
             }
 
             return team;
+        }
+
+        private string GetCurrentUserId()
+        {
+            return _currentProfile?.UserId ?? string.Empty;
+        }
+
+        private bool IsCurrentUserTeamCreator(TeamWorkspaceInfo team)
+        {
+            return !string.IsNullOrWhiteSpace(team.CreatedBy)
+                && string.Equals(team.CreatedBy, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private int CalculateTeamProgressPercentage(TeamWorkspaceInfo team)
+        {
+            return Math.Max(0, Math.Min(100, team.ProjectProgress));
+        }
+
+        private string GetNextTeamDeadlineLabel(TeamWorkspaceInfo team)
+        {
+            if (team.ProjectDeadline.HasValue)
+            {
+                return FormatRelativeDate(team.ProjectDeadline.Value);
+            }
+
+            var nextDate = team.TaskColumns
+                .SelectMany(column => column.Cards)
+                .Where(card => card.DueDate.HasValue)
+                .Select(card => card.DueDate!.Value)
+                .OrderBy(date => date)
+                .FirstOrDefault();
+
+            return nextDate == default ? "Sem prazo definido" : FormatRelativeDate(nextDate);
+        }
+
+        private string GetProjectDeadlineText(TeamWorkspaceInfo team)
+        {
+            return team.ProjectDeadline.HasValue
+                ? $"{team.ProjectDeadline.Value:dd/MM/yyyy} ({FormatRelativeDate(team.ProjectDeadline.Value)})"
+                : "Nao definido";
         }
 
         private void AddTeamNotification(TeamWorkspaceInfo team, string message)
@@ -654,6 +640,14 @@ namespace MeuApp
                 Margin = new Thickness(0, 6, 0, 0),
                 Foreground = GetThemeBrush("SecondaryTextBrush")
             });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = $"Codigo de ingresso: {team.TeamId}",
+                FontSize = 12,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("AccentBrush"),
+                FontWeight = FontWeights.SemiBold
+            });
             grid.Children.Add(titleStack);
 
             var actions = new WrapPanel
@@ -662,9 +656,13 @@ namespace MeuApp
                 VerticalAlignment = VerticalAlignment.Top
             };
 
+            actions.Children.Add(CreateTeamWorkspaceActionButton("Copiar codigo", Color.FromRgb(14, 165, 233), CopyTeamCode_Click));
             actions.Children.Add(CreateTeamWorkspaceActionButton("Adicionar membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team)));
             actions.Children.Add(CreateTeamWorkspaceActionButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team)));
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace));
+            if (IsCurrentUserTeamCreator(team))
+            {
+                actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace));
+            }
             actions.Children.Add(CreateTeamWorkspaceActionButton("Fechar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click));
 
             Grid.SetColumn(actions, 1);
@@ -677,6 +675,7 @@ namespace MeuApp
         private UIElement CreateTeamWorkspaceMetrics(TeamWorkspaceInfo team)
         {
             var overdueCount = team.TaskColumns.SelectMany(column => column.Cards).Count(card => card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today);
+            var completedMilestones = team.Milestones.Count(milestone => string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase));
 
             var wrap = new WrapPanel
             {
@@ -685,8 +684,9 @@ namespace MeuApp
 
             wrap.Children.Add(CreateTeamMetricCard("Membros", $"{team.Members.Count}", "Equipe ativa", Color.FromRgb(37, 99, 235)));
             wrap.Children.Add(CreateTeamMetricCard("Tarefas", $"{team.TaskColumns.Sum(column => column.Cards.Count)}", "Cards no board", Color.FromRgb(16, 185, 129)));
+            wrap.Children.Add(CreateTeamMetricCard("Progresso", $"{CalculateTeamProgressPercentage(team)}%", "Fluxo concluido", Color.FromRgb(14, 165, 233)));
             wrap.Children.Add(CreateTeamMetricCard("Atrasos", $"{overdueCount}", "Itens fora do prazo", Color.FromRgb(220, 38, 38)));
-            wrap.Children.Add(CreateTeamMetricCard("Notificacoes", $"{team.Notifications.Count}", "Ultimos alertas", Color.FromRgb(168, 85, 247)));
+            wrap.Children.Add(CreateTeamMetricCard("Entregas", $"{completedMilestones}/{team.Milestones.Count}", "Marcos academicos", Color.FromRgb(168, 85, 247)));
 
             return wrap;
         }
@@ -1014,6 +1014,51 @@ namespace MeuApp
                 stack.Children.Add(CreateTaskCard(team, column, card));
             }
 
+            if (column.Cards.Count == 0)
+            {
+                var emptyState = new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(14),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    Child = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Nenhuma tarefa nesta coluna ainda.",
+                                FontSize = 11,
+                                TextWrapping = TextWrapping.Wrap,
+                                Foreground = GetThemeBrush("SecondaryTextBrush")
+                            },
+                            new Button
+                            {
+                                Content = "Adicionar tarefa",
+                                Background = GetThemeBrush("AccentBrush"),
+                                Foreground = Brushes.White,
+                                BorderThickness = new Thickness(0),
+                                Padding = new Thickness(12, 8, 12, 8),
+                                Margin = new Thickness(0, 10, 0, 0),
+                                FontWeight = FontWeights.SemiBold,
+                                Cursor = Cursors.Hand,
+                                Tag = team
+                            }
+                        }
+                    }
+                };
+
+                if (emptyState.Child is StackPanel emptyStack && emptyStack.Children.OfType<Button>().FirstOrDefault() is Button addTaskButton)
+                {
+                    addTaskButton.Click += (s, e) => OpenCreateTaskDialog(team);
+                }
+
+                stack.Children.Add(emptyState);
+            }
+
             columnBorder.Child = stack;
             return columnBorder;
         }
@@ -1155,13 +1200,13 @@ namespace MeuApp
         private UIElement CreateCsdBoardView(TeamWorkspaceInfo team)
         {
             var wrap = new WrapPanel();
-            wrap.Children.Add(CreateCsdColumn("Certezas", team.CsdBoard.Certainties, Color.FromRgb(37, 99, 235)));
-            wrap.Children.Add(CreateCsdColumn("Suposicoes", team.CsdBoard.Assumptions, Color.FromRgb(245, 158, 11)));
-            wrap.Children.Add(CreateCsdColumn("Duvidas", team.CsdBoard.Doubts, Color.FromRgb(168, 85, 247)));
+            wrap.Children.Add(CreateCsdColumn(team, "Certezas", team.CsdBoard.Certainties, Color.FromRgb(37, 99, 235)));
+            wrap.Children.Add(CreateCsdColumn(team, "Suposicoes", team.CsdBoard.Assumptions, Color.FromRgb(245, 158, 11)));
+            wrap.Children.Add(CreateCsdColumn(team, "Duvidas", team.CsdBoard.Doubts, Color.FromRgb(168, 85, 247)));
             return wrap;
         }
 
-        private Border CreateCsdColumn(string title, List<string> notes, Color accent)
+        private Border CreateCsdColumn(TeamWorkspaceInfo team, string title, List<string> notes, Color accent)
         {
             var border = new Border
             {
@@ -1185,6 +1230,52 @@ namespace MeuApp
 
             foreach (var note in notes)
             {
+                var noteCard = new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(12),
+                    Margin = new Thickness(0, 10, 0, 0),
+                };
+
+                var noteGrid = new Grid();
+                noteGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                noteGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                noteGrid.Children.Add(new TextBlock
+                {
+                    Text = note,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 11,
+                    Margin = new Thickness(0, 0, 10, 0),
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+
+                var deleteButton = new Button
+                {
+                    Content = "Remover",
+                    Background = Brushes.Transparent,
+                    Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(6, 0, 0, 0),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Tag = Tuple.Create(team, title, note)
+                };
+                deleteButton.Click += DeleteCsdNote_Click;
+                Grid.SetColumn(deleteButton, 1);
+                noteGrid.Children.Add(deleteButton);
+
+                noteCard.Child = noteGrid;
+                stack.Children.Add(noteCard);
+            }
+
+            if (notes.Count == 0)
+            {
                 stack.Children.Add(new Border
                 {
                     Background = GetThemeBrush("MutedCardBackgroundBrush"),
@@ -1195,10 +1286,10 @@ namespace MeuApp
                     Margin = new Thickness(0, 10, 0, 0),
                     Child = new TextBlock
                     {
-                        Text = note,
+                        Text = "Nenhuma nota criada ainda. Use o botao 'Nova nota CSD' acima para adicionar manualmente.",
                         TextWrapping = TextWrapping.Wrap,
                         FontSize = 11,
-                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                        Foreground = GetThemeBrush("SecondaryTextBrush")
                     }
                 });
             }
@@ -1207,13 +1298,249 @@ namespace MeuApp
             return border;
         }
 
+        private void DeleteCsdNote_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, string, string> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var bucket = payload.Item2;
+            var note = payload.Item3;
+
+            List<string> notes = bucket switch
+            {
+                "Suposicoes" => team.CsdBoard.Assumptions,
+                "Duvidas" => team.CsdBoard.Doubts,
+                _ => team.CsdBoard.Certainties
+            };
+
+            if (MessageBox.Show("Remover esta nota da matriz CSD?", "Matriz CSD", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            notes.Remove(note);
+            AddTeamNotification(team, $"Nota removida da matriz CSD em {bucket.ToLowerInvariant()}.");
+            SaveTeamWorkspace(team);
+            RenderTeamWorkspace();
+        }
+
         private UIElement CreateTeamWorkspaceSidebar(TeamWorkspaceInfo team)
         {
             var stack = new StackPanel();
+            stack.Children.Add(CreateProjectManagementSection(team));
+            stack.Children.Add(CreateTeamMilestonesSection(team));
+            stack.Children.Add(CreateProjectChatSection(team));
             stack.Children.Add(CreateTeamMembersSection(team));
             stack.Children.Add(CreateTeamAssetsSection(team));
             stack.Children.Add(CreateTeamNotificationsSection(team));
             return stack;
+        }
+
+        private Border CreateProjectManagementSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Gestao do projeto", "Defina o andamento geral e o prazo principal da equipe.");
+            var content = (StackPanel)border.Child;
+
+            content.Children.Add(CreateStaticTeamChip($"Status: {team.ProjectStatus}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+
+            content.Children.Add(new TextBlock
+            {
+                Text = $"Progresso atual: {CalculateTeamProgressPercentage(team)}%",
+                FontSize = 11,
+                Margin = new Thickness(0, 12, 0, 6),
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            content.Children.Add(new ProgressBar
+            {
+                Minimum = 0,
+                Maximum = 100,
+                Value = CalculateTeamProgressPercentage(team),
+                Height = 12,
+                Margin = new Thickness(0, 0, 0, 10),
+                Foreground = GetThemeBrush("AccentBrush"),
+                Background = GetThemeBrush("MutedCardBackgroundBrush")
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = $"Prazo principal: {GetProjectDeadlineText(team)}",
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            content.Children.Add(CreateSidebarButton("Atualizar progresso e prazo", Color.FromRgb(14, 165, 233), (s, e) => OpenProjectManagementDialog(team)));
+            return border;
+        }
+
+        private Border CreateProjectChatSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Chat do projeto", "Converse com todos os integrantes no mesmo fluxo do projeto.");
+            var content = (StackPanel)border.Child;
+
+            if (team.ChatMessages.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Nenhuma mensagem enviada ainda. Abra o chat do projeto para iniciar a conversa em grupo.",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            else
+            {
+                foreach (var message in team.ChatMessages.OrderByDescending(item => item.SentAt).Take(3))
+                {
+                    content.Children.Add(new Border
+                    {
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Padding = new Thickness(12),
+                        Margin = new Thickness(0, 10, 0, 0),
+                        Child = new StackPanel
+                        {
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text = message.SenderName,
+                                    FontSize = 11,
+                                    FontWeight = FontWeights.SemiBold,
+                                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                                },
+                                new TextBlock
+                                {
+                                    Text = message.Content,
+                                    FontSize = 11,
+                                    Margin = new Thickness(0, 6, 0, 0),
+                                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                    TextWrapping = TextWrapping.Wrap
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            content.Children.Add(CreateSidebarButton("Abrir chat do projeto", Color.FromRgb(37, 99, 235), (s, e) => OpenProjectChatDialog(team)));
+            return border;
+        }
+
+        private Border CreateTeamMilestonesSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Plano de entregas", "Marcos, checkpoints e pequenas entregas para a equipe acompanhar.");
+            var content = (StackPanel)border.Child;
+
+            content.Children.Add(CreateSidebarButton("Adicionar entrega", Color.FromRgb(124, 58, 237), (s, e) => OpenAddMilestoneDialog(team)));
+
+            if (team.Milestones.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Nenhuma entrega criada ainda. Use o botao acima para adicionar manualmente.",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = GetThemeBrush("SecondaryTextBrush")
+                });
+                return border;
+            }
+
+            foreach (var milestone in team.Milestones.OrderBy(item => item.DueDate ?? DateTime.MaxValue).Take(5))
+            {
+                var isDone = string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase);
+                var statusColor = isDone ? Color.FromRgb(16, 185, 129) : Color.FromRgb(245, 158, 11);
+
+                var row = new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(12),
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+
+                var rowStack = new StackPanel();
+                rowStack.Children.Add(new TextBlock
+                {
+                    Text = milestone.Title,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+
+                if (!string.IsNullOrWhiteSpace(milestone.Notes))
+                {
+                    rowStack.Children.Add(new TextBlock
+                    {
+                        Text = milestone.Notes,
+                        FontSize = 11,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        TextWrapping = TextWrapping.Wrap,
+                        Foreground = GetThemeBrush("SecondaryTextBrush")
+                    });
+                }
+
+                var badges = new WrapPanel
+                {
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+                badges.Children.Add(CreateStaticTeamChip(milestone.Status, new SolidColorBrush(statusColor), Brushes.White));
+                if (milestone.DueDate.HasValue)
+                {
+                    badges.Children.Add(CreateStaticTeamChip($"Prazo {FormatRelativeDate(milestone.DueDate.Value)}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                }
+                rowStack.Children.Add(badges);
+
+                var actions = new WrapPanel
+                {
+                    Margin = new Thickness(0, 8, 0, 0)
+                };
+
+                var toggleButton = new Button
+                {
+                    Content = isDone ? "Reabrir" : "Concluir",
+                    Background = Brushes.Transparent,
+                    Foreground = GetThemeBrush("AccentBrush"),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(0),
+                    FontWeight = FontWeights.SemiBold,
+                    Tag = Tuple.Create(team, milestone)
+                };
+                toggleButton.Click += ToggleMilestoneStatus_Click;
+                actions.Children.Add(toggleButton);
+
+                var removeButton = new Button
+                {
+                    Content = "Remover",
+                    Background = Brushes.Transparent,
+                    Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(12, 0, 0, 0),
+                    FontWeight = FontWeights.SemiBold,
+                    Tag = Tuple.Create(team, milestone)
+                };
+                removeButton.Click += DeleteMilestone_Click;
+                actions.Children.Add(removeButton);
+
+                rowStack.Children.Add(actions);
+                row.Child = rowStack;
+                content.Children.Add(row);
+            }
+
+            return border;
         }
 
         private Border CreateTeamMembersSection(TeamWorkspaceInfo team)
@@ -1396,13 +1723,14 @@ namespace MeuApp
 
         private Border CreateTeamListItem(TeamWorkspaceInfo team)
         {
+            var progress = CalculateTeamProgressPercentage(team);
             var card = new Border
             {
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(16),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(18),
                 Margin = new Thickness(0, 0, 0, 12)
             };
 
@@ -1414,8 +1742,8 @@ namespace MeuApp
             textStack.Children.Add(new TextBlock
             {
                 Text = team.TeamName,
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
             textStack.Children.Add(new TextBlock
@@ -1433,7 +1761,21 @@ namespace MeuApp
                 Margin = new Thickness(0, 6, 0, 0),
                 Foreground = GetThemeBrush("TertiaryTextBrush")
             });
+            var metaWrap = new WrapPanel
+            {
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+            metaWrap.Children.Add(CreateStaticTeamChip($"Codigo {team.TeamId}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            metaWrap.Children.Add(CreateStaticTeamChip($"Progresso {progress}%", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            metaWrap.Children.Add(CreateStaticTeamChip($"Proximo prazo {GetNextTeamDeadlineLabel(team)}", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            textStack.Children.Add(metaWrap);
             layout.Children.Add(textStack);
+
+            var actionWrap = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
             var openButton = new Button
             {
@@ -1442,27 +1784,46 @@ namespace MeuApp
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(16, 10, 16, 10),
-                Margin = new Thickness(16, 0, 0, 0),
+                Margin = new Thickness(16, 0, 0, 10),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand,
                 VerticalAlignment = VerticalAlignment.Center,
                 Tag = team
             };
             openButton.Click += OpenTeamWorkspace_Click;
-            Grid.SetColumn(openButton, 1);
-            layout.Children.Add(openButton);
+
+            var copyButton = new Button
+            {
+                Content = "Copiar codigo",
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 10, 14, 10),
+                Margin = new Thickness(16, 0, 0, 10),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center,
+                Tag = team
+            };
+            copyButton.Click += CopyTeamCode_Click;
+
+            actionWrap.Children.Add(openButton);
+            actionWrap.Children.Add(copyButton);
+
+            Grid.SetColumn(actionWrap, 1);
+            layout.Children.Add(actionWrap);
 
             card.Child = layout;
             return card;
         }
 
-        private void SaveTeamWorkspace(TeamWorkspaceInfo team)
+        private void SaveTeamWorkspace(TeamWorkspaceInfo team, bool persistInBackground = true)
         {
             EnsureTeamWorkspaceDefaults(team);
 
             var existingIndex = _teamWorkspaces.FindIndex(item =>
-                string.Equals(item.ClassId, team.ClassId, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(item.TeamName, team.TeamName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(item.TeamId, team.TeamId, StringComparison.OrdinalIgnoreCase));
 
             if (existingIndex >= 0)
             {
@@ -1474,6 +1835,46 @@ namespace MeuApp
             }
 
             RenderTeamsList();
+
+            if (persistInBackground)
+            {
+                _ = Task.Run(async () => await SaveTeamToFirestoreAsync(team));
+            }
+        }
+
+        /// <summary>
+        /// Salva a equipe no Firebase Firestore
+        /// </summary>
+        private async Task<TeamOperationResult> SaveTeamToFirestoreAsync(TeamWorkspaceInfo team)
+        {
+            try
+            {
+                if (_teamService == null)
+                {
+                    DebugHelper.WriteLine("[SaveTeamToFirebase] TeamService não inicializado");
+                    return TeamOperationResult.Fail("TeamService nao inicializado.");
+                }
+
+                DebugHelper.WriteLine($"[SaveTeamToFirebase] Salvando equipe '{team.TeamName}' no Firebase...");
+
+                var result = await _teamService.SaveTeamAsync(team);
+                if (!result.Success)
+                {
+                    DebugHelper.WriteLine($"[SaveTeamToFirebase] Erro ao salvar: {result.ErrorMessage}");
+                }
+                else
+                {
+                    DebugHelper.WriteLine($"[SaveTeamToFirebase] Equipe salva com sucesso!");
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[SaveTeamToFirebase ERROR] {ex.Message}");
+                DebugHelper.WriteLine($"[SaveTeamToFirebase ERROR] Stack: {ex.StackTrace}");
+                return TeamOperationResult.Fail(ex.Message);
+            }
         }
 
         private void UpdateTeamsViewState()
@@ -1506,7 +1907,542 @@ namespace MeuApp
             PortfolioLinkTextBox.Text = profile.PortfolioLink;
             LinkedInLinkTextBox.Text = profile.LinkedInLink;
             SetProgrammingLanguages(profile.ProgrammingLanguages);
+            RefreshAvatarUi(profile);
             ProfessionalProfileStatusText.Text = string.Empty;
+        }
+
+        private void RefreshAvatarUi(UserProfile profile)
+        {
+            RenderProfileAvatarPreview(profile);
+            RenderSidebarAvatarPreview(profile);
+
+            var hasAvatar = HasCustomAvatar(profile);
+            AvatarActionButton.Content = hasAvatar ? "Editar avatar" : "Criar seu ícone";
+            AvatarEditorHintText.Text = hasAvatar
+                ? "Seu avatar já está configurado. Clique para ajustar corpo, cabelo ou acessório."
+                : "Sem avatar ainda. Clique no + ou em Criar seu ícone para montar sua identidade visual.";
+        }
+
+        private void RenderProfileAvatarPreview(UserProfile profile)
+        {
+            ProfileAvatarPreviewHost.Children.Clear();
+            ProfileAvatarPreviewHost.Children.Add(CreateProfileAvatarVisual(profile));
+        }
+
+        private void RenderSidebarAvatarPreview(UserProfile profile)
+        {
+            SidebarAvatarHost.Children.Clear();
+            SidebarAvatarHost.Children.Add(CreateSidebarAvatarVisual(profile));
+        }
+
+        private bool HasCustomAvatar(UserProfile? profile)
+        {
+            return profile != null
+                && !string.IsNullOrWhiteSpace(profile.AvatarBody)
+                && !string.IsNullOrWhiteSpace(profile.AvatarHair);
+        }
+
+        private UIElement CreateProfileAvatarVisual(UserProfile? profile)
+        {
+            if (!HasCustomAvatar(profile))
+            {
+                var placeholder = new Border
+                {
+                    Width = 132,
+                    Height = 132,
+                    CornerRadius = new CornerRadius(22),
+                    Background = GetThemeBrush("AccentMutedBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1)
+                };
+
+                var content = new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                content.Children.Add(new TextBlock
+                {
+                    Text = "+",
+                    FontSize = 36,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Foreground = GetThemeBrush("AccentBrush")
+                });
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Crie seu ícone",
+                    Margin = new Thickness(0, 4, 0, 0),
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+
+                placeholder.Child = content;
+                return placeholder;
+            }
+
+            return CreateAvatarCompositeVisual(profile!, 132, new CornerRadius(22), showBorder: true);
+        }
+
+        private UIElement CreateSidebarAvatarVisual(UserProfile? profile)
+        {
+            if (HasCustomAvatar(profile))
+            {
+                return CreateAvatarCompositeVisual(profile!, 40, new CornerRadius(20), showBorder: false);
+            }
+
+            var initial = (profile?.Name ?? "U")
+                .Trim()
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            var letter = string.IsNullOrWhiteSpace(initial) ? "U" : initial.Substring(0, 1).ToUpperInvariant();
+
+            var grid = new Grid
+            {
+                Width = 40,
+                Height = 40
+            };
+            grid.Children.Add(new Ellipse
+            {
+                Fill = GetThemeBrush("AccentBrush"),
+                Width = 40,
+                Height = 40
+            });
+            grid.Children.Add(new TextBlock
+            {
+                Text = letter,
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Brushes.White
+            });
+
+            return grid;
+        }
+
+        private Border CreateAvatarCompositeVisual(UserProfile profile, double size, CornerRadius cornerRadius, bool showBorder)
+        {
+            var container = new Border
+            {
+                Width = size,
+                Height = size,
+                CornerRadius = cornerRadius,
+                Background = new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = showBorder ? GetThemeBrush("CardBorderBrush") : Brushes.Transparent,
+                BorderThickness = showBorder ? new Thickness(1) : new Thickness(0),
+                ClipToBounds = true
+            };
+
+            var viewbox = new Viewbox
+            {
+                Stretch = Stretch.Uniform
+            };
+
+            var layers = new Grid
+            {
+                Width = 256,
+                Height = 256,
+                ClipToBounds = true
+            };
+
+            AddAvatarLayer(layers, "Chars", profile.AvatarBody);
+            AddAvatarLayer(layers, "Hairs", profile.AvatarHair);
+            AddAvatarLayer(layers, "Acessory", profile.AvatarAccessory);
+
+            viewbox.Child = layers;
+            container.Child = viewbox;
+            return container;
+        }
+
+        private void AddAvatarLayer(Panel host, string folder, string option)
+        {
+            if (string.IsNullOrWhiteSpace(option))
+            {
+                return;
+            }
+
+            var source = TryCreateAvatarImageSource(folder, option);
+            if (source == null)
+            {
+                return;
+            }
+
+            host.Children.Add(new Image
+            {
+                Source = source,
+                Stretch = Stretch.Fill,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                SnapsToDevicePixels = true
+            });
+        }
+
+        private ImageSource? TryCreateAvatarImageSource(string folder, string option)
+        {
+            try
+            {
+                return new BitmapImage(new Uri($"pack://application:,,,/img/avatar/{folder}/{option}.png", UriKind.Absolute));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private Button CreateAvatarOptionButton(string title, string? folder, string option, bool isSelected, RoutedEventHandler onClick)
+        {
+            var button = new Button
+            {
+                Width = 118,
+                Height = 138,
+                Margin = new Thickness(0, 0, 12, 12),
+                Padding = new Thickness(10),
+                Background = isSelected ? GetThemeBrush("AccentMutedBrush") : GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(isSelected ? 2 : 1),
+                Cursor = Cursors.Hand,
+                Tag = option
+            };
+
+            var stack = new StackPanel();
+            var previewBorder = new Border
+            {
+                Width = 86,
+                Height = 86,
+                CornerRadius = new CornerRadius(14),
+                Background = Brushes.White,
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            if (string.IsNullOrWhiteSpace(folder))
+            {
+                previewBorder.Child = new TextBlock
+                {
+                    Text = "Sem\nacessório",
+                    TextAlignment = TextAlignment.Center,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+            }
+            else
+            {
+                var previewGrid = new Grid();
+                var source = TryCreateAvatarImageSource(folder, option);
+                if (source != null)
+                {
+                    previewGrid.Children.Add(new Image
+                    {
+                        Source = source,
+                        Stretch = Stretch.Uniform,
+                        Margin = new Thickness(6)
+                    });
+                }
+                previewBorder.Child = previewGrid;
+            }
+
+            stack.Children.Add(previewBorder);
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                Margin = new Thickness(0, 10, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            button.Content = stack;
+            button.Click += onClick;
+            return button;
+        }
+
+        private void OpenAvatarEditor_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProfile == null)
+            {
+                return;
+            }
+
+            var selectedBody = string.IsNullOrWhiteSpace(_currentProfile.AvatarBody) ? AvatarBodyOptions.First() : _currentProfile.AvatarBody;
+            var selectedHair = string.IsNullOrWhiteSpace(_currentProfile.AvatarHair) ? AvatarHairOptions.First() : _currentProfile.AvatarHair;
+            var selectedAccessory = _currentProfile.AvatarAccessory ?? string.Empty;
+
+            var dialog = new MetroWindow
+            {
+                Title = "Criador de avatar",
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Width = 940,
+                Height = 720,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                Background = GetThemeBrush("WindowBackgroundBrush"),
+                GlowBrush = (Brush)GlowBrush,
+                BorderBrush = GetThemeBrush("CardBorderBrush")
+            };
+
+            var root = new Grid
+            {
+                Margin = new Thickness(24)
+            };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 0, 18)
+            };
+            header.Children.Add(new TextBlock
+            {
+                Text = "Monte seu avatar acadêmico",
+                FontSize = 24,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = "Escolha um corpo, um cabelo e, se quiser, um acessório. Corpo e cabelo são obrigatórios.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 13,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            Grid.SetRow(header, 0);
+            root.Children.Add(header);
+
+            var contentGrid = new Grid();
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var previewCard = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(22),
+                Margin = new Thickness(0, 0, 20, 0)
+            };
+            var previewStack = new StackPanel();
+            previewStack.Children.Add(new TextBlock
+            {
+                Text = "Prévia",
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            previewStack.Children.Add(new TextBlock
+            {
+                Text = "Seu ícone será mostrado no perfil e na navegação lateral.",
+                Margin = new Thickness(0, 6, 0, 18),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var previewHost = new Grid
+            {
+                Width = 220,
+                Height = 220,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            var selectionSummary = new TextBlock
+            {
+                Margin = new Thickness(0, 16, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            previewStack.Children.Add(previewHost);
+            previewStack.Children.Add(selectionSummary);
+            previewCard.Child = previewStack;
+            Grid.SetColumn(previewCard, 0);
+            contentGrid.Children.Add(previewCard);
+
+            var selectorsScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            var selectorsStack = new StackPanel();
+
+            var bodyPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var hairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var accessoryPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Corpo", "Obrigatório · use os tons de pele da layer principal."));
+            selectorsStack.Children.Add(bodyPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelo", "Obrigatório · escolha uma das seis variações disponíveis."));
+            selectorsStack.Children.Add(hairPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Acessório", "Opcional · você pode deixar sem acessório."));
+            selectorsStack.Children.Add(accessoryPanel);
+
+            selectorsScroll.Content = selectorsStack;
+            Grid.SetColumn(selectorsScroll, 1);
+            contentGrid.Children.Add(selectorsScroll);
+
+            void RenderEditorPreview()
+            {
+                previewHost.Children.Clear();
+                previewHost.Children.Add(CreateAvatarCompositeVisual(new UserProfile
+                {
+                    AvatarBody = selectedBody,
+                    AvatarHair = selectedHair,
+                    AvatarAccessory = selectedAccessory
+                }, 220, new CornerRadius(28), showBorder: true));
+
+                selectionSummary.Text = string.IsNullOrWhiteSpace(selectedAccessory)
+                    ? $"Corpo {selectedBody}, cabelo {selectedHair} e sem acessório."
+                    : $"Corpo {selectedBody}, cabelo {selectedHair} e acessório {selectedAccessory}.";
+            }
+
+            void RenderEditorOptions()
+            {
+                bodyPanel.Children.Clear();
+                foreach (var option in AvatarBodyOptions)
+                {
+                    var currentOption = option;
+                    bodyPanel.Children.Add(CreateAvatarOptionButton($"Tom {currentOption}", "Chars", currentOption, selectedBody == currentOption, (buttonSender, buttonArgs) =>
+                    {
+                        selectedBody = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
+                hairPanel.Children.Clear();
+                foreach (var option in AvatarHairOptions)
+                {
+                    var currentOption = option;
+                    hairPanel.Children.Add(CreateAvatarOptionButton($"Cabelo {currentOption}", "Hairs", currentOption, selectedHair == currentOption, (buttonSender, buttonArgs) =>
+                    {
+                        selectedHair = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
+                accessoryPanel.Children.Clear();
+                accessoryPanel.Children.Add(CreateAvatarOptionButton("Sem acessório", null, string.Empty, string.IsNullOrWhiteSpace(selectedAccessory), (buttonSender, buttonArgs) =>
+                {
+                    selectedAccessory = string.Empty;
+                    RenderEditorOptions();
+                    RenderEditorPreview();
+                }));
+
+                foreach (var option in AvatarAccessoryOptions)
+                {
+                    var currentOption = option;
+                    accessoryPanel.Children.Add(CreateAvatarOptionButton($"Acessório {currentOption}", "Acessory", currentOption, selectedAccessory == currentOption, (buttonSender, buttonArgs) =>
+                    {
+                        selectedAccessory = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+            }
+
+            RenderEditorOptions();
+            RenderEditorPreview();
+
+            Grid.SetRow(contentGrid, 1);
+            root.Children.Add(contentGrid);
+
+            var footer = new Grid
+            {
+                Margin = new Thickness(0, 20, 0, 0)
+            };
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var footerHint = new TextBlock
+            {
+                Text = "Ao aplicar, a prévia do perfil é atualizada. Depois use Salvar perfil profissional para persistir no Firebase.",
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 16, 0)
+            };
+            Grid.SetColumn(footerHint, 0);
+            footer.Children.Add(footerHint);
+
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                Width = 120,
+                Height = 42,
+                Margin = new Thickness(0, 0, 12, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            cancelButton.Click += (buttonSender, buttonArgs) => dialog.Close();
+            Grid.SetColumn(cancelButton, 1);
+            footer.Children.Add(cancelButton);
+
+            var applyButton = new Button
+            {
+                Content = "Aplicar avatar",
+                Width = 150,
+                Height = 42,
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+            applyButton.Click += (buttonSender, buttonArgs) =>
+            {
+                _currentProfile.AvatarBody = selectedBody;
+                _currentProfile.AvatarHair = selectedHair;
+                _currentProfile.AvatarAccessory = selectedAccessory;
+                RefreshAvatarUi(_currentProfile);
+                ProfessionalProfileStatusText.Text = "Avatar atualizado. Clique em Salvar perfil profissional para persistir.";
+                dialog.Close();
+            };
+            Grid.SetColumn(applyButton, 2);
+            footer.Children.Add(applyButton);
+
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = root;
+            dialog.ShowDialog();
+        }
+
+        private StackPanel CreateAvatarSectionHeader(string title, string description)
+        {
+            var section = new StackPanel();
+            section.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            section.Children.Add(new TextBlock
+            {
+                Text = description,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            return section;
         }
 
         private void SetProgrammingLanguages(string serializedLanguages)
@@ -1880,7 +2816,7 @@ namespace MeuApp
             TeamCreationStatusText.Text = string.Empty;
         }
 
-        private void CreateTeam_Click(object sender, RoutedEventArgs e)
+        private async void CreateTeam_Click(object sender, RoutedEventArgs e)
         {
             EnsureCurrentUserInTeamDraft();
 
@@ -1906,10 +2842,17 @@ namespace MeuApp
 
             var teamWorkspace = new TeamWorkspaceInfo
             {
+                TeamId = TeamService.GenerateTeamId(classId, teamName),
                 TeamName = teamName,
                 Course = course,
                 ClassName = className,
                 ClassId = classId,
+                CreatedBy = GetCurrentUserId(),
+                CreatedAt = DateTime.Now,
+                UpdatedAt = DateTime.Now,
+                ProjectProgress = 0,
+                ProjectDeadline = null,
+                ProjectStatus = "Planejamento",
                 Members = _draftTeamMembers
                     .GroupBy(item => item.UserId, StringComparer.OrdinalIgnoreCase)
                     .Select(group => group.First())
@@ -1919,21 +2862,35 @@ namespace MeuApp
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(item => item)
                     .ToList(),
+                Milestones = CreateDefaultMilestones(),
                 Assets = new List<TeamAssetInfo>(),
                 TaskColumns = CreateDefaultTeamColumns(),
                 Notifications = new List<TeamNotificationInfo>(),
+                ChatMessages = new List<TeamChatMessageInfo>(),
                 CsdBoard = CreateDefaultCsdBoard()
             };
 
-            SaveTeamWorkspace(teamWorkspace);
+            CreateTeamButton.IsEnabled = false;
+            TeamCreationStatusText.Text = "Salvando equipe no Firebase...";
+
+            var saveResult = await SaveTeamToFirestoreAsync(teamWorkspace);
+            if (!saveResult.Success)
+            {
+                TeamCreationStatusText.Text = $"Erro ao salvar equipe: {saveResult.ErrorMessage}";
+                CreateTeamButton.IsEnabled = true;
+                return;
+            }
+
+            SaveTeamWorkspace(teamWorkspace, persistInBackground: false);
             _activeTeamWorkspace = null;
             _teamEntryMode = TeamEntryMode.None;
-            TeamCreationStatusText.Text = "Equipe criada e adicionada na lista. Abra a equipe para ver os detalhes.";
+            TeamCreationStatusText.Text = $"Equipe salva com sucesso. Codigo da equipe: {teamWorkspace.TeamId}";
             TeamJoinStatusText.Text = string.Empty;
             UpdateTeamsViewState();
+            CreateTeamButton.IsEnabled = true;
         }
 
-        private void JoinTeamByCode_Click(object sender, RoutedEventArgs e)
+        private async void JoinTeamByCode_Click(object sender, RoutedEventArgs e)
         {
             var joinCode = NormalizeTeamValue(TeamJoinCodeTextBox.Text);
             if (string.IsNullOrWhiteSpace(joinCode))
@@ -1942,51 +2899,22 @@ namespace MeuApp
                 return;
             }
 
-            EnsureCurrentUserInTeamDraft();
-
-            var teamWorkspace = new TeamWorkspaceInfo
+            if (_teamService == null)
             {
-                TeamName = $"Equipe {joinCode.ToUpperInvariant()}",
-                Course = NormalizeTeamValue(TeamCourseComboBox.Text) is var course && !string.IsNullOrWhiteSpace(course)
-                    ? course
-                    : _currentProfile?.Course ?? "Projeto Integrador",
-                ClassName = "Equipe compartilhada",
-                ClassId = joinCode.ToUpperInvariant(),
-                Members = _draftTeamMembers
-                    .Concat(new[]
-                    {
-                        new UserInfo
-                        {
-                            UserId = "team-owner",
-                            Name = "Coordenador da equipe",
-                            Email = "coordenador@obsseract.local",
-                            Registration = "COORD-001",
-                            Course = NormalizeTeamValue(TeamCourseComboBox.Text)
-                        },
-                        new UserInfo
-                        {
-                            UserId = "guest-member",
-                            Name = "Integrante convidado",
-                            Email = "integrante@obsseract.local",
-                            Registration = "MEMB-002",
-                            Course = NormalizeTeamValue(TeamCourseComboBox.Text)
-                        }
-                    })
-                    .GroupBy(item => item.UserId, StringComparer.OrdinalIgnoreCase)
-                    .Select(group => group.First())
-                    .OrderBy(item => item.Name)
-                    .ToList(),
-                Ucs = (_draftTeamUcs.Count > 0 ? _draftTeamUcs : KnownTeamUcs.Take(2).ToList())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(item => item)
-                    .ToList(),
-                Assets = new List<TeamAssetInfo>(),
-                TaskColumns = CreateDefaultTeamColumns(),
-                Notifications = new List<TeamNotificationInfo>(),
-                CsdBoard = CreateDefaultCsdBoard()
-            };
+                TeamJoinStatusText.Text = "Servico de equipes nao inicializado.";
+                return;
+            }
 
-            SaveTeamWorkspace(teamWorkspace);
+            TeamJoinStatusText.Text = "Buscando equipe no Firebase...";
+
+            var joinResult = await _teamService.JoinTeamByCodeAsync(joinCode);
+            if (!joinResult.Success || joinResult.Team == null)
+            {
+                TeamJoinStatusText.Text = $"Erro ao ingressar: {joinResult.ErrorMessage}";
+                return;
+            }
+
+            SaveTeamWorkspace(joinResult.Team, persistInBackground: false);
             _activeTeamWorkspace = null;
             TeamJoinCodeTextBox.Text = string.Empty;
             TeamJoinStatusText.Text = "Equipe vinculada com sucesso. Abra a equipe na lista para ver os detalhes.";
@@ -2146,41 +3074,91 @@ namespace MeuApp
             var dialog = new Window
             {
                 Title = existingCard == null ? "Nova tarefa" : "Editar tarefa",
-                Width = 520,
-                Height = 620,
+                Width = 560,
+                Height = 720,
+                MinHeight = 680,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
+                Background = GetThemeBrush("SurfaceBrush")
             };
 
-            var root = new StackPanel { Margin = new Thickness(20) };
+            var root = new Grid { Margin = new Thickness(20) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+            header.Children.Add(new TextBlock
+            {
+                Text = existingCard == null ? "Criar nova tarefa" : "Editar tarefa da equipe",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = "Preencha os dados abaixo e confirme para adicionar a tarefa ao board.",
+                FontSize = 12,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            root.Children.Add(header);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var form = new StackPanel();
+            scrollViewer.Content = form;
 
             var titleBox = new TextBox
             {
                 Text = existingCard?.Title ?? string.Empty,
-                Height = 40,
+                Height = 44,
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var descriptionBox = new TextBox
             {
                 Text = existingCard?.Description ?? string.Empty,
-                Height = 90,
+                Height = 110,
+                Padding = new Thickness(12),
                 TextWrapping = TextWrapping.Wrap,
                 AcceptsReturn = true,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var priorityBox = new ComboBox
             {
                 ItemsSource = new[] { "Alta", "Media", "Baixa" },
                 SelectedItem = existingCard?.Priority ?? "Media",
-                Height = 40,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var dueDatePicker = new DatePicker
             {
                 SelectedDate = existingCard?.DueDate,
-                Height = 40,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var columnBox = new ComboBox
@@ -2188,13 +3166,20 @@ namespace MeuApp
                 ItemsSource = team.TaskColumns,
                 DisplayMemberPath = "Title",
                 SelectedItem = currentColumn ?? team.TaskColumns.FirstOrDefault(),
-                Height = 40,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var membersBox = new ListBox
             {
                 SelectionMode = SelectionMode.Multiple,
-                Height = 160,
+                Height = 180,
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             foreach (var member in team.Members.OrderBy(item => item.Name))
@@ -2212,39 +3197,51 @@ namespace MeuApp
                 membersBox.Items.Add(item);
             }
 
-            root.Children.Add(new TextBlock { Text = "Titulo", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(titleBox);
-            root.Children.Add(new TextBlock { Text = "Descricao", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(descriptionBox);
-            root.Children.Add(new TextBlock { Text = "Prioridade", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(priorityBox);
-            root.Children.Add(new TextBlock { Text = "Prazo", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(dueDatePicker);
-            root.Children.Add(new TextBlock { Text = "Coluna", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(columnBox);
-            root.Children.Add(new TextBlock { Text = "Atribuir para", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(membersBox);
+            form.Children.Add(CreateDialogFieldLabel("Titulo da tarefa"));
+            form.Children.Add(titleBox);
+            form.Children.Add(CreateDialogFieldLabel("Descricao"));
+            form.Children.Add(descriptionBox);
+            form.Children.Add(CreateDialogFieldLabel("Prioridade"));
+            form.Children.Add(priorityBox);
+            form.Children.Add(CreateDialogFieldLabel("Prazo"));
+            form.Children.Add(dueDatePicker);
+            form.Children.Add(CreateDialogFieldLabel("Coluna"));
+            form.Children.Add(columnBox);
+            form.Children.Add(CreateDialogFieldLabel("Atribuir para"));
+            form.Children.Add(membersBox);
 
-            var footer = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 14, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
             var cancelButton = new Button
             {
                 Content = "Cancelar",
                 Width = 110,
                 Height = 40,
-                Margin = new Thickness(0, 0, 10, 0)
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush")
             };
             var saveButton = new Button
             {
-                Content = existingCard == null ? "Criar" : "Salvar",
-                Width = 110,
+                Content = existingCard == null ? "Confirmar adicao" : "Confirmar alteracao",
+                Width = 160,
                 Height = 40,
                 Background = GetThemeBrush("AccentBrush"),
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0)
             };
-            footer.Children.Add(cancelButton);
-            footer.Children.Add(saveButton);
-            root.Children.Add(footer);
+            footerButtons.Children.Add(cancelButton);
+            footerButtons.Children.Add(saveButton);
+            footer.Child = footerButtons;
             dialog.Content = root;
 
             TeamTaskCardInfo? resultCard = null;
@@ -2294,52 +3291,111 @@ namespace MeuApp
             var dialog = new Window
             {
                 Title = "Nova nota CSD",
-                Width = 420,
-                Height = 300,
+                Width = 500,
+                Height = 420,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
+                Background = GetThemeBrush("SurfaceBrush")
             };
 
-            var root = new StackPanel { Margin = new Thickness(20) };
+            var root = new Grid { Margin = new Thickness(20) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+            header.Children.Add(new TextBlock
+            {
+                Text = "Adicionar nota ao quadro CSD",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = "Escolha a categoria e confirme a nova nota do projeto.",
+                FontSize = 12,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            root.Children.Add(header);
+
+            var form = new StackPanel();
+            Grid.SetRow(form, 1);
+            root.Children.Add(form);
+
             var bucketBox = new ComboBox
             {
                 ItemsSource = new[] { "Certezas", "Suposicoes", "Duvidas" },
                 SelectedIndex = 0,
-                Height = 40,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var noteBox = new TextBox
             {
-                Height = 120,
+                Height = 180,
+                Padding = new Thickness(12),
                 TextWrapping = TextWrapping.Wrap,
                 AcceptsReturn = true,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
                 Margin = new Thickness(0, 6, 0, 14)
             };
-            root.Children.Add(new TextBlock { Text = "Categoria", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(bucketBox);
-            root.Children.Add(new TextBlock { Text = "Nota", FontWeight = FontWeights.SemiBold });
-            root.Children.Add(noteBox);
 
+            form.Children.Add(CreateDialogFieldLabel("Categoria"));
+            form.Children.Add(bucketBox);
+            form.Children.Add(CreateDialogFieldLabel("Conteudo da nota"));
+            form.Children.Add(noteBox);
+
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 14, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            Grid.SetRow(footer, 2);
+            var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                Width = 110,
+                Height = 40,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush")
+            };
             var addButton = new Button
             {
-                Content = "Adicionar",
-                Width = 120,
+                Content = "Confirmar adicao",
+                Width = 160,
                 Height = 40,
-                HorizontalAlignment = HorizontalAlignment.Right,
                 Background = GetThemeBrush("AccentBrush"),
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0)
             };
-            root.Children.Add(addButton);
+            footerButtons.Children.Add(cancelButton);
+            footerButtons.Children.Add(addButton);
+            footer.Child = footerButtons;
+            root.Children.Add(footer);
             dialog.Content = root;
+
+            cancelButton.Click += (s, e) => dialog.Close();
 
             addButton.Click += (s, e) =>
             {
                 var note = noteBox.Text.Trim();
                 if (string.IsNullOrWhiteSpace(note))
                 {
+                    MessageBox.Show("Digite a nota antes de confirmar.", "CSD", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -2364,6 +3420,17 @@ namespace MeuApp
             };
 
             dialog.ShowDialog();
+        }
+
+        private TextBlock CreateDialogFieldLabel(string text)
+        {
+            return new TextBlock
+            {
+                Text = text,
+                FontWeight = FontWeights.SemiBold,
+                FontSize = 12,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            };
         }
 
         private FrameworkElementFactory CreateTeamMemberSearchItemTemplate()
@@ -2709,10 +3776,16 @@ namespace MeuApp
             RenderTeamWorkspace();
         }
 
-        private void DeleteActiveTeamWorkspace(object? sender, RoutedEventArgs e)
+        private async void DeleteActiveTeamWorkspace(object? sender, RoutedEventArgs e)
         {
             if (_activeTeamWorkspace == null)
             {
+                return;
+            }
+
+            if (!IsCurrentUserTeamCreator(_activeTeamWorkspace))
+            {
+                MessageBox.Show("Apenas quem criou a equipe pode apagá-la.", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -2721,8 +3794,17 @@ namespace MeuApp
                 return;
             }
 
-            _teamWorkspaces.RemoveAll(team => string.Equals(team.TeamName, _activeTeamWorkspace.TeamName, StringComparison.OrdinalIgnoreCase) &&
-                                              string.Equals(team.ClassId, _activeTeamWorkspace.ClassId, StringComparison.OrdinalIgnoreCase));
+            if (_teamService != null)
+            {
+                var deleteResult = await _teamService.DeleteTeamAsync(_activeTeamWorkspace);
+                if (!deleteResult.Success)
+                {
+                    MessageBox.Show($"Nao foi possivel apagar a equipe.\n\n{deleteResult.ErrorMessage}", "Equipe", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+
+            _teamWorkspaces.RemoveAll(team => string.Equals(team.TeamId, _activeTeamWorkspace.TeamId, StringComparison.OrdinalIgnoreCase));
             _activeTeamWorkspace = null;
             TeamWorkspaceHost.Content = null;
             RenderTeamsList();
@@ -2760,6 +3842,475 @@ namespace MeuApp
             AddTeamNotification(_activeTeamWorkspace, $"{dialog.FileNames.Length} arquivo(s) adicionado(s) em {category}.");
             SaveTeamWorkspace(_activeTeamWorkspace);
             RenderTeamWorkspace();
+        }
+
+        private void CopyTeamCode_Click(object? sender, RoutedEventArgs e)
+        {
+            TeamWorkspaceInfo? team = null;
+            if (sender is Button button && button.Tag is TeamWorkspaceInfo taggedTeam)
+            {
+                team = taggedTeam;
+            }
+
+            team ??= _activeTeamWorkspace;
+            if (team == null || string.IsNullOrWhiteSpace(team.TeamId))
+            {
+                return;
+            }
+
+            Clipboard.SetText(team.TeamId);
+            MessageBox.Show($"Codigo da equipe copiado: {team.TeamId}", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void OpenAddMilestoneDialog(TeamWorkspaceInfo team)
+        {
+            var dialog = new Window
+            {
+                Title = "Nova entrega",
+                Width = 500,
+                Height = 420,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                Background = Brushes.White
+            };
+
+            var root = new StackPanel { Margin = new Thickness(20) };
+            var titleBox = new TextBox { Height = 40, Margin = new Thickness(0, 6, 0, 14) };
+            var notesBox = new TextBox
+            {
+                Height = 110,
+                TextWrapping = TextWrapping.Wrap,
+                AcceptsReturn = true,
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+            var statusBox = new ComboBox
+            {
+                ItemsSource = new[] { "Planejada", "Em andamento", "Concluida" },
+                SelectedIndex = 0,
+                Height = 40,
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+            var dueDatePicker = new DatePicker { Height = 40, Margin = new Thickness(0, 6, 0, 14) };
+
+            root.Children.Add(new TextBlock { Text = "Titulo da entrega", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(titleBox);
+            root.Children.Add(new TextBlock { Text = "Notas", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(notesBox);
+            root.Children.Add(new TextBlock { Text = "Status", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(statusBox);
+            root.Children.Add(new TextBlock { Text = "Prazo", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(dueDatePicker);
+
+            var footer = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            var cancelButton = new Button { Content = "Cancelar", Width = 110, Height = 40, Margin = new Thickness(0, 0, 10, 0) };
+            var saveButton = new Button
+            {
+                Content = "Salvar entrega",
+                Width = 130,
+                Height = 40,
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            footer.Children.Add(cancelButton);
+            footer.Children.Add(saveButton);
+            root.Children.Add(footer);
+            dialog.Content = root;
+
+            cancelButton.Click += (s, e) => dialog.Close();
+            saveButton.Click += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(titleBox.Text))
+                {
+                    MessageBox.Show("Informe um titulo para a entrega.", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                team.Milestones.Add(new TeamMilestoneInfo
+                {
+                    Title = titleBox.Text.Trim(),
+                    Notes = notesBox.Text.Trim(),
+                    Status = statusBox.SelectedItem?.ToString() ?? "Planejada",
+                    DueDate = dueDatePicker.SelectedDate,
+                    CreatedAt = DateTime.Now
+                });
+
+                AddTeamNotification(team, $"Nova entrega planejada: {titleBox.Text.Trim()}.");
+                SaveTeamWorkspace(team);
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                RenderTeamWorkspace();
+            }
+        }
+
+        private void ToggleMilestoneStatus_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamMilestoneInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var milestone = payload.Item2;
+            milestone.Status = string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase)
+                ? "Em andamento"
+                : "Concluida";
+            AddTeamNotification(team, $"Entrega atualizada: {milestone.Title} agora está {milestone.Status.ToLowerInvariant()}.");
+            SaveTeamWorkspace(team);
+            RenderTeamWorkspace();
+        }
+
+        private void DeleteMilestone_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamMilestoneInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var milestone = payload.Item2;
+            if (MessageBox.Show($"Remover a entrega '{milestone.Title}'?", "Equipe", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            team.Milestones.RemoveAll(item => string.Equals(item.Id, milestone.Id, StringComparison.OrdinalIgnoreCase));
+            AddTeamNotification(team, $"Entrega removida: {milestone.Title}.");
+            SaveTeamWorkspace(team);
+            RenderTeamWorkspace();
+        }
+
+        private void OpenProjectManagementDialog(TeamWorkspaceInfo team)
+        {
+            var dialog = new Window
+            {
+                Title = "Gestao do projeto",
+                Width = 520,
+                Height = 430,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                Background = GetThemeBrush("SurfaceBrush")
+            };
+
+            var root = new Grid { Margin = new Thickness(20) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+            header.Children.Add(new TextBlock
+            {
+                Text = "Atualizar progresso e prazo",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = "Defina um andamento geral para o projeto e a data principal de entrega.",
+                FontSize = 12,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            root.Children.Add(header);
+
+            var form = new StackPanel();
+            Grid.SetRow(form, 1);
+            root.Children.Add(form);
+
+            var progressLabel = new TextBlock
+            {
+                Text = $"Progresso: {team.ProjectProgress}%",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            };
+            var progressSlider = new Slider
+            {
+                Minimum = 0,
+                Maximum = 100,
+                TickFrequency = 5,
+                IsSnapToTickEnabled = true,
+                Value = team.ProjectProgress,
+                Margin = new Thickness(0, 10, 0, 18)
+            };
+            progressSlider.ValueChanged += (s, e) => progressLabel.Text = $"Progresso: {(int)progressSlider.Value}%";
+
+            var statusBox = new ComboBox
+            {
+                ItemsSource = new[] { "Planejamento", "Em andamento", "Em revisao", "Concluido" },
+                SelectedItem = team.ProjectStatus,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+
+            var deadlinePicker = new DatePicker
+            {
+                SelectedDate = team.ProjectDeadline,
+                Height = 44,
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+
+            form.Children.Add(progressLabel);
+            form.Children.Add(progressSlider);
+            form.Children.Add(CreateDialogFieldLabel("Status do projeto"));
+            form.Children.Add(statusBox);
+            form.Children.Add(CreateDialogFieldLabel("Prazo principal"));
+            form.Children.Add(deadlinePicker);
+
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 14, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            Grid.SetRow(footer, 2);
+            var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                Width = 110,
+                Height = 40,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush")
+            };
+            var saveButton = new Button
+            {
+                Content = "Salvar gestao",
+                Width = 150,
+                Height = 40,
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0)
+            };
+            footerButtons.Children.Add(cancelButton);
+            footerButtons.Children.Add(saveButton);
+            footer.Child = footerButtons;
+            root.Children.Add(footer);
+            dialog.Content = root;
+
+            cancelButton.Click += (s, e) => dialog.Close();
+            saveButton.Click += (s, e) =>
+            {
+                team.ProjectProgress = (int)progressSlider.Value;
+                team.ProjectStatus = statusBox.SelectedItem?.ToString() ?? "Planejamento";
+                team.ProjectDeadline = deadlinePicker.SelectedDate;
+                AddTeamNotification(team, $"Gestao do projeto atualizada: {team.ProjectProgress}% e status {team.ProjectStatus.ToLowerInvariant()}.");
+                SaveTeamWorkspace(team);
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                RenderTeamWorkspace();
+            }
+        }
+
+        private void OpenProjectChatDialog(TeamWorkspaceInfo team)
+        {
+            var dialog = new Window
+            {
+                Title = $"Chat do projeto - {team.TeamName}",
+                Width = 860,
+                Height = 640,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                Background = GetThemeBrush("SurfaceBrush")
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var topBar = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(20, 16, 20, 16)
+            };
+            var topStack = new StackPanel();
+            topStack.Children.Add(new TextBlock
+            {
+                Text = "Chat do projeto",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            topStack.Children.Add(new TextBlock
+            {
+                Text = string.Join(" • ", team.Members.Select(member => member.Name).Take(6)),
+                FontSize = 12,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            topBar.Child = topStack;
+            root.Children.Add(topBar);
+
+            var messagesScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = GetThemeBrush("MainContentBackgroundBrush")
+            };
+            Grid.SetRow(messagesScroll, 1);
+            var messagesPanel = new StackPanel { Margin = new Thickness(20, 16, 20, 16) };
+            messagesScroll.Content = messagesPanel;
+            root.Children.Add(messagesScroll);
+
+            void RenderProjectChatMessages()
+            {
+                messagesPanel.Children.Clear();
+                if (team.ChatMessages.Count == 0)
+                {
+                    messagesPanel.Children.Add(new Border
+                    {
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(18),
+                        Padding = new Thickness(18),
+                        Child = new TextBlock
+                        {
+                            Text = "Nenhuma mensagem ainda. Use o campo abaixo para iniciar o chat em grupo do projeto.",
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        }
+                    });
+                    return;
+                }
+
+                foreach (var message in team.ChatMessages.OrderBy(item => item.SentAt))
+                {
+                    var isOwn = string.Equals(message.SenderId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase);
+                    var wrapper = new StackPanel
+                    {
+                        Margin = new Thickness(0, 0, 0, 12),
+                        HorizontalAlignment = isOwn ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                        MaxWidth = 520
+                    };
+
+                    wrapper.Children.Add(new TextBlock
+                    {
+                        Text = $"{message.SenderName} • {message.SentAt:dd/MM HH:mm}",
+                        FontSize = 10,
+                        Margin = new Thickness(6, 0, 6, 4),
+                        Foreground = GetThemeBrush("TertiaryTextBrush"),
+                        HorizontalAlignment = isOwn ? HorizontalAlignment.Right : HorizontalAlignment.Left
+                    });
+
+                    wrapper.Children.Add(new Border
+                    {
+                        Background = isOwn ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = isOwn ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(18),
+                        Padding = new Thickness(14, 10, 14, 10),
+                        Child = new TextBlock
+                        {
+                            Text = message.Content,
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = isOwn ? Brushes.White : GetThemeBrush("PrimaryTextBrush"),
+                            FontSize = 12
+                        }
+                    });
+
+                    messagesPanel.Children.Add(wrapper);
+                }
+
+                messagesScroll.ScrollToEnd();
+            }
+
+            var composer = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(20, 14, 20, 14)
+            };
+            Grid.SetRow(composer, 2);
+            var composerGrid = new Grid();
+            composerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            composerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var messageBox = new TextBox
+            {
+                Height = 46,
+                Padding = new Thickness(14, 12, 14, 12),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            };
+            composerGrid.Children.Add(messageBox);
+            var sendButton = new Button
+            {
+                Content = "Enviar",
+                Width = 120,
+                Height = 46,
+                Margin = new Thickness(12, 0, 0, 0),
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                FontWeight = FontWeights.SemiBold
+            };
+            Grid.SetColumn(sendButton, 1);
+            composerGrid.Children.Add(sendButton);
+            composer.Child = composerGrid;
+            root.Children.Add(composer);
+            dialog.Content = root;
+
+            void SubmitProjectMessage()
+            {
+                var content = messageBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    return;
+                }
+
+                team.ChatMessages.Add(new TeamChatMessageInfo
+                {
+                    SenderId = GetCurrentUserId(),
+                    SenderName = _currentProfile?.Name ?? "Usuario",
+                    Content = content,
+                    SentAt = DateTime.Now
+                });
+                AddTeamNotification(team, "Nova mensagem enviada no chat do projeto.");
+                SaveTeamWorkspace(team);
+                messageBox.Text = string.Empty;
+                RenderProjectChatMessages();
+                RenderTeamWorkspace();
+            }
+
+            sendButton.Click += (s, e) => SubmitProjectMessage();
+            messageBox.KeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift)
+                {
+                    SubmitProjectMessage();
+                    e.Handled = true;
+                }
+            };
+
+            RenderProjectChatMessages();
+            dialog.ShowDialog();
         }
 
         private void TeamActionButton_Click(object sender, RoutedEventArgs e)
@@ -3102,6 +4653,9 @@ namespace MeuApp
                     programmingLanguages = new { stringValue = profile.ProgrammingLanguages },
                     portfolioLink = new { stringValue = profile.PortfolioLink },
                     linkedInLink = new { stringValue = profile.LinkedInLink },
+                    avatarBody = new { stringValue = profile.AvatarBody },
+                    avatarHair = new { stringValue = profile.AvatarHair },
+                    avatarAccessory = new { stringValue = profile.AvatarAccessory },
                     updatedAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -4284,6 +5838,41 @@ namespace MeuApp
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[LoadActiveConversations ERROR] {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Carrega as equipes do banco de dados Firebase
+        /// </summary>
+        private async Task LoadTeamsFromDatabaseAsync()
+        {
+            try
+            {
+                DebugHelper.WriteLine("[LoadTeamsFromDatabase] Carregando equipes do Firebase");
+
+                if (_teamService == null)
+                {
+                    DebugHelper.WriteLine("[LoadTeamsFromDatabase] TeamService não inicializado");
+                    return;
+                }
+
+                var teams = await _teamService.LoadTeamsAsync();
+
+                _teamWorkspaces.Clear();
+                foreach (var team in teams)
+                {
+                    _teamWorkspaces.Add(team);
+                }
+
+                UpdateTeamsViewState();
+                RenderTeamsList();
+
+                DebugHelper.WriteLine($"[LoadTeamsFromDatabase] {teams.Count} equipes carregadas do banco de dados");
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[LoadTeamsFromDatabase ERROR] {ex.Message}");
+                DebugHelper.WriteLine($"[LoadTeamsFromDatabase ERROR] Stack: {ex.StackTrace}");
             }
         }
 

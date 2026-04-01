@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isParticipantById(conversationId) {
+      return signedIn()
+        && conversationId.matches(
+          '(^' + request.auth.uid + '-.*$)|(^.*-' + request.auth.uid + '$)'
+        );
+    }
+
+    function isParticipantByData(data) {
+      return signedIn() && (
+        data.userAId == request.auth.uid ||
+        data.userBId == request.auth.uid ||
+        (data.participants is list && request.auth.uid in data.participants)
+      );
+    }
+
+    function teamVisible(data) {
+      return signedIn() && (
+        data.createdBy == request.auth.uid ||
+        (data.memberIds is list && request.auth.uid in data.memberIds)
+      );
+    }
+
+    function validTeamPayload(data) {
+      return data.teamId is string
+        && data.teamName is string
+        && data.course is string
+        && data.className is string
+        && data.classId is string
+        && data.createdBy is string
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.ucs is list
+        && data.memberIds is list
+        && request.auth.uid in data.memberIds
+        && data.members is list;
+    }
+
+    function validUserTeamPayload(data, userId) {
+      return data.userId == userId
+        && data.teamId is string
+        && data.teamName is string
+        && data.addedAt is timestamp;
+    }
+
+    function teamDocument(teamId) {
+      return get(/databases/$(database)/documents/teams/$(teamId));
+    }
+
+    function teamExists(teamId) {
+      return teamDocument(teamId).data != null;
+    }
+
+    function isTeamCreator(teamId) {
+      return signedIn()
+        && teamExists(teamId)
+        && teamDocument(teamId).data.createdBy == request.auth.uid;
+    }
+
+    function canWriteUserTeamReference(data) {
+      return signedIn()
+        && data.userId is string
+        && data.teamId is string
+        && data.teamName is string
+        && data.addedAt is timestamp
+        && (
+          data.userId == request.auth.uid ||
+          isTeamCreator(data.teamId)
+        );
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /conversations/{conversationId} {
+      allow get: if isParticipantByData(resource.data);
+      allow list: if signedIn();
+
+      allow create: if isParticipantById(conversationId)
+        && request.resource.data.participants is list
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.userAId is string
+        && request.resource.data.userBId is string
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessageTime is timestamp
+        && request.resource.data.lastSenderId is string;
+
+      allow update: if isParticipantByData(resource.data)
+        && isParticipantByData(request.resource.data);
+
+      allow delete: if false;
+    }
+
+    match /conversations/{conversationId}/messages/{messageId} {
+      allow read: if isParticipantById(conversationId);
+
+      allow create: if isParticipantById(conversationId)
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.content is string
+        && (
+          request.resource.data.createdAt is timestamp ||
+          request.resource.data.timestamp is timestamp
+        );
+
+      allow update, delete: if false;
+    }
+
+    match /teams/{teamId} {
+      allow get: if teamVisible(resource.data);
+      allow list: if signedIn();
+
+      allow create: if signedIn()
+        && validTeamPayload(request.resource.data)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.teamId == teamId;
+
+      allow update: if teamVisible(resource.data)
+        && validTeamPayload(request.resource.data)
+        && request.resource.data.teamId == teamId
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /userTeams/{documentId} {
+      allow get: if signedIn() && resource.data.userId == request.auth.uid;
+      allow list: if signedIn();
+
+      allow create, update: if canWriteUserTeamReference(request.resource.data);
+
+      allow delete: if signedIn()
+        && (
+          resource.data.userId == request.auth.uid ||
+          isTeamCreator(resource.data.teamId)
+        );
+    }
+  }
+}
