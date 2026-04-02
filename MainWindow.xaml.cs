@@ -9,6 +9,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using MahApps.Metro.Controls;
@@ -104,6 +105,12 @@ namespace MeuApp
         private string _chatListFilter = string.Empty;
         private bool _appDarkModeEnabled = false;
         private TeamService? _teamService = null;
+        private ConnectionService? _connectionService = null;
+        private readonly HashSet<string> _connectedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private List<UserConnectionInfo> _connectionEntries = new List<UserConnectionInfo>();
+        private List<UserInfo> _searchSlideResults = new List<UserInfo>();
+        private string _searchSlideQuery = string.Empty;
+        private int _teamSyncSequence = 0;
 
         public MainWindow()
         {
@@ -123,19 +130,29 @@ namespace MeuApp
             {
                 // Inicializar TeamService
                 _teamService = new TeamService(_idToken, _currentProfile.UserId ?? "");
+                _connectionService = new ConnectionService(_idToken, _currentProfile);
 
                 RenderChatsLoadingState();
                 await LoadActiveConversationsAsync();
                 await LoadTeamsFromDatabaseAsync();
+                await RefreshConnectionsCacheAsync();
             }
             else
             {
                 RefreshChatsUI();
+                UpdateConnectionsBadge();
             }
         }
 
         private void MainWindow_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Escape && SearchSlidePanel.Visibility == Visibility.Visible)
+            {
+                HideSearchSlidePanel();
+                e.Handled = true;
+                return;
+            }
+
             // Ctrl+D para ativar modo debug
             if (e.Key == Key.D && Keyboard.Modifiers == ModifierKeys.Control)
             {
@@ -156,6 +173,22 @@ namespace MeuApp
             _currentProfile = profile;
             _idToken = idToken;
             ApplyUserProfile(profile);
+        }
+
+        private void SearchFriendsBox_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                SearchFriends_Click(sender, new RoutedEventArgs());
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.Escape && SearchSlidePanel.Visibility == Visibility.Visible)
+            {
+                HideSearchSlidePanel();
+                e.Handled = true;
+            }
         }
 
         public MainWindow(UserProfile profile) : this()
@@ -258,7 +291,10 @@ namespace MeuApp
                 Name = _currentProfile.Name,
                 Email = _currentProfile.Email,
                 Registration = _currentProfile.Registration,
-                Course = _currentProfile.Course
+                Course = _currentProfile.Course,
+                AvatarBody = _currentProfile.AvatarBody,
+                AvatarHair = _currentProfile.AvatarHair,
+                AvatarAccessory = _currentProfile.AvatarAccessory
             };
         }
 
@@ -490,7 +526,63 @@ namespace MeuApp
             {
                 Background = background,
                 CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(12, 7, 10, 7),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 8, 8),
+                Child = content
+            };
+        }
+
+        private Border CreateMemberChip(UserInfo member, Brush background, Brush foreground, Action? onRemove = null)
+        {
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            content.Children.Add(new Border
+            {
+                Width = 28,
+                Height = 28,
+                CornerRadius = new CornerRadius(14),
+                Margin = new Thickness(0, 0, 8, 0),
+                ClipToBounds = true,
+                Child = CreateUserAvatarVisual(member, 28)
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(member.Name) ? member.Email : member.Name,
+                Foreground = foreground,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            if (onRemove != null)
+            {
+                var removeButton = new Button
+                {
+                    Content = "x",
+                    Background = Brushes.Transparent,
+                    Foreground = foreground,
+                    BorderThickness = new Thickness(0),
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 11,
+                    Padding = new Thickness(4, 0, 0, 0),
+                    Margin = new Thickness(6, 0, 0, 0),
+                    Cursor = Cursors.Hand,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                removeButton.Click += (sender, args) => onRemove();
+                content.Children.Add(removeButton);
+            }
+
+            return new Border
+            {
+                Background = background,
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(8, 6, 10, 6),
                 Margin = new Thickness(0, 0, 8, 8),
                 Child = content
             };
@@ -513,8 +605,8 @@ namespace MeuApp
 
             foreach (var member in _draftTeamMembers.OrderBy(item => item.Name))
             {
-                TeamMembersPanel.Children.Add(CreateDraftChip(
-                    GetTeamMemberChipLabel(member),
+                TeamMembersPanel.Children.Add(CreateMemberChip(
+                    member,
                     GetThemeBrush("AccentMutedBrush"),
                     GetThemeBrush("AccentBrush"),
                     () =>
@@ -942,37 +1034,115 @@ namespace MeuApp
 
         private UIElement CreateTaskBoardView(TeamWorkspaceInfo team)
         {
-            var scrollViewer = new ScrollViewer
+            var totalCards = team.TaskColumns.Sum(item => item.Cards.Count);
+            var overdueCards = team.TaskColumns
+                .SelectMany(item => item.Cards)
+                .Count(task => task.DueDate.HasValue && task.DueDate.Value.Date < DateTime.Today);
+            var completedCards = team.TaskColumns
+                .Where(item => item.Title.Contains("Conclu", StringComparison.OrdinalIgnoreCase))
+                .Sum(item => item.Cards.Count);
+            var assignedCards = team.TaskColumns
+                .SelectMany(item => item.Cards)
+                .Count(task => task.AssignedUserIds.Count > 0);
+            var isKanban = _activeTeamBoardView == TeamBoardView.Kanban;
+
+            var stack = new StackPanel();
+
+            var overview = new Border
             {
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = isKanban
+                    ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                    : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 16)
             };
 
+            var overviewWrap = new WrapPanel();
+            overviewWrap.Children.Add(CreateBoardOverviewMetric(
+                isKanban ? "Fluxo" : "Visao geral",
+                totalCards.ToString(),
+                isKanban ? "Itens circulando entre etapas" : "Total de tarefas",
+                isKanban ? Color.FromRgb(14, 165, 233) : Color.FromRgb(37, 99, 235)));
+            overviewWrap.Children.Add(CreateBoardOverviewMetric("Em risco", overdueCards.ToString(), overdueCards == 1 ? "Prazo vencido" : "Prazos vencidos", Color.FromRgb(220, 38, 38)));
+            overviewWrap.Children.Add(CreateBoardOverviewMetric(
+                isKanban ? "Saidas" : "Concluidas",
+                completedCards.ToString(),
+                isKanban ? "Itens finalizados no fluxo" : "Ja entregues",
+                Color.FromRgb(16, 185, 129)));
+            overviewWrap.Children.Add(CreateBoardOverviewMetric(
+                isKanban ? "Responsaveis" : "Com responsavel",
+                assignedCards.ToString(),
+                isKanban ? "Cards com dono definido" : "Cards com dono",
+                Color.FromRgb(168, 85, 247)));
+            overview.Child = overviewWrap;
+            stack.Children.Add(overview);
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = isKanban
+                    ? "O modo Kanban agora prioriza leitura operacional: etapas empilhadas, resumo por faixa e cards mais compactos para enxergar gargalos rapidamente."
+                    : "O modo Trello ficou mais editorial: colunas amplas, cards com mais respiro e leitura mais clara de prioridade, prazo e responsaveis.",
+                FontSize = 12,
+                Margin = new Thickness(2, 0, 0, 14),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+
+            stack.Children.Add(isKanban
+                ? CreateKanbanTaskBoardView(team)
+                : CreateTrelloTaskBoardView(team));
+
+            return stack;
+        }
+
+        private UIElement CreateTrelloTaskBoardView(TeamWorkspaceInfo team)
+        {
             var columnsWrap = new WrapPanel
             {
-                Orientation = Orientation.Horizontal
+                Orientation = Orientation.Horizontal,
+                ItemWidth = 360,
+                Margin = new Thickness(0, 0, -16, 0)
             };
 
             foreach (var column in team.TaskColumns)
             {
-                columnsWrap.Children.Add(CreateTaskBoardColumn(team, column));
+                columnsWrap.Children.Add(CreateTaskBoardColumn(team, column, false));
             }
 
-            scrollViewer.Content = columnsWrap;
-            return scrollViewer;
+            return columnsWrap;
         }
 
-        private Border CreateTaskBoardColumn(TeamWorkspaceInfo team, TeamTaskColumnInfo column)
+        private UIElement CreateKanbanTaskBoardView(TeamWorkspaceInfo team)
         {
+            var lanes = new StackPanel();
+
+            foreach (var column in team.TaskColumns)
+            {
+                lanes.Children.Add(CreateKanbanTaskLane(team, column));
+            }
+
+            return lanes;
+        }
+
+        private Border CreateTaskBoardColumn(TeamWorkspaceInfo team, TeamTaskColumnInfo column, bool compactCards)
+        {
+            var nextDueDate = column.Cards
+                .Where(task => task.DueDate.HasValue)
+                .OrderBy(task => task.DueDate)
+                .Select(task => task.DueDate)
+                .FirstOrDefault();
+
             var columnBorder = new Border
             {
-                Width = 300,
-                Margin = new Thickness(0, 0, 14, 0),
+                Width = 344,
+                Margin = new Thickness(0, 0, 16, 16),
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = new SolidColorBrush(column.AccentColor),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(14),
+                CornerRadius = new CornerRadius(20),
                 AllowDrop = true,
                 Tag = column
             };
@@ -980,14 +1150,30 @@ namespace MeuApp
             columnBorder.DragOver += TeamBoardColumn_DragOver;
 
             var stack = new StackPanel();
-            var header = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            stack.Children.Add(new Border
+            {
+                Height = 6,
+                Background = new SolidColorBrush(column.AccentColor),
+                CornerRadius = new CornerRadius(20, 20, 0, 0)
+            });
+
+            var headerSection = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Padding = new Thickness(16, 14, 16, 14),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 0, 0, 1)
+            };
+
+            var headerStack = new StackPanel();
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             header.Children.Add(new TextBlock
             {
                 Text = column.Title,
-                FontSize = 14,
+                FontSize = 15,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
@@ -1007,11 +1193,28 @@ namespace MeuApp
             };
             Grid.SetColumn(countBadge, 1);
             header.Children.Add(countBadge);
-            stack.Children.Add(header);
+
+            headerStack.Children.Add(header);
+            headerStack.Children.Add(new TextBlock
+            {
+                Text = nextDueDate.HasValue
+                    ? $"Proximo prazo {FormatRelativeDate(nextDueDate.Value)}"
+                    : "Sem prazo definido nesta etapa.",
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            headerSection.Child = headerStack;
+            stack.Children.Add(headerSection);
+
+            var cardsHost = new StackPanel
+            {
+                Margin = new Thickness(14, 14, 14, 14)
+            };
 
             foreach (var card in column.Cards.OrderBy(task => task.DueDate ?? DateTime.MaxValue))
             {
-                stack.Children.Add(CreateTaskCard(team, column, card));
+                cardsHost.Children.Add(CreateTaskCard(team, column, card, compactCards));
             }
 
             if (column.Cards.Count == 0)
@@ -1022,8 +1225,8 @@ namespace MeuApp
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(14),
-                    Padding = new Thickness(14),
-                    Margin = new Thickness(0, 4, 0, 0),
+                    Padding = new Thickness(16),
+                    Margin = new Thickness(0, 2, 0, 0),
                     Child = new StackPanel
                     {
                         Children =
@@ -1037,7 +1240,7 @@ namespace MeuApp
                             },
                             new Button
                             {
-                                Content = "Adicionar tarefa",
+                                Content = "Criar primeira tarefa",
                                 Background = GetThemeBrush("AccentBrush"),
                                 Foreground = Brushes.White,
                                 BorderThickness = new Thickness(0),
@@ -1056,14 +1259,135 @@ namespace MeuApp
                     addTaskButton.Click += (s, e) => OpenCreateTaskDialog(team);
                 }
 
-                stack.Children.Add(emptyState);
+                cardsHost.Children.Add(emptyState);
             }
 
+            stack.Children.Add(cardsHost);
             columnBorder.Child = stack;
             return columnBorder;
         }
 
-        private Border CreateTaskCard(TeamWorkspaceInfo team, TeamTaskColumnInfo column, TeamTaskCardInfo card)
+        private Border CreateKanbanTaskLane(TeamWorkspaceInfo team, TeamTaskColumnInfo column)
+        {
+            var overdueCount = column.Cards.Count(task => task.DueDate.HasValue && task.DueDate.Value.Date < DateTime.Today);
+            var lane = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = new SolidColorBrush(column.AccentColor),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Margin = new Thickness(0, 0, 0, 16),
+                Padding = new Thickness(18)
+            };
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var leftRail = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16)
+            };
+
+            var leftStack = new StackPanel();
+            leftStack.Children.Add(new Border
+            {
+                Width = 42,
+                Height = 8,
+                CornerRadius = new CornerRadius(999),
+                Background = new SolidColorBrush(column.AccentColor),
+                Margin = new Thickness(0, 0, 0, 12)
+            });
+            leftStack.Children.Add(new TextBlock
+            {
+                Text = column.Title,
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            leftStack.Children.Add(new TextBlock
+            {
+                Text = overdueCount > 0
+                    ? $"{overdueCount} item(ns) exigindo atencao imediata."
+                    : "Fluxo estavel nesta etapa.",
+                FontSize = 12,
+                Margin = new Thickness(0, 8, 0, 14),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            leftStack.Children.Add(CreateBoardOverviewMetric("Cards", column.Cards.Count.ToString(), "Volume atual", column.AccentColor));
+            leftStack.Children.Add(CreateBoardOverviewMetric("Atrasos", overdueCount.ToString(), "Itens vencidos", Color.FromRgb(220, 38, 38)));
+            leftRail.Child = leftStack;
+            layout.Children.Add(leftRail);
+
+            var cardsWrap = new WrapPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 0, -12, -12)
+            };
+
+            foreach (var card in column.Cards.OrderBy(task => task.DueDate ?? DateTime.MaxValue))
+            {
+                cardsWrap.Children.Add(CreateTaskCard(team, column, card, true));
+            }
+
+            if (column.Cards.Count == 0)
+            {
+                cardsWrap.Children.Add(new Border
+                {
+                    Width = 260,
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16),
+                    Padding = new Thickness(16),
+                    Child = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Etapa vazia. Use esse espaco para puxar novas tarefas ou abrir um item agora.",
+                                FontSize = 11,
+                                TextWrapping = TextWrapping.Wrap,
+                                Foreground = GetThemeBrush("SecondaryTextBrush")
+                            },
+                            new Button
+                            {
+                                Content = "Criar tarefa nesta etapa",
+                                Background = new SolidColorBrush(column.AccentColor),
+                                Foreground = Brushes.White,
+                                BorderThickness = new Thickness(0),
+                                Padding = new Thickness(12, 8, 12, 8),
+                                Margin = new Thickness(0, 12, 0, 0),
+                                FontWeight = FontWeights.SemiBold,
+                                Cursor = Cursors.Hand,
+                                Tag = team
+                            }
+                        }
+                    }
+                });
+
+                if (cardsWrap.Children.OfType<Border>().LastOrDefault()?.Child is StackPanel emptyStack
+                    && emptyStack.Children.OfType<Button>().FirstOrDefault() is Button createButton)
+                {
+                    createButton.Click += (s, e) => OpenCreateTaskDialog(team);
+                }
+            }
+
+            Grid.SetColumn(cardsWrap, 2);
+            layout.Children.Add(cardsWrap);
+
+            lane.Child = layout;
+            return lane;
+        }
+
+        private Border CreateTaskCard(TeamWorkspaceInfo team, TeamTaskColumnInfo column, TeamTaskCardInfo card, bool compactMode)
         {
             var isOverdue = card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today;
             var priorityColor = card.Priority switch
@@ -1077,12 +1401,13 @@ namespace MeuApp
             {
                 Background = isOverdue
                     ? new SolidColorBrush(Color.FromRgb(254, 242, 242))
-                    : GetThemeBrush("MutedCardBackgroundBrush"),
+                    : Brushes.White,
                 BorderBrush = new SolidColorBrush(isOverdue ? Color.FromRgb(220, 38, 38) : Color.FromRgb(226, 232, 240)),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(14),
-                Margin = new Thickness(0, 0, 0, 10),
+                CornerRadius = new CornerRadius(18),
+                Padding = compactMode ? new Thickness(14) : new Thickness(16),
+                Margin = new Thickness(0, 0, 0, 12),
+                Width = compactMode ? 256 : double.NaN,
                 Cursor = Cursors.Hand,
                 Tag = card
             };
@@ -1091,8 +1416,16 @@ namespace MeuApp
             var stack = new StackPanel();
             stack.Children.Add(new TextBlock
             {
+                Text = column.Title.ToUpperInvariant(),
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(column.AccentColor),
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+            stack.Children.Add(new TextBlock
+            {
                 Text = card.Title,
-                FontSize = 13,
+                FontSize = compactMode ? 13 : 14,
                 FontWeight = FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
@@ -1101,8 +1434,9 @@ namespace MeuApp
             {
                 Text = card.Description,
                 FontSize = 11,
-                Margin = new Thickness(0, 6, 0, 0),
+                Margin = new Thickness(0, 8, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
+                MaxHeight = compactMode ? 54 : double.PositiveInfinity,
                 Foreground = GetThemeBrush("SecondaryTextBrush")
             });
 
@@ -1120,15 +1454,23 @@ namespace MeuApp
                     isOverdue ? Brushes.White : GetThemeBrush("AccentBrush")));
             }
 
-            foreach (var assignedMember in team.Members.Where(member => card.AssignedUserIds.Contains(member.UserId)))
-            {
-                chips.Children.Add(CreateStaticTeamChip(
-                    assignedMember.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? assignedMember.Name,
-                    GetThemeBrush("CardBackgroundBrush"),
-                    GetThemeBrush("PrimaryTextBrush")));
-            }
-
             stack.Children.Add(chips);
+
+            var assignedMembers = team.Members
+                .Where(member => card.AssignedUserIds.Contains(member.UserId))
+                .ToList();
+
+            if (assignedMembers.Count > 0)
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = assignedMembers.Count == 1 ? "Responsavel" : "Responsaveis",
+                    FontSize = 10,
+                    Margin = new Thickness(0, 10, 0, 6),
+                    Foreground = GetThemeBrush("TertiaryTextBrush")
+                });
+                stack.Children.Add(CreateTaskAssigneesPanel(assignedMembers, compactMode));
+            }
 
             var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1177,6 +1519,105 @@ namespace MeuApp
             stack.Children.Add(footer);
             cardBorder.Child = stack;
             return cardBorder;
+        }
+
+        private WrapPanel CreateTaskAssigneesPanel(List<UserInfo> assignedMembers, bool compactMode)
+        {
+            var wrap = new WrapPanel
+            {
+                Margin = new Thickness(0, 0, 0, 0)
+            };
+
+            foreach (var member in assignedMembers)
+            {
+                wrap.Children.Add(CreateAssigneeAvatarPill(member, compactMode));
+            }
+
+            return wrap;
+        }
+
+        private Border CreateAssigneeAvatarPill(UserInfo member, bool compactMode)
+        {
+            var displayName = string.IsNullOrWhiteSpace(member.Name)
+                ? member.Email
+                : member.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? member.Name;
+
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            content.Children.Add(new Border
+            {
+                Width = compactMode ? 24 : 28,
+                Height = compactMode ? 24 : 28,
+                CornerRadius = new CornerRadius(compactMode ? 12 : 14),
+                ClipToBounds = true,
+                Child = CreateUserAvatarVisual(member, compactMode ? 24 : 28, true)
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = displayName,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = compactMode ? 10 : 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            return new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(6, 4, 10, 4),
+                Margin = new Thickness(0, 0, 8, 8),
+                Child = content
+            };
+        }
+
+        private Border CreateBoardOverviewMetric(string title, string value, string subtitle, Color accentColor)
+        {
+            return new Border
+            {
+                Width = 160,
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = new SolidColorBrush(accentColor),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 12, 12),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = value,
+                            FontSize = 24,
+                            FontWeight = FontWeights.Bold,
+                            Margin = new Thickness(0, 6, 0, 4),
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = subtitle,
+                            FontSize = 11,
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        }
+                    }
+                }
+            };
         }
 
         private Border CreateStaticTeamChip(string text, Brush background, Brush foreground)
@@ -1439,6 +1880,17 @@ namespace MeuApp
             var border = CreateSidebarSection("Plano de entregas", "Marcos, checkpoints e pequenas entregas para a equipe acompanhar.");
             var content = (StackPanel)border.Child;
 
+            var completedCount = team.Milestones.Count(item => string.Equals(item.Status, "Concluida", StringComparison.OrdinalIgnoreCase));
+            var nextMilestone = team.Milestones
+                .Where(item => item.DueDate.HasValue)
+                .OrderBy(item => item.DueDate)
+                .FirstOrDefault();
+
+            var overview = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) };
+            overview.Children.Add(CreateSidebarMiniMetric("Ativas", (team.Milestones.Count - completedCount).ToString(), Color.FromRgb(124, 58, 237)));
+            overview.Children.Add(CreateSidebarMiniMetric("Concluidas", completedCount.ToString(), Color.FromRgb(16, 185, 129)));
+            overview.Children.Add(CreateSidebarMiniMetric("Proxima", nextMilestone?.DueDate.HasValue == true ? FormatRelativeDate(nextMilestone.DueDate.Value) : "Sem prazo", Color.FromRgb(245, 158, 11)));
+            content.Children.Add(overview);
             content.Children.Add(CreateSidebarButton("Adicionar entrega", Color.FromRgb(124, 58, 237), (s, e) => OpenAddMilestoneDialog(team)));
 
             if (team.Milestones.Count == 0)
@@ -1458,19 +1910,31 @@ namespace MeuApp
             {
                 var isDone = string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase);
                 var statusColor = isDone ? Color.FromRgb(16, 185, 129) : Color.FromRgb(245, 158, 11);
+                var isLate = milestone.DueDate.HasValue && milestone.DueDate.Value.Date < DateTime.Today && !isDone;
 
                 var row = new Border
                 {
-                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    Background = isLate ? new SolidColorBrush(Color.FromRgb(255, 247, 237)) : GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = isLate ? new SolidColorBrush(Color.FromRgb(245, 158, 11)) : GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(14),
-                    Padding = new Thickness(12),
+                    CornerRadius = new CornerRadius(16),
+                    Padding = new Thickness(14),
                     Margin = new Thickness(0, 10, 0, 0)
                 };
 
-                var rowStack = new StackPanel();
-                rowStack.Children.Add(new TextBlock
+                var rowStack = new Grid();
+                rowStack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(4) });
+                rowStack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+                rowStack.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                rowStack.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(statusColor),
+                    CornerRadius = new CornerRadius(999)
+                });
+
+                var info = new StackPanel();
+                info.Children.Add(new TextBlock
                 {
                     Text = milestone.Title,
                     FontSize = 12,
@@ -1481,7 +1945,7 @@ namespace MeuApp
 
                 if (!string.IsNullOrWhiteSpace(milestone.Notes))
                 {
-                    rowStack.Children.Add(new TextBlock
+                    info.Children.Add(new TextBlock
                     {
                         Text = milestone.Notes,
                         FontSize = 11,
@@ -1500,7 +1964,11 @@ namespace MeuApp
                 {
                     badges.Children.Add(CreateStaticTeamChip($"Prazo {FormatRelativeDate(milestone.DueDate.Value)}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
                 }
-                rowStack.Children.Add(badges);
+                if (isLate)
+                {
+                    badges.Children.Add(CreateStaticTeamChip("Atrasada", new SolidColorBrush(Color.FromRgb(245, 158, 11)), Brushes.White));
+                }
+                info.Children.Add(badges);
 
                 var actions = new WrapPanel
                 {
@@ -1535,7 +2003,10 @@ namespace MeuApp
                 removeButton.Click += DeleteMilestone_Click;
                 actions.Children.Add(removeButton);
 
-                rowStack.Children.Add(actions);
+                info.Children.Add(actions);
+
+                Grid.SetColumn(info, 2);
+                rowStack.Children.Add(info);
                 row.Child = rowStack;
                 content.Children.Add(row);
             }
@@ -1551,8 +2022,8 @@ namespace MeuApp
             var membersWrap = new WrapPanel();
             foreach (var member in team.Members.OrderBy(item => item.Name))
             {
-                membersWrap.Children.Add(CreateDraftChip(
-                    GetTeamMemberChipLabel(member),
+                membersWrap.Children.Add(CreateMemberChip(
+                    member,
                     GetThemeBrush("AccentMutedBrush"),
                     GetThemeBrush("AccentBrush"),
                     team.Members.Count > 1 ? () => RemoveMemberFromActiveTeam(member) : null));
@@ -1575,6 +2046,16 @@ namespace MeuApp
             var border = CreateSidebarSection("Materiais e planos", "Arquivos e artefatos da equipe ficam centralizados aqui.");
             var content = (StackPanel)border.Child;
 
+            var imagesCount = team.Assets.Count(item => string.Equals(item.Category, "imagens", StringComparison.OrdinalIgnoreCase));
+            var documentsCount = team.Assets.Count(item => string.Equals(item.Category, "documentos", StringComparison.OrdinalIgnoreCase));
+            var plansCount = team.Assets.Count(item => string.Equals(item.Category, "planos", StringComparison.OrdinalIgnoreCase));
+
+            var stats = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) };
+            stats.Children.Add(CreateSidebarMiniMetric("Imagens", imagesCount.ToString(), Color.FromRgb(14, 165, 233)));
+            stats.Children.Add(CreateSidebarMiniMetric("Docs", documentsCount.ToString(), Color.FromRgb(37, 99, 235)));
+            stats.Children.Add(CreateSidebarMiniMetric("Planos", plansCount.ToString(), Color.FromRgb(16, 185, 129)));
+            content.Children.Add(stats);
+
             var actions = new WrapPanel();
             actions.Children.Add(CreateSidebarButton("Imagens", Color.FromRgb(14, 165, 233), (s, e) => AddTeamAsset("imagens")));
             actions.Children.Add(CreateSidebarButton("Documentos", Color.FromRgb(37, 99, 235), (s, e) => AddTeamAsset("documentos")));
@@ -1595,17 +2076,85 @@ namespace MeuApp
             {
                 foreach (var asset in team.Assets.OrderByDescending(item => item.AddedAt).Take(6))
                 {
-                    content.Children.Add(new TextBlock
-                    {
-                        Text = $"{asset.Category.ToUpperInvariant()} • {asset.FileName}",
-                        FontSize = 11,
-                        Margin = new Thickness(0, 10, 0, 0),
-                        Foreground = GetThemeBrush("PrimaryTextBrush")
-                    });
+                    content.Children.Add(CreateAssetSidebarCard(asset));
                 }
             }
 
             return border;
+        }
+
+        private Border CreateAssetSidebarCard(TeamAssetInfo asset)
+        {
+            var accent = asset.Category.ToLowerInvariant() switch
+            {
+                "imagens" => Color.FromRgb(14, 165, 233),
+                "planos" => Color.FromRgb(16, 185, 129),
+                _ => Color.FromRgb(37, 99, 235)
+            };
+
+            var card = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(CreateStaticTeamChip(asset.Category.ToUpperInvariant(), new SolidColorBrush(accent), Brushes.White));
+            stack.Children.Add(new TextBlock
+            {
+                Text = asset.FileName,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 8, 0, 0),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Adicionado em {asset.AddedAt:dd/MM 'às' HH:mm}",
+                FontSize = 11,
+                Margin = new Thickness(0, 6, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            card.Child = stack;
+            return card;
+        }
+
+        private Border CreateSidebarMiniMetric(string title, string value, Color accent)
+        {
+            return new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = new SolidColorBrush(accent),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 0, 8, 8),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontSize = 10,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = value,
+                            FontSize = 16,
+                            FontWeight = FontWeights.Bold,
+                            Margin = new Thickness(0, 4, 0, 0),
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        }
+                    }
+                }
+            };
         }
 
         private Border CreateTeamNotificationsSection(TeamWorkspaceInfo team)
@@ -1838,7 +2387,416 @@ namespace MeuApp
 
             if (persistInBackground)
             {
-                _ = Task.Run(async () => await SaveTeamToFirestoreAsync(team));
+                var syncSequence = ++_teamSyncSequence;
+                SetTeamSyncStatus("Sincronizando alterações da equipe no Firebase...", GetThemeBrush("SecondaryTextBrush"));
+                _ = PersistTeamWorkspaceInBackgroundAsync(team, syncSequence);
+            }
+        }
+
+        private async Task PersistTeamWorkspaceInBackgroundAsync(TeamWorkspaceInfo team, int syncSequence)
+        {
+            var result = await SaveTeamToFirestoreAsync(team);
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (syncSequence != _teamSyncSequence)
+                {
+                    return;
+                }
+
+                if (result.Success)
+                {
+                    SetTeamSyncStatus("Equipe sincronizada com sucesso no Firebase.", new SolidColorBrush(Color.FromRgb(21, 128, 61)));
+                    return;
+                }
+
+                SetTeamSyncStatus(
+                    $"Falha na sincronização automática: {result.ErrorMessage ?? "erro não identificado"}",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+            });
+        }
+
+        private void SetTeamSyncStatus(string message, Brush foreground)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => SetTeamSyncStatus(message, foreground));
+                return;
+            }
+
+            TeamSyncStatusText.Text = message;
+            TeamSyncStatusText.Foreground = foreground;
+        }
+
+        private async Task RefreshConnectionsCacheAsync()
+        {
+            _connectedUserIds.Clear();
+            _connectionEntries.Clear();
+
+            if (_connectionService == null)
+            {
+                UpdateConnectionsBadge();
+                return;
+            }
+
+            _connectionEntries = await _connectionService.LoadConnectionsAsync();
+
+            foreach (var userId in _connectionEntries
+                .Where(item => string.Equals(item.Status, "connected", StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.ConnectedUserId)
+                .Where(userId => !string.IsNullOrWhiteSpace(userId)))
+            {
+                _connectedUserIds.Add(userId);
+            }
+
+            UpdateConnectionsBadge();
+            RenderConnectionsView();
+        }
+
+        private void RenderConnectionsView()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(RenderConnectionsView);
+                return;
+            }
+
+            ConnectionsSectionsHost.Children.Clear();
+
+            var incomingRequests = _connectionEntries
+                .Where(item => string.Equals(item.Status, "pendingIncoming", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.UpdatedAt)
+                .ToList();
+            var outgoingRequests = _connectionEntries
+                .Where(item => string.Equals(item.Status, "pendingOutgoing", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.UpdatedAt)
+                .ToList();
+            var acceptedNotifications = _connectionEntries
+                .Where(item => string.Equals(item.NotificationType, "accepted", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.UpdatedAt)
+                .ToList();
+            var connectedUsers = _connectionEntries
+                .Where(item => string.Equals(item.Status, "connected", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(item => item.ConnectedUserName)
+                .ToList();
+
+            ConnectionsSectionsHost.Children.Add(CreateConnectionsSection(
+                "Solicitações recebidas",
+                "Quem quer entrar na sua rede agora.",
+                incomingRequests,
+                ConnectionSectionMode.IncomingRequests));
+
+            ConnectionsSectionsHost.Children.Add(CreateConnectionsSection(
+                "Atualizações",
+                "Aceites recentes e avisos da sua rede.",
+                acceptedNotifications,
+                ConnectionSectionMode.Notifications));
+
+            ConnectionsSectionsHost.Children.Add(CreateConnectionsSection(
+                "Convites enviados",
+                "Solicitações aguardando resposta.",
+                outgoingRequests,
+                ConnectionSectionMode.OutgoingRequests));
+
+            ConnectionsSectionsHost.Children.Add(CreateConnectionsSection(
+                "Sua rede",
+                "Perfis que já aceitaram a conexão.",
+                connectedUsers,
+                ConnectionSectionMode.Connected));
+
+            var hasAnyItem = incomingRequests.Count > 0 || outgoingRequests.Count > 0 || acceptedNotifications.Count > 0 || connectedUsers.Count > 0;
+            ConnectionsStatusText.Text = hasAnyItem
+                ? $"{connectedUsers.Count} conexão(ões) ativa(s), {incomingRequests.Count} solicitação(ões) pendente(s) e {acceptedNotifications.Count} atualização(ões)."
+                : "Sua rede ainda está vazia. Use a busca no topo para enviar convites de conexão.";
+            ConnectionsStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+        }
+
+        private enum ConnectionSectionMode
+        {
+            IncomingRequests,
+            Notifications,
+            OutgoingRequests,
+            Connected
+        }
+
+        private Border CreateConnectionsSection(string title, string subtitle, List<UserConnectionInfo> items, ConnectionSectionMode mode)
+        {
+            var card = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(22),
+                Margin = new Thickness(0, 0, 0, 14)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                Margin = new Thickness(0, 6, 0, 16),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            if (items.Count == 0)
+            {
+                stack.Children.Add(new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(16),
+                    Child = new TextBlock
+                    {
+                        Text = mode switch
+                        {
+                            ConnectionSectionMode.IncomingRequests => "Nenhuma solicitação aguardando sua resposta.",
+                            ConnectionSectionMode.Notifications => "Nenhuma atualização de conexão no momento.",
+                            ConnectionSectionMode.OutgoingRequests => "Você não possui convites enviados pendentes.",
+                            _ => "Nenhuma conexão ativa ainda."
+                        },
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        FontSize = 12,
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                });
+                card.Child = stack;
+                return card;
+            }
+
+            foreach (var item in items)
+            {
+                stack.Children.Add(CreateConnectionListItem(item, mode));
+            }
+
+            card.Child = stack;
+            return card;
+        }
+
+        private Border CreateConnectionListItem(UserConnectionInfo item, ConnectionSectionMode mode)
+        {
+            var container = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(16),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var textStack = new StackPanel();
+            textStack.Children.Add(new TextBlock
+            {
+                Text = item.ConnectedUserName,
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(item.NotificationMessage)
+                    ? mode switch
+                    {
+                        ConnectionSectionMode.Connected => $"Conectado desde {item.UpdatedAt:dd/MM 'às' HH:mm}.",
+                        ConnectionSectionMode.OutgoingRequests => $"Convite enviado em {item.AddedAt:dd/MM 'às' HH:mm}.",
+                        _ => $"Solicitação recebida em {item.AddedAt:dd/MM 'às' HH:mm}."
+                    }
+                    : item.NotificationMessage,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 520
+            });
+            if (!string.IsNullOrWhiteSpace(item.ConnectedUserEmail))
+            {
+                textStack.Children.Add(new TextBlock
+                {
+                    Text = item.ConnectedUserEmail,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("TertiaryTextBrush")
+                });
+            }
+            grid.Children.Add(textStack);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(16, 0, 0, 0)
+            };
+
+            if (mode == ConnectionSectionMode.IncomingRequests)
+            {
+                actions.Children.Add(CreateConnectionActionButton("Recusar", item, DeclineConnectionRequest_Click, false));
+                actions.Children.Add(CreateConnectionActionButton("Aceitar", item, AcceptConnectionRequest_Click, true));
+            }
+            else if (mode == ConnectionSectionMode.Notifications)
+            {
+                actions.Children.Add(CreateConnectionActionButton("Marcar como lida", item, DismissConnectionNotification_Click, false));
+            }
+            else if (mode == ConnectionSectionMode.OutgoingRequests)
+            {
+                actions.Children.Add(new Border
+                {
+                    Background = GetThemeBrush("AccentMutedBrush"),
+                    CornerRadius = new CornerRadius(999),
+                    Padding = new Thickness(10, 5, 10, 5),
+                    Child = new TextBlock
+                    {
+                        Text = "Aguardando resposta",
+                        Foreground = GetThemeBrush("AccentBrush"),
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold
+                    }
+                });
+            }
+            else
+            {
+                actions.Children.Add(new Border
+                {
+                    Background = GetThemeBrush("AccentMutedBrush"),
+                    CornerRadius = new CornerRadius(999),
+                    Padding = new Thickness(10, 5, 10, 5),
+                    Child = new TextBlock
+                    {
+                        Text = "Conectado",
+                        Foreground = GetThemeBrush("AccentBrush"),
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold
+                    }
+                });
+            }
+
+            Grid.SetColumn(actions, 1);
+            grid.Children.Add(actions);
+            container.Child = grid;
+            return container;
+        }
+
+        private Button CreateConnectionActionButton(string label, UserConnectionInfo item, RoutedEventHandler clickHandler, bool isPrimary)
+        {
+            var button = new Button
+            {
+                Content = label,
+                Tag = item,
+                Height = 38,
+                MinWidth = 110,
+                Margin = new Thickness(10, 0, 0, 0),
+                Padding = new Thickness(14, 8, 14, 8),
+                Background = isPrimary ? GetThemeBrush("AccentBrush") : GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = isPrimary ? Brushes.White : GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = isPrimary ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = isPrimary ? new Thickness(0) : new Thickness(1),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold
+            };
+            button.Click += clickHandler;
+            return button;
+        }
+
+        private async void RefreshConnections_Click(object sender, RoutedEventArgs e)
+        {
+            ConnectionsStatusText.Text = "Atualizando conexões...";
+            await RefreshConnectionsCacheAsync();
+        }
+
+        private async void AcceptConnectionRequest_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserConnectionInfo item } || _connectionService == null)
+            {
+                return;
+            }
+
+            var result = await _connectionService.AcceptConnectionAsync(item);
+            if (!result.Success)
+            {
+                ConnectionsStatusText.Text = $"Falha ao aceitar conexão: {result.ErrorMessage}";
+                ConnectionsStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                return;
+            }
+
+            await RefreshConnectionsCacheAsync();
+            ConnectionsStatusText.Text = $"Conexão com {item.ConnectedUserName} aceita com sucesso.";
+            ConnectionsStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+        }
+
+        private async void DeclineConnectionRequest_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserConnectionInfo item } || _connectionService == null)
+            {
+                return;
+            }
+
+            var result = await _connectionService.DeclineConnectionAsync(item);
+            if (!result.Success)
+            {
+                ConnectionsStatusText.Text = $"Falha ao recusar conexão: {result.ErrorMessage}";
+                ConnectionsStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                return;
+            }
+
+            await RefreshConnectionsCacheAsync();
+            ConnectionsStatusText.Text = "Solicitação recusada sem notificar o outro usuário.";
+            ConnectionsStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+        }
+
+        private async void DismissConnectionNotification_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserConnectionInfo item } || _connectionService == null)
+            {
+                return;
+            }
+
+            var result = await _connectionService.MarkNotificationAsReadAsync(item);
+            if (!result.Success)
+            {
+                ConnectionsStatusText.Text = $"Falha ao atualizar notificação: {result.ErrorMessage}";
+                ConnectionsStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                return;
+            }
+
+            await RefreshConnectionsCacheAsync();
+            ConnectionsStatusText.Text = "Atualização arquivada.";
+            ConnectionsStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+        }
+
+        private void UpdateConnectionsBadge()
+        {
+            var unreadCount = _connectionEntries.Count(item =>
+                string.Equals(item.Status, "pendingIncoming", StringComparison.OrdinalIgnoreCase)
+                || (!item.IsRead && !string.IsNullOrWhiteSpace(item.NotificationType)));
+
+            if (unreadCount > 0)
+            {
+                ConnectionsUnreadBadge.Visibility = Visibility.Visible;
+                ConnectionsUnreadCountText.Text = unreadCount > 99 ? "99+" : unreadCount.ToString();
+                ConnectionsNavButton.Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(6, 78, 59))
+                    : new SolidColorBrush(Color.FromRgb(236, 253, 245));
+            }
+            else
+            {
+                ConnectionsUnreadBadge.Visibility = Visibility.Collapsed;
+                ConnectionsUnreadCountText.Text = "0";
+                ConnectionsNavButton.Background = new SolidColorBrush(Colors.Transparent);
             }
         }
 
@@ -1935,11 +2893,50 @@ namespace MeuApp
             SidebarAvatarHost.Children.Add(CreateSidebarAvatarVisual(profile));
         }
 
+        private bool HasCustomAvatar(UserInfo? user)
+        {
+            return user != null && IsValidAvatarSelection(user.AvatarBody, user.AvatarHair, user.AvatarAccessory);
+        }
+
+        private bool HasCustomAvatar(Conversation? conversation)
+        {
+            return conversation != null && IsValidAvatarSelection(conversation.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarAccessory);
+        }
+
         private bool HasCustomAvatar(UserProfile? profile)
         {
-            return profile != null
-                && !string.IsNullOrWhiteSpace(profile.AvatarBody)
-                && !string.IsNullOrWhiteSpace(profile.AvatarHair);
+            return profile != null && IsValidAvatarSelection(profile.AvatarBody, profile.AvatarHair, profile.AvatarAccessory);
+        }
+
+        private bool IsValidAvatarSelection(string? body, string? hair, string? accessory)
+        {
+            var normalizedBody = body?.Trim() ?? string.Empty;
+            var normalizedHair = hair?.Trim() ?? string.Empty;
+            var normalizedAccessory = accessory?.Trim() ?? string.Empty;
+
+            return AvatarBodyOptions.Contains(normalizedBody, StringComparer.Ordinal)
+                && AvatarHairOptions.Contains(normalizedHair, StringComparer.Ordinal)
+                && (string.IsNullOrWhiteSpace(normalizedAccessory)
+                    || AvatarAccessoryOptions.Contains(normalizedAccessory, StringComparer.Ordinal));
+        }
+
+        private string NormalizeAvatarOption(string? selectedValue, IEnumerable<string> validOptions, string fallback)
+        {
+            var normalized = selectedValue?.Trim() ?? string.Empty;
+            return validOptions.Contains(normalized, StringComparer.Ordinal) ? normalized : fallback;
+        }
+
+        private string NormalizeOptionalAvatarOption(string? selectedValue, IEnumerable<string> validOptions)
+        {
+            var normalized = selectedValue?.Trim() ?? string.Empty;
+            return validOptions.Contains(normalized, StringComparer.Ordinal) ? normalized : string.Empty;
+        }
+
+        private void NormalizeProfileAvatarSelection(UserProfile profile)
+        {
+            profile.AvatarBody = NormalizeAvatarOption(profile.AvatarBody, AvatarBodyOptions, AvatarBodyOptions.First());
+            profile.AvatarHair = NormalizeAvatarOption(profile.AvatarHair, AvatarHairOptions, AvatarHairOptions.First());
+            profile.AvatarAccessory = NormalizeOptionalAvatarOption(profile.AvatarAccessory, AvatarAccessoryOptions);
         }
 
         private UIElement CreateProfileAvatarVisual(UserProfile? profile)
@@ -2025,6 +3022,11 @@ namespace MeuApp
 
         private Border CreateAvatarCompositeVisual(UserProfile profile, double size, CornerRadius cornerRadius, bool showBorder)
         {
+            return CreateAvatarCompositeVisual(profile.AvatarBody, profile.AvatarHair, profile.AvatarAccessory, size, cornerRadius, showBorder);
+        }
+
+        private Border CreateAvatarCompositeVisual(string body, string hair, string accessory, double size, CornerRadius cornerRadius, bool showBorder)
+        {
             var container = new Border
             {
                 Width = size,
@@ -2048,13 +3050,159 @@ namespace MeuApp
                 ClipToBounds = true
             };
 
-            AddAvatarLayer(layers, "Chars", profile.AvatarBody);
-            AddAvatarLayer(layers, "Hairs", profile.AvatarHair);
-            AddAvatarLayer(layers, "Acessory", profile.AvatarAccessory);
+            AddAvatarLayer(layers, "Chars", body);
+            AddAvatarLayer(layers, "Hairs", hair);
+            AddAvatarLayer(layers, "Acessory", accessory);
 
             viewbox.Child = layers;
             container.Child = viewbox;
             return container;
+        }
+
+        private UIElement CreateUserAvatarVisual(UserInfo? user, double size, bool showBorder = false)
+        {
+            if (HasCustomAvatar(user))
+            {
+                return CreateAvatarCompositeVisual(user!.AvatarBody, user.AvatarHair, user.AvatarAccessory, size, new CornerRadius(size / 2), showBorder);
+            }
+
+            return CreateFallbackAvatarVisual(user?.Name, size, showBorder, GetThemeBrush("AccentBrush"));
+        }
+
+        private UIElement CreateConversationAvatarVisual(Conversation? conversation, double size, bool showBorder = false)
+        {
+            if (HasCustomAvatar(conversation))
+            {
+                return CreateAvatarCompositeVisual(conversation!.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarAccessory, size, new CornerRadius(size / 2), showBorder);
+            }
+
+            return CreateFallbackAvatarVisual(conversation?.ContactName, size, showBorder, new SolidColorBrush(Color.FromRgb(0, 168, 132)));
+        }
+
+        private Grid CreateFallbackAvatarVisual(string? displayName, double size, bool showBorder, Brush fill)
+        {
+            var grid = new Grid
+            {
+                Width = size,
+                Height = size
+            };
+            grid.Children.Add(new Ellipse
+            {
+                Fill = fill,
+                Width = size,
+                Height = size,
+                Stroke = showBorder ? GetThemeBrush("CardBorderBrush") : Brushes.Transparent,
+                StrokeThickness = showBorder ? 1 : 0
+            });
+            grid.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(displayName) ? "?" : displayName[..1].ToUpperInvariant(),
+                Foreground = Brushes.White,
+                FontSize = Math.Max(12, size * 0.38),
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            return grid;
+        }
+
+        private async Task<UserInfo?> LoadUserInfoByIdAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(_idToken))
+            {
+                return null;
+            }
+
+            try
+            {
+                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{userId}";
+                var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var content = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    DebugHelper.WriteLine($"[LoadUserInfoByIdAsync] Falha ao carregar {userId}: {response.StatusCode} | {content}");
+                    return null;
+                }
+
+                using var doc = JsonDocument.Parse(content);
+                if (!doc.RootElement.TryGetProperty("fields", out var fields))
+                {
+                    return null;
+                }
+
+                return new UserInfo
+                {
+                    UserId = userId,
+                    Name = GetFirestoreStringValue(fields, "name"),
+                    Email = GetFirestoreStringValue(fields, "email"),
+                    Registration = GetFirestoreStringValue(fields, "registration"),
+                    Course = GetFirestoreStringValue(fields, "course"),
+                    Role = GetFirestoreStringValue(fields, "role"),
+                    AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
+                    AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
+                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory")
+                };
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[LoadUserInfoByIdAsync] Exceção ao carregar {userId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string GetFirestoreStringValue(JsonElement fields, string fieldName)
+        {
+            return fields.TryGetProperty(fieldName, out var field) && field.TryGetProperty("stringValue", out var value)
+                ? value.GetString() ?? string.Empty
+                : string.Empty;
+        }
+
+        private async Task EnrichConversationAvatarsAsync(List<Conversation> conversations)
+        {
+            foreach (var conversation in conversations)
+            {
+                if (HasCustomAvatar(conversation))
+                {
+                    continue;
+                }
+
+                var user = await LoadUserInfoByIdAsync(conversation.ContactId);
+                if (user == null)
+                {
+                    continue;
+                }
+
+                conversation.ContactAvatarBody = user.AvatarBody;
+                conversation.ContactAvatarHair = user.AvatarHair;
+                conversation.ContactAvatarAccessory = user.AvatarAccessory;
+            }
+        }
+
+        private async Task EnrichTeamMembersAvatarsAsync(List<TeamWorkspaceInfo> teams)
+        {
+            foreach (var team in teams)
+            {
+                foreach (var member in team.Members)
+                {
+                    if (HasCustomAvatar(member))
+                    {
+                        continue;
+                    }
+
+                    var user = await LoadUserInfoByIdAsync(member.UserId);
+                    if (user == null)
+                    {
+                        continue;
+                    }
+
+                    member.AvatarBody = user.AvatarBody;
+                    member.AvatarHair = user.AvatarHair;
+                    member.AvatarAccessory = user.AvatarAccessory;
+                }
+            }
         }
 
         private void AddAvatarLayer(Panel host, string folder, string option)
@@ -2086,8 +3234,9 @@ namespace MeuApp
             {
                 return new BitmapImage(new Uri($"pack://application:,,,/img/avatar/{folder}/{option}.png", UriKind.Absolute));
             }
-            catch
+            catch (Exception ex)
             {
+                DebugHelper.WriteLine($"[Avatar] Falha ao carregar recurso {folder}/{option}.png: {ex.Message}");
                 return null;
             }
         }
@@ -2172,9 +3321,9 @@ namespace MeuApp
                 return;
             }
 
-            var selectedBody = string.IsNullOrWhiteSpace(_currentProfile.AvatarBody) ? AvatarBodyOptions.First() : _currentProfile.AvatarBody;
-            var selectedHair = string.IsNullOrWhiteSpace(_currentProfile.AvatarHair) ? AvatarHairOptions.First() : _currentProfile.AvatarHair;
-            var selectedAccessory = _currentProfile.AvatarAccessory ?? string.Empty;
+            var selectedBody = NormalizeAvatarOption(_currentProfile.AvatarBody, AvatarBodyOptions, AvatarBodyOptions.First());
+            var selectedHair = NormalizeAvatarOption(_currentProfile.AvatarHair, AvatarHairOptions, AvatarHairOptions.First());
+            var selectedAccessory = NormalizeOptionalAvatarOption(_currentProfile.AvatarAccessory, AvatarAccessoryOptions);
 
             var dialog = new MetroWindow
             {
@@ -2368,7 +3517,7 @@ namespace MeuApp
 
             var footerHint = new TextBlock
             {
-                Text = "Ao aplicar, a prévia do perfil é atualizada. Depois use Salvar perfil profissional para persistir no Firebase.",
+                Text = "Ao aplicar, o avatar é atualizado na tela e salvo no Firebase imediatamente.",
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -2405,14 +3554,64 @@ namespace MeuApp
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand
             };
-            applyButton.Click += (buttonSender, buttonArgs) =>
+            applyButton.Click += async (buttonSender, buttonArgs) =>
             {
+                if (_currentProfile == null)
+                {
+                    dialog.Close();
+                    return;
+                }
+
                 _currentProfile.AvatarBody = selectedBody;
                 _currentProfile.AvatarHair = selectedHair;
                 _currentProfile.AvatarAccessory = selectedAccessory;
+                NormalizeProfileAvatarSelection(_currentProfile);
                 RefreshAvatarUi(_currentProfile);
-                ProfessionalProfileStatusText.Text = "Avatar atualizado. Clique em Salvar perfil profissional para persistir.";
-                dialog.Close();
+
+                applyButton.IsEnabled = false;
+                cancelButton.IsEnabled = false;
+                footerHint.Text = "Salvando avatar no Firebase...";
+
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(_idToken) || string.IsNullOrWhiteSpace(_currentProfile.UserId))
+                    {
+                        ProfessionalProfileStatusText.Text = "Avatar atualizado localmente. Faça login novamente para sincronizar com o Firebase.";
+                        dialog.Close();
+                        return;
+                    }
+
+                    var saveResult = await SaveProfessionalProfileAsync(_currentProfile, _idToken);
+                    if (saveResult.Success)
+                    {
+                        ProfessionalProfileStatusText.Text = "Avatar salvo com sucesso no Firebase.";
+                        dialog.Close();
+                        return;
+                    }
+
+                    ProfessionalProfileStatusText.Text = "Avatar atualizado localmente, mas o Firebase recusou a gravação.";
+                    footerHint.Text = "Falha ao salvar avatar no Firebase. Você pode tentar novamente.";
+                    MessageBox.Show(
+                        $"Não foi possível salvar o avatar no Firebase.\n\n{saveResult.ErrorMessage}",
+                        "Erro ao salvar avatar",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+                catch (Exception ex)
+                {
+                    ProfessionalProfileStatusText.Text = "Avatar atualizado localmente, mas ocorreu um erro ao salvar no Firebase.";
+                    footerHint.Text = "Erro ao salvar avatar. Revise sua conexão e tente novamente.";
+                    MessageBox.Show(
+                        $"Erro inesperado ao salvar avatar: {ex.Message}",
+                        "Erro",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                finally
+                {
+                    applyButton.IsEnabled = true;
+                    cancelButton.IsEnabled = true;
+                }
             };
             Grid.SetColumn(applyButton, 2);
             footer.Children.Add(applyButton);
@@ -4355,7 +5554,7 @@ namespace MeuApp
 
             if (string.IsNullOrWhiteSpace(query))
             {
-                MessageBox.Show("Digite algo para pesquisar!", "Pesquisa", MessageBoxButton.OK, MessageBoxImage.Information);
+                HideSearchSlidePanel();
                 DebugHelper.WriteLine("Busca cancelada: query vazia");
                 return;
             }
@@ -4367,21 +5566,9 @@ namespace MeuApp
                 return;
             }
 
-            // Abrir janela de resultados
-            var searchWindow = new SearchResultsWindow(query, _currentProfile?.UserId ?? "", _currentProfile);
-            searchWindow.Owner = this;
-            
-            // REGISTRAR HANDLER para quando conversa for iniciada
-            searchWindow.OnConversationStarted += (selectedUser) =>
-            {
-                DebugHelper.WriteLine($"[MainWindow] Conversa iniciada com: {selectedUser.Name}");
-                ShowConversationInMainWindow(selectedUser);
-            };
-            
-            searchWindow.ShowLoading();
-            searchWindow.Show();
-
-            DebugHelper.WriteLine("Janela de resultados aberta, iniciando busca...");
+            await RefreshConnectionsCacheAsync();
+            SetSearchSlideLoadingState(query);
+            DebugHelper.WriteLine("Painel inline de resultados aberto, iniciando busca...");
 
             // Executar busca assincronamente
             try
@@ -4390,17 +5577,19 @@ namespace MeuApp
                 DebugHelper.WriteLine("UserSearchService criado");
 
                 var results = await searchService.SearchUsersAsync(query);
+                results = results
+                    .Where(user => !string.Equals(user.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                foreach (var user in results)
+                {
+                    user.IsCurrentUser = string.Equals(user.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase);
+                    user.ConnectionState = _connectionService?.GetRelationshipState(user.UserId, _connectionEntries) ?? "none";
+                }
 
                 DebugHelper.WriteLine($"Busca concluída. Resultados: {results?.Count ?? 0}");
 
-                if (results == null || results.Count == 0)
-                {
-                    DebugHelper.WriteLine("AVISO: Nenhum resultado encontrado via Firebase, usando dados simulados...");
-                    // Usar dados simulados para teste (remover quando Firebase permissions for resolvido)
-                    results = MockData.SearchMockUsers(query);
-                    DebugHelper.WriteLine($"Dados simulados: {results.Count} resultados");
-                }
-                else
+                if (results != null && results.Count > 0)
                 {
                     foreach (var result in results)
                     {
@@ -4408,27 +5597,296 @@ namespace MeuApp
                     }
                 }
 
-                searchWindow.SetResults(results ?? new System.Collections.Generic.List<UserInfo>());
+                RenderSearchSlideResults(results ?? new List<UserInfo>());
             }
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"EXCEÇÃO na busca: {ex.GetType().Name}");
                 DebugHelper.WriteLine($"Mensagem: {ex.Message}");
                 DebugHelper.WriteLine($"Stack: {ex.StackTrace}");
-                
-                DebugHelper.WriteLine("Usando dados simulados como fallback...");
-                var mockResults = MockData.SearchMockUsers(query);
-                searchWindow.SetResults(mockResults);
 
-                MessageBox.Show(
-                    $"Firebase indisponível. Usando dados simulados para demonstração.\n\nErro: {ex.Message}",
-                    "Busca com Dados Simulados",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
+                SearchSlideStatusText.Text = $"Nao foi possivel consultar conexoes agora. {ex.Message}";
+                SearchSlideStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                RenderSearchSlideResults(new List<UserInfo>());
+                SearchSlideEmptyStateText.Text = "Revise sua conexão com o Firebase e tente novamente.";
+                SearchSlideEmptyStateText.Visibility = Visibility.Visible;
             }
 
             DebugHelper.WriteLine("=== BUSCA FINALIZADA ===\n");
+        }
+
+        private void SetSearchSlideLoadingState(string query)
+        {
+            _searchSlideQuery = query;
+            _searchSlideResults.Clear();
+            SearchSlideTitleText.Text = $"Resultados para \"{query}\"";
+            SearchSlideStatusText.Text = "Buscando por nome, matricula e email dentro da sua rede academica...";
+            SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            SearchSlideResultsHost.Children.Clear();
+            SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
+            SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Buscando agora", "Assim que os perfis forem encontrados, eles aparecem aqui sem abrir uma nova janela."));
+            ShowSearchSlidePanel();
+        }
+
+        private void RenderSearchSlideResults(List<UserInfo> results)
+        {
+            _searchSlideResults = results;
+            SearchSlideResultsHost.Children.Clear();
+
+            if (results.Count == 0)
+            {
+                SearchSlideStatusText.Text = string.IsNullOrWhiteSpace(_searchSlideQuery)
+                    ? "Nenhuma pesquisa ativa."
+                    : $"Nenhum perfil encontrado para \"{_searchSlideQuery}\".";
+                SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                SearchSlideEmptyStateText.Text = "Tente outro nome, matrícula ou email para localizar a pessoa certa.";
+                SearchSlideEmptyStateText.Visibility = Visibility.Visible;
+                return;
+            }
+
+            SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
+            SearchSlideStatusText.Text = results.Count == 1
+                ? "1 perfil encontrado. Você já pode iniciar conversa ou enviar conexão daqui."
+                : $"{results.Count} perfis encontrados. Escolha quem deseja abrir no fluxo de conversas.";
+            SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+            foreach (var user in results)
+            {
+                SearchSlideResultsHost.Children.Add(CreateSearchSlideResultCard(user));
+            }
+        }
+
+        private Border CreateSearchSlideInfoCard(string title, string description)
+        {
+            return new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Margin = new Thickness(0, 0, 0, 10),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontSize = 13,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = description,
+                            Margin = new Thickness(0, 6, 0, 0),
+                            FontSize = 11,
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        }
+                    }
+                }
+            };
+        }
+
+        private Border CreateSearchSlideResultCard(UserInfo user)
+        {
+            var card = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            layout.Children.Add(new Border
+            {
+                Width = 52,
+                Height = 52,
+                CornerRadius = new CornerRadius(26),
+                ClipToBounds = true,
+                Margin = new Thickness(0, 0, 14, 0),
+                Child = CreateUserAvatarVisual(user, 52, true)
+            });
+
+            var info = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            info.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(user.Name) ? "Sem nome" : user.Name,
+                FontSize = 14,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(user.Email) ? "Email indisponivel" : user.Email,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = $"Matricula: {(!string.IsNullOrWhiteSpace(user.Registration) ? user.Registration : "nao informada")}",
+                Margin = new Thickness(0, 2, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("TertiaryTextBrush")
+            });
+            if (!string.IsNullOrWhiteSpace(user.Course))
+            {
+                info.Children.Add(new TextBlock
+                {
+                    Text = user.Course,
+                    Margin = new Thickness(0, 2, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("TertiaryTextBrush")
+                });
+            }
+            Grid.SetColumn(info, 1);
+            layout.Children.Add(info);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(14, 0, 0, 0)
+            };
+
+            var conversationButton = new Button
+            {
+                Content = "Abrir conversa",
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = user
+            };
+            conversationButton.Click += SearchSlideStartConversation_Click;
+            actions.Children.Add(conversationButton);
+
+            var connectionButton = new Button
+            {
+                Content = user.ConnectionButtonLabel,
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 8, 14, 8),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                IsEnabled = user.CanCreateConnection,
+                Tag = user
+            };
+            connectionButton.Click += SearchSlideCreateConnection_Click;
+            actions.Children.Add(connectionButton);
+
+            Grid.SetColumn(actions, 2);
+            layout.Children.Add(actions);
+
+            card.Child = layout;
+            return card;
+        }
+
+        private async void SearchSlideCreateConnection_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserInfo user } || _connectionService == null)
+            {
+                return;
+            }
+
+            user.IsConnecting = true;
+            RenderSearchSlideResults(_searchSlideResults);
+
+            try
+            {
+                var result = await _connectionService.CreateConnectionRequestAsync(user);
+                if (!result.Success)
+                {
+                    SearchSlideStatusText.Text = $"Falha ao enviar conexao para {user.Name}: {result.ErrorMessage}";
+                    SearchSlideStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                user.IsConnecting = false;
+                user.ConnectionState = "pendingOutgoing";
+                await RefreshConnectionsCacheAsync();
+                SearchSlideStatusText.Text = $"Solicitacao enviada para {user.Name}.";
+                SearchSlideStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                RenderSearchSlideResults(_searchSlideResults);
+            }
+            catch (Exception ex)
+            {
+                user.IsConnecting = false;
+                SearchSlideStatusText.Text = $"Erro ao criar conexao: {ex.Message}";
+                SearchSlideStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                RenderSearchSlideResults(_searchSlideResults);
+            }
+        }
+
+        private void SearchSlideStartConversation_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserInfo user })
+            {
+                return;
+            }
+
+            DebugHelper.WriteLine($"[MainWindow] Conversa iniciada pelo painel inline com: {user.Name}");
+            ShowConversationInMainWindow(user);
+            SearchFriendsBox.Clear();
+            HideSearchSlidePanel();
+        }
+
+        private void CloseSearchSlide_Click(object sender, RoutedEventArgs e)
+        {
+            HideSearchSlidePanel();
+        }
+
+        private void ShowSearchSlidePanel()
+        {
+            SearchSlidePanel.Visibility = Visibility.Visible;
+
+            var opacityAnimation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180));
+            SearchSlidePanel.BeginAnimation(OpacityProperty, opacityAnimation);
+
+            if (SearchSlidePanel.RenderTransform is TranslateTransform transform)
+            {
+                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-18, 0, TimeSpan.FromMilliseconds(180)));
+            }
+        }
+
+        private void HideSearchSlidePanel()
+        {
+            if (SearchSlidePanel.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            var opacityAnimation = new DoubleAnimation(0, TimeSpan.FromMilliseconds(160));
+            opacityAnimation.Completed += (s, e) =>
+            {
+                SearchSlidePanel.Visibility = Visibility.Collapsed;
+                SearchSlideResultsHost.Children.Clear();
+                SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
+            };
+            SearchSlidePanel.BeginAnimation(OpacityProperty, opacityAnimation);
+
+            if (SearchSlidePanel.RenderTransform is TranslateTransform transform)
+            {
+                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-18, TimeSpan.FromMilliseconds(160)));
+            }
         }
 
         private async void TestFirebase_Click(object sender, RoutedEventArgs e)
@@ -4507,6 +5965,11 @@ namespace MeuApp
                             RefreshChatsUI();
                         }
                         break;
+                    case "Conexoes":
+                        ConnectionsContent.Visibility = Visibility.Visible;
+                        ConnectionsStatusText.Text = "Atualizando conexões...";
+                        await RefreshConnectionsCacheAsync();
+                        break;
                     case "Equipes":
                         TeamsContent.Visibility = Visibility.Visible;
                         break;
@@ -4534,10 +5997,12 @@ namespace MeuApp
         private void ResetNavigation()
         {
             ChatsContent.Visibility = Visibility.Collapsed;
+            ConnectionsContent.Visibility = Visibility.Collapsed;
             TeamsContent.Visibility = Visibility.Collapsed;
             CalendarContent.Visibility = Visibility.Collapsed;
             FilesContent.Visibility = Visibility.Collapsed;
             SettingsContent.Visibility = Visibility.Collapsed;
+            HideSearchSlidePanel();
         }
 
         private void LogoutButton_Click(object sender, RoutedEventArgs e)
@@ -4575,6 +6040,16 @@ namespace MeuApp
                 RenderTeamsList();
                 RenderTeamWorkspace();
             }
+
+            if (ConnectionsContent.Visibility == Visibility.Visible)
+            {
+                RenderConnectionsView();
+            }
+
+            if (SearchSlidePanel.Visibility == Visibility.Visible)
+            {
+                RenderSearchSlideResults(_searchSlideResults);
+            }
         }
 
         private async void SaveProfessionalProfile_Click(object sender, RoutedEventArgs e)
@@ -4595,6 +6070,7 @@ namespace MeuApp
             _currentProfile.ProgrammingLanguages = string.Join(", ", _selectedProgrammingLanguages.OrderBy(language => language));
             _currentProfile.PortfolioLink = PortfolioLinkTextBox.Text?.Trim() ?? string.Empty;
             _currentProfile.LinkedInLink = LinkedInLinkTextBox.Text?.Trim() ?? string.Empty;
+            NormalizeProfileAvatarSelection(_currentProfile);
 
             try
             {
@@ -4704,6 +6180,7 @@ namespace MeuApp
                 : new SolidColorBrush(Color.FromRgb(0, 120, 212));
 
             UpdateChatsBadge();
+            UpdateConnectionsBadge();
         }
 
         private void SetThemeBrush(string key, Color color)
@@ -4732,6 +6209,9 @@ namespace MeuApp
                         ConversationId = Guid.NewGuid().ToString(),
                         ContactId = contactUser.UserId,
                         ContactName = contactUser.Name,
+                        ContactAvatarBody = contactUser.AvatarBody,
+                        ContactAvatarHair = contactUser.AvatarHair,
+                        ContactAvatarAccessory = contactUser.AvatarAccessory,
                         LastMessage = "Conversa iniciada",
                         LastMessageTime = DateTime.Now,
                         Messages = new List<ChatMessage>()
@@ -5145,23 +6625,7 @@ namespace MeuApp
                 Height = 48,
                 Margin = new Thickness(0, 0, 12, 0)
             };
-
-            avatarGrid.Children.Add(new Ellipse
-            {
-                Fill = conv.HasUnread
-                    ? new SolidColorBrush(Color.FromRgb(14, 116, 144))
-                    : new SolidColorBrush(Color.FromRgb(0, 120, 212))
-            });
-
-            avatarGrid.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(conv.ContactName) ? "?" : conv.ContactName[..1].ToUpperInvariant(),
-                Foreground = new SolidColorBrush(Colors.White),
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            });
+            avatarGrid.Children.Add(CreateConversationAvatarVisual(conv, 48));
 
             Grid.SetColumn(avatarGrid, 0);
             grid.Children.Add(avatarGrid);
@@ -5430,19 +6894,7 @@ namespace MeuApp
                 Height = 46,
                 Margin = new Thickness(0, 0, 14, 0)
             };
-            avatarGrid.Children.Add(new Ellipse
-            {
-                Fill = new SolidColorBrush(Color.FromRgb(0, 168, 132))
-            });
-            avatarGrid.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(conv.ContactName) ? "?" : conv.ContactName[..1].ToUpperInvariant(),
-                Foreground = Brushes.White,
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            });
+            avatarGrid.Children.Add(CreateConversationAvatarVisual(conv, 46));
             Grid.SetColumn(avatarGrid, 0);
             headerGrid.Children.Add(avatarGrid);
 
@@ -5764,6 +7216,27 @@ namespace MeuApp
                 MaxWidth = 520
             };
 
+            var row = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = msg.IsOwn ? HorizontalAlignment.Right : HorizontalAlignment.Left
+            };
+
+            if (!msg.IsOwn)
+            {
+                row.Children.Add(new Border
+                {
+                    Width = 36,
+                    Height = 36,
+                    CornerRadius = new CornerRadius(18),
+                    Margin = new Thickness(0, 0, 8, 0),
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Child = _selectedConversation != null
+                        ? CreateConversationAvatarVisual(_selectedConversation, 36)
+                        : CreateFallbackAvatarVisual(msg.SenderName, 36, false, GetThemeBrush("AccentBrush"))
+                });
+            }
+
             var bubble = new Border
             {
                 Background = msg.IsOwn 
@@ -5811,7 +7284,8 @@ namespace MeuApp
             });
 
             bubble.Child = stack;
-            container.Child = bubble;
+            row.Children.Add(bubble);
+            container.Child = row;
             return container;
         }
 
@@ -5823,6 +7297,7 @@ namespace MeuApp
 
                 var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
                 var conversations = await chatService.LoadConversationsAsync();
+                await EnrichConversationAvatarsAsync(conversations);
 
                 _conversations = conversations;
 
@@ -5857,6 +7332,7 @@ namespace MeuApp
                 }
 
                 var teams = await _teamService.LoadTeamsAsync();
+                await EnrichTeamMembersAvatarsAsync(teams);
 
                 _teamWorkspaces.Clear();
                 foreach (var team in teams)

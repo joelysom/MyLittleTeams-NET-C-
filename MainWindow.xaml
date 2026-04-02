@@ -118,6 +118,33 @@
                             </Border>
                         </Grid>
                     </Button>
+                    <Button x:Name="ConnectionsNavButton" Click="NavButton_Click" Tag="Conexoes" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Stretch">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="🤝 Conexões" VerticalAlignment="Center"/>
+
+                            <Border x:Name="ConnectionsUnreadBadge"
+                                    Grid.Column="1"
+                                    Background="#FF0F766E"
+                                    CornerRadius="10"
+                                    Padding="7,2"
+                                    Margin="10,0,0,0"
+                                    Visibility="Collapsed"
+                                    VerticalAlignment="Center">
+                                <TextBlock x:Name="ConnectionsUnreadCountText"
+                                           Text="0"
+                                           Foreground="White"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Center"/>
+                            </Border>
+                        </Grid>
+                    </Button>
                     <Button Click="NavButton_Click" Tag="Equipes" Content="👥 Equipes" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
                     <Button Click="NavButton_Click" Tag="Calendario" Content="📅 Calendario" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
                     <Button Click="NavButton_Click" Tag="Arquivos" Content="📁 Arquivos" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left"/>
@@ -172,7 +199,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="🔍 Pesquisar amigos..."/>
+                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="🔍 Pesquisar conexões..." KeyDown="SearchFriendsBox_KeyDown"/>
                             <Button Grid.Column="1" Content="🔍" Background="Transparent" Foreground="{DynamicResource AccentBrush}" FontSize="14" Padding="8" Width="40" Cursor="Hand" BorderThickness="0" Click="SearchFriends_Click"/>
                         </Grid>
                     </Border>
@@ -206,6 +233,7 @@
                                 <StackPanel>
                                     <TextBlock Text="👥 Minhas Equipes" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                     <TextBlock Text="Gerencie grupos de projeto, convites e materiais compartilhados sem poluir a tela inicial." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="TeamSyncStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                                 </StackPanel>
 
                                 <Button x:Name="TeamEntryOptionsButton"
@@ -473,6 +501,38 @@
                         </StackPanel>
                     </ScrollViewer>
 
+                    <!-- Connections -->
+                    <ScrollViewer x:Name="ConnectionsContent" Visibility="Collapsed" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Orientation="Vertical">
+                            <Grid Margin="0,0,0,18">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel>
+                                    <TextBlock Text="🤝 Minhas conexões" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,8" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Acompanhe solicitações pendentes, respostas recebidas e sua rede acadêmica em um só lugar." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <Button Grid.Column="1"
+                                        Content="Atualizar"
+                                        Width="120"
+                                        Height="42"
+                                        Background="{DynamicResource MutedCardBackgroundBrush}"
+                                        Foreground="{DynamicResource PrimaryTextBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1"
+                                        FontWeight="SemiBold"
+                                        Cursor="Hand"
+                                        Click="RefreshConnections_Click"/>
+                            </Grid>
+
+                            <TextBlock x:Name="ConnectionsStatusText" Text="" FontSize="12" Margin="0,0,0,14" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                            <StackPanel x:Name="ConnectionsSectionsHost" Orientation="Vertical"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
                     <!-- Calendar -->
                     <StackPanel x:Name="CalendarContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
                         <TextBlock Text="📅 Calendario" FontSize="20" FontWeight="ExtraBold" Margin="0,0,0,16" Foreground="{DynamicResource PrimaryTextBrush}"/>
@@ -726,6 +786,90 @@
                         </Border>
                         </StackPanel>
                     </ScrollViewer>
+
+                    <Border x:Name="SearchSlidePanel"
+                            Visibility="Collapsed"
+                            Panel.ZIndex="40"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Top"
+                            Width="440"
+                            MaxHeight="620"
+                            Margin="0,4,0,0"
+                            Background="{DynamicResource CardBackgroundBrush}"
+                            BorderBrush="{DynamicResource AccentBrush}"
+                            BorderThickness="1"
+                            CornerRadius="24"
+                            Padding="0"
+                            Opacity="0">
+                        <Border.RenderTransform>
+                            <TranslateTransform Y="-18"/>
+                        </Border.RenderTransform>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Background="{DynamicResource MutedCardBackgroundBrush}" CornerRadius="24,24,0,0" Padding="18,16,18,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel>
+                                        <TextBlock x:Name="SearchSlideTitleText"
+                                                   Text="Pesquisar conexões"
+                                                   FontSize="16"
+                                                   FontWeight="ExtraBold"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <TextBlock Text="Busque por nome, matrícula ou email sem sair da tela de conversas."
+                                                   Margin="0,6,0,0"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                    </StackPanel>
+
+                                    <Button Grid.Column="1"
+                                            Content="✕"
+                                            Width="36"
+                                            Height="36"
+                                            Margin="12,0,0,0"
+                                            Background="Transparent"
+                                            Foreground="{DynamicResource PrimaryTextBrush}"
+                                            BorderThickness="0"
+                                            FontSize="14"
+                                            Cursor="Hand"
+                                            Click="CloseSearchSlide_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <TextBlock x:Name="SearchSlideStatusText"
+                                       Grid.Row="1"
+                                       Text=""
+                                       Margin="18,14,18,12"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"/>
+
+                            <ScrollViewer Grid.Row="2"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Padding="18,0,18,18">
+                                <StackPanel>
+                                    <TextBlock x:Name="SearchSlideEmptyStateText"
+                                               Text=""
+                                               Visibility="Collapsed"
+                                               Margin="0,6,0,0"
+                                               FontSize="12"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                    <StackPanel x:Name="SearchSlideResultsHost" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </Border>
             </Grid>
         </Grid>
     </Grid>

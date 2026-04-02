@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using MahApps.Metro.Controls;
+using System.Threading.Tasks;
 
 namespace MeuApp
 {
@@ -13,21 +14,25 @@ namespace MeuApp
         // Evento disparado quando usuário iniciar conversa
         public delegate void ConversationStartedEventHandler(UserInfo selectedUser);
         public event ConversationStartedEventHandler? OnConversationStarted;
+        public delegate void ConnectionCreatedEventHandler(UserInfo selectedUser);
+        public event ConnectionCreatedEventHandler? OnConnectionCreated;
 
         public ObservableCollection<UserInfo> Results { get; set; }
         private string _searchQuery;
         private string _currentUserId;
         private UserProfile? _currentProfile;
+        private readonly ConnectionService? _connectionService;
 
-        public SearchResultsWindow(string query, string currentUserId, UserProfile? currentProfile = null)
+        public SearchResultsWindow(string query, string currentUserId, string idToken, UserProfile? currentProfile = null)
         {
             InitializeComponent();
             _searchQuery = query;
             _currentUserId = currentUserId;
             _currentProfile = currentProfile;
+            _connectionService = string.IsNullOrWhiteSpace(idToken) || currentProfile == null ? null : new ConnectionService(idToken, currentProfile);
             Results = new ObservableCollection<UserInfo>();
             DataContext = this;
-            SearchQueryText.Text = $"Buscando por: \"{query}\"";
+            SearchQueryText.Text = $"Pesquisando conexões por: \"{query}\"";
         }
 
         public void SetResults(System.Collections.Generic.List<UserInfo> users)
@@ -59,17 +64,51 @@ namespace MeuApp
             LoadingText.Visibility = Visibility.Visible;
         }
 
-        private void AddFriend_Click(object sender, RoutedEventArgs e)
+        private async void AddFriend_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is Button button && button.Tag is string friendId)
+            if (sender is not Button button || button.DataContext is not UserInfo user)
+            {
+                return;
+            }
+
+            if (_connectionService == null)
             {
                 MessageBox.Show(
-                    $"Amigo adicionado com sucesso! 👋\n\nUserId: {friendId}",
-                    "Sucesso",
+                    "Sua sessão atual não possui credenciais para criar conexões. Faça login novamente e tente outra vez.",
+                    "Conexão indisponível",
                     MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
-                // TODO: Implementar lógica de adicionar amigo no banco de dados
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            user.IsConnecting = true;
+            try
+            {
+                var result = await _connectionService.CreateConnectionRequestAsync(user);
+                if (!result.Success)
+                {
+                    MessageBox.Show(
+                        $"Não foi possível enviar a solicitação de conexão agora.\n\n{result.ErrorMessage}",
+                        "Falha ao conectar",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                user.ConnectionState = "pendingOutgoing";
+                OnConnectionCreated?.Invoke(user);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Erro inesperado ao criar conexão:\n\n{ex.Message}",
+                    "Erro",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                user.IsConnecting = false;
             }
         }
 

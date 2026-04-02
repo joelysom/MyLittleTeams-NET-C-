@@ -1,15 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace MeuApp
 {
-    public class UserInfo
+    public class UserInfo : INotifyPropertyChanged
     {
         public string UserId { get; set; } = "";
         public string Name { get; set; } = "";
@@ -17,6 +19,14 @@ namespace MeuApp
         public string Registration { get; set; } = "";
         public string Course { get; set; } = "";
         public string? Role { get; set; } = "member";
+        public string AvatarBody { get; set; } = "";
+        public string AvatarHair { get; set; } = "";
+        public string AvatarAccessory { get; set; } = "";
+        private bool _isConnecting;
+        private bool _isCurrentUser;
+        private string _connectionState = "none";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         public string DisplayLabel
         {
@@ -26,6 +36,82 @@ namespace MeuApp
                 var email = string.IsNullOrWhiteSpace(Email) ? "Sem email" : Email;
                 return $"{Name} | {registration} | {email}";
             }
+        }
+
+        public string ConnectionState
+        {
+            get => _connectionState;
+            set
+            {
+                var normalized = string.IsNullOrWhiteSpace(value) ? "none" : value.Trim();
+                if (string.Equals(_connectionState, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                _connectionState = normalized;
+                RaiseConnectionUiPropertiesChanged();
+            }
+        }
+
+        public bool IsConnecting
+        {
+            get => _isConnecting;
+            set
+            {
+                if (_isConnecting == value)
+                {
+                    return;
+                }
+
+                _isConnecting = value;
+                RaiseConnectionUiPropertiesChanged();
+            }
+        }
+
+        public bool IsCurrentUser
+        {
+            get => _isCurrentUser;
+            set
+            {
+                if (_isCurrentUser == value)
+                {
+                    return;
+                }
+
+                _isCurrentUser = value;
+                RaiseConnectionUiPropertiesChanged();
+            }
+        }
+
+        public string ConnectionButtonLabel => IsCurrentUser
+            ? "Seu perfil"
+            : IsConnecting
+                ? "Enviando..."
+                : ConnectionState switch
+                {
+                    "connected" => "Conectado",
+                    "pendingOutgoing" => "Pendente",
+                    "pendingIncoming" => "Responder na aba",
+                    _ => "Conectar"
+                };
+
+        public bool CanCreateConnection => !IsCurrentUser
+            && !IsConnecting
+            && string.Equals(ConnectionState, "none", StringComparison.OrdinalIgnoreCase);
+
+        private void RaiseConnectionUiPropertiesChanged()
+        {
+            OnPropertyChanged(nameof(ConnectionState));
+            OnPropertyChanged(nameof(IsConnecting));
+            OnPropertyChanged(nameof(IsCurrentUser));
+            OnPropertyChanged(nameof(ConnectionButtonLabel));
+            OnPropertyChanged(nameof(CanCreateConnection));
+        }
+
+        private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
     }
 
@@ -233,6 +319,10 @@ namespace MeuApp
                     user.Course = ExtractField(fields, "course", documentIndex) ?? "";
                     if (!string.IsNullOrEmpty(user.Course))
                         Debug.WriteLine($"  [ExtractUserInfo #{documentIndex}] Curso: {user.Course}");
+
+                    user.AvatarBody = ExtractField(fields, "avatarBody", documentIndex) ?? "";
+                    user.AvatarHair = ExtractField(fields, "avatarHair", documentIndex) ?? "";
+                    user.AvatarAccessory = ExtractField(fields, "avatarAccessory", documentIndex) ?? "";
 
                     // Listar campos disponíveis se houver campos não esperados
                     var availableFields = fields.EnumerateObject().Select(p => p.Name).ToList();

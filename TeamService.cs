@@ -529,7 +529,10 @@ namespace MeuApp
                             email = new { stringValue = member.Email ?? "" },
                             registration = new { stringValue = member.Registration ?? "" },
                             course = new { stringValue = member.Course ?? "" },
-                            role = new { stringValue = member.Role ?? "member" }
+                            role = new { stringValue = member.Role ?? "member" },
+                            avatarBody = new { stringValue = member.AvatarBody ?? "" },
+                            avatarHair = new { stringValue = member.AvatarHair ?? "" },
+                            avatarAccessory = new { stringValue = member.AvatarAccessory ?? "" }
                         }
                     }
                 });
@@ -799,7 +802,10 @@ namespace MeuApp
                                 Email = GetString(memberFields, "email"),
                                 Registration = GetString(memberFields, "registration"),
                                 Course = GetString(memberFields, "course"),
-                                Role = GetString(memberFields, "role")
+                                Role = GetString(memberFields, "role"),
+                                AvatarBody = GetString(memberFields, "avatarBody"),
+                                AvatarHair = GetString(memberFields, "avatarHair"),
+                                AvatarAccessory = GetString(memberFields, "avatarAccessory")
                             };
 
                             if (!string.IsNullOrEmpty(member.UserId))

@@ -38,10 +38,21 @@ service cloud.firestore {
         && data.isActive is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
+        && data.projectProgress is int
+        && data.projectProgress >= 0
+        && data.projectProgress <= 100
+        && (data.projectDeadline == null || data.projectDeadline is timestamp)
+        && data.projectStatus is string
         && data.ucs is list
         && data.memberIds is list
         && request.auth.uid in data.memberIds
-        && data.members is list;
+        && data.members is list
+        && data.milestones is list
+        && data.assets is list
+        && data.taskColumns is list
+        && data.notifications is list
+        && data.chatMessages is list
+        && data.csdBoard is map;
     }
 
     function validUserTeamPayload(data, userId) {
@@ -74,6 +85,67 @@ service cloud.firestore {
         && (
           data.userId == request.auth.uid ||
           isTeamCreator(data.teamId)
+        );
+    }
+
+    function connectionVisible(data) {
+      return signedIn() && (
+        data.userAId == request.auth.uid ||
+        data.userBId == request.auth.uid ||
+        (data.userIds is list && request.auth.uid in data.userIds)
+      );
+    }
+
+    function connectionDocument(connectionId) {
+      return get(/databases/$(database)/documents/connections/$(connectionId));
+    }
+
+    function connectionExists(connectionId) {
+      return connectionDocument(connectionId).data != null;
+    }
+
+    function isConnectionParticipant(connectionId) {
+      return signedIn()
+        && connectionExists(connectionId)
+        && request.auth.uid in connectionDocument(connectionId).data.userIds;
+    }
+
+    function validConnectionPayload(data, connectionId) {
+      return data.connectionId is string
+        && data.connectionId == connectionId
+        && data.userAId is string
+        && data.userBId is string
+        && data.userAId != data.userBId
+        && data.userIds is list
+        && data.userIds.size() == 2
+        && data.userAId in data.userIds
+        && data.userBId in data.userIds
+        && request.auth.uid in data.userIds
+        && data.requestedBy is string
+        && data.respondedBy is string
+        && data.status is string
+        && (data.status == 'pending' || data.status == 'active' || data.status == 'declined')
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function canWriteUserConnectionReference(data) {
+      return signedIn()
+        && data.userId is string
+        && data.connectionId is string
+        && data.connectedUserId is string
+        && data.connectedUserName is string
+        && data.connectedUserEmail is string
+        && data.requestedBy is string
+        && data.status is string
+        && data.notificationType is string
+        && data.notificationMessage is string
+        && data.isRead is bool
+        && data.addedAt is timestamp
+        && data.updatedAt is timestamp
+        && (
+          data.userId == request.auth.uid ||
+          isConnectionParticipant(data.connectionId)
         );
     }
 
@@ -130,6 +202,36 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy;
 
       allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /connections/{connectionId} {
+      allow get: if connectionVisible(resource.data);
+      allow list: if signedIn();
+
+      allow create: if signedIn()
+        && validConnectionPayload(request.resource.data, connectionId)
+        && request.resource.data.requestedBy == request.auth.uid;
+
+      allow update: if connectionVisible(resource.data)
+        && validConnectionPayload(request.resource.data, connectionId)
+        && request.resource.data.userAId == resource.data.userAId
+        && request.resource.data.userBId == resource.data.userBId
+        && request.resource.data.requestedBy == resource.data.requestedBy;
+
+      allow delete: if false;
+    }
+
+    match /userConnections/{documentId} {
+      allow get: if signedIn() && resource.data.userId == request.auth.uid;
+      allow list: if signedIn();
+
+      allow create, update: if canWriteUserConnectionReference(request.resource.data);
+
+      allow delete: if signedIn()
+        && (
+          resource.data.userId == request.auth.uid ||
+          isConnectionParticipant(resource.data.connectionId)
+        );
     }
 
     match /userTeams/{documentId} {

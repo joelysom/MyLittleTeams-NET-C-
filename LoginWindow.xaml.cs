@@ -285,11 +285,11 @@ namespace MeuApp
             return new UserProfile
             {
                 UserId = localId,
-                Name = fields.GetProperty("name").GetProperty("stringValue").GetString() ?? "",
-                Email = fields.GetProperty("email").GetProperty("stringValue").GetString() ?? "",
-                Phone = fields.GetProperty("phone").GetProperty("stringValue").GetString() ?? "",
-                Course = fields.GetProperty("course").GetProperty("stringValue").GetString() ?? "",
-                Registration = fields.GetProperty("registration").GetProperty("stringValue").GetString() ?? "",
+                Name = TryGetStringField(fields, "name"),
+                Email = TryGetStringField(fields, "email"),
+                Phone = TryGetStringField(fields, "phone"),
+                Course = TryGetStringField(fields, "course"),
+                Registration = TryGetStringField(fields, "registration"),
                 Nickname = TryGetStringField(fields, "nickname"),
                 ProfessionalTitle = TryGetStringField(fields, "professionalTitle"),
                 Bio = TryGetStringField(fields, "bio"),
