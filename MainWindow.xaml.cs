@@ -127,6 +127,12 @@ namespace MeuApp
             "chao_5.png",
             "chao_6.png"
         };
+        private static readonly string[] ChatComposerEmojis =
+        {
+            "😀", "😂", "😍", "🥳", "🤔", "😎", "😭", "🔥",
+            "👏", "🙏", "✅", "❌", "📚", "💻", "🚀", "🎯",
+            "⭐", "📌", "⚠️", "💡", "🫶", "👍", "👀", "🎉"
+        };
         private static readonly string[] KnownTeamCourses =
         {
             "Analise e Desenvolvimento de Sistemas",
@@ -215,7 +221,6 @@ namespace MeuApp
 
             if (!string.IsNullOrWhiteSpace(_idToken) && _currentProfile != null)
             {
-                // Inicializar TeamService
                 _teamService = new TeamService(_idToken, _currentProfile.UserId ?? "");
                 _connectionService = new ConnectionService(_idToken, _currentProfile);
 
@@ -241,7 +246,6 @@ namespace MeuApp
                 return;
             }
 
-            // Ctrl+D para ativar modo debug
             if (e.Key == Key.D && Keyboard.Modifiers == ModifierKeys.Control)
             {
                 if (!DebugHelper.IsInitialized)
@@ -475,30 +479,10 @@ namespace MeuApp
         {
             return new List<TeamTaskColumnInfo>
             {
-                new TeamTaskColumnInfo
-                {
-                    Title = "Backlog",
-                    AccentColor = Color.FromRgb(59, 130, 246),
-                    Cards = new List<TeamTaskCardInfo>()
-                },
-                new TeamTaskColumnInfo
-                {
-                    Title = "Em andamento",
-                    AccentColor = Color.FromRgb(245, 158, 11),
-                    Cards = new List<TeamTaskCardInfo>()
-                },
-                new TeamTaskColumnInfo
-                {
-                    Title = "Revisao",
-                    AccentColor = Color.FromRgb(168, 85, 247),
-                    Cards = new List<TeamTaskCardInfo>()
-                },
-                new TeamTaskColumnInfo
-                {
-                    Title = "Concluido",
-                    AccentColor = Color.FromRgb(16, 185, 129),
-                    Cards = new List<TeamTaskCardInfo>()
-                }
+                new TeamTaskColumnInfo { Title = "Backlog", AccentColor = Color.FromRgb(59, 130, 246), Cards = new List<TeamTaskCardInfo>() },
+                new TeamTaskColumnInfo { Title = "Em andamento", AccentColor = Color.FromRgb(245, 158, 11), Cards = new List<TeamTaskCardInfo>() },
+                new TeamTaskColumnInfo { Title = "Revisao", AccentColor = Color.FromRgb(168, 85, 247), Cards = new List<TeamTaskCardInfo>() },
+                new TeamTaskColumnInfo { Title = "Concluido", AccentColor = Color.FromRgb(16, 185, 129), Cards = new List<TeamTaskCardInfo>() }
             };
         }
 
@@ -525,14 +509,8 @@ namespace MeuApp
             team.CreatedBy = string.IsNullOrWhiteSpace(team.CreatedBy)
                 ? _currentProfile?.UserId ?? string.Empty
                 : team.CreatedBy;
-            if (team.CreatedAt == default)
-            {
-                team.CreatedAt = DateTime.Now;
-            }
-            if (team.UpdatedAt == default)
-            {
-                team.UpdatedAt = DateTime.Now;
-            }
+            if (team.CreatedAt == default) team.CreatedAt = DateTime.Now;
+            if (team.UpdatedAt == default) team.UpdatedAt = DateTime.Now;
 
             team.Members = team.Members
                 .Where(member => member != null && !string.IsNullOrWhiteSpace(member.UserId))
@@ -554,11 +532,7 @@ namespace MeuApp
             team.ProjectProgress = Math.Max(0, Math.Min(100, team.ProjectProgress));
             team.ProjectStatus = string.IsNullOrWhiteSpace(team.ProjectStatus) ? "Planejamento" : team.ProjectStatus;
 
-            if (team.TaskColumns == null || team.TaskColumns.Count == 0)
-            {
-                team.TaskColumns = CreateDefaultTeamColumns();
-            }
-
+            if (team.TaskColumns == null || team.TaskColumns.Count == 0) team.TaskColumns = CreateDefaultTeamColumns();
             if (team.CsdBoard == null)
             {
                 team.CsdBoard = CreateDefaultCsdBoard();
@@ -570,11 +544,7 @@ namespace MeuApp
                 team.CsdBoard.Doubts ??= new List<string>();
             }
 
-            if (team.Milestones.Count == 0)
-            {
-                team.Milestones = CreateDefaultMilestones();
-            }
-
+            if (team.Milestones.Count == 0) team.Milestones = CreateDefaultMilestones();
             return team;
         }
 
@@ -596,10 +566,7 @@ namespace MeuApp
 
         private string GetNextTeamDeadlineLabel(TeamWorkspaceInfo team)
         {
-            if (team.ProjectDeadline.HasValue)
-            {
-                return FormatRelativeDate(team.ProjectDeadline.Value);
-            }
+            if (team.ProjectDeadline.HasValue) return FormatRelativeDate(team.ProjectDeadline.Value);
 
             var nextDate = team.TaskColumns
                 .SelectMany(column => column.Cards)
@@ -620,55 +587,23 @@ namespace MeuApp
 
         private void AddTeamNotification(TeamWorkspaceInfo team, string message)
         {
-            team.Notifications.Insert(0, new TeamNotificationInfo
-            {
-                Message = message,
-                CreatedAt = DateTime.Now
-            });
-
-            if (team.Notifications.Count > 10)
-            {
-                team.Notifications = team.Notifications.Take(10).ToList();
-            }
+            team.Notifications.Insert(0, new TeamNotificationInfo { Message = message, CreatedAt = DateTime.Now });
+            if (team.Notifications.Count > 10) team.Notifications = team.Notifications.Take(10).ToList();
         }
 
         private string FormatRelativeDate(DateTime date)
         {
             var difference = date.Date - DateTime.Today;
-            if (difference.TotalDays == 0)
-            {
-                return "Hoje";
-            }
-
-            if (difference.TotalDays == 1)
-            {
-                return "Amanha";
-            }
-
-            if (difference.TotalDays == -1)
-            {
-                return "Ontem";
-            }
-
+            if (difference.TotalDays == 0) return "Hoje";
+            if (difference.TotalDays == 1) return "Amanha";
+            if (difference.TotalDays == -1) return "Ontem";
             return date.ToString("dd/MM");
         }
 
         private Border CreateDraftChip(string text, Brush background, Brush foreground, Action? onRemove = null)
         {
-            var content = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            content.Children.Add(new TextBlock
-            {
-                Text = text,
-                Foreground = foreground,
-                FontSize = 12,
-                FontWeight = FontWeights.SemiBold,
-                VerticalAlignment = VerticalAlignment.Center
-            });
+            var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            content.Children.Add(new TextBlock { Text = text, Foreground = foreground, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
 
             if (onRemove != null)
             {
@@ -701,12 +636,7 @@ namespace MeuApp
 
         private Border CreateMemberChip(UserInfo member, Brush background, Brush foreground, Action? onRemove = null)
         {
-            var content = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
+            var content = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             content.Children.Add(new Border
             {
                 Width = 28,
@@ -716,7 +646,6 @@ namespace MeuApp
                 ClipToBounds = true,
                 Child = CreateUserAvatarVisual(member, 28)
             });
-
             content.Children.Add(new TextBlock
             {
                 Text = string.IsNullOrWhiteSpace(member.Name) ? member.Email : member.Name,
@@ -8322,7 +8251,7 @@ namespace MeuApp
                 var messagesList = new StackPanel { Orientation = Orientation.Vertical };
                 foreach (var msg in conv.Messages.OrderBy(message => message.Timestamp))
                 {
-                    messagesList.Children.Add(CreateMessageBubble(msg));
+                    messagesList.Children.Add(CreateMessageBubble(conv, msg));
                 }
 
                 var scrollViewer = new ScrollViewer
@@ -8367,19 +8296,12 @@ namespace MeuApp
             inputGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var emojiButton = CreateHeaderIconButton("😊", "Emoji");
-            Grid.SetColumn(emojiButton, 0);
-            inputGrid.Children.Add(emojiButton);
-
             var attachmentButton = CreateHeaderIconButton("＋", "Enviar figurinha");
             attachmentButton.Background = new SolidColorBrush(Color.FromRgb(0, 168, 132));
             attachmentButton.Foreground = Brushes.White;
             attachmentButton.MinWidth = 40;
             attachmentButton.Height = 40;
             attachmentButton.FontSize = 16;
-            var stickerPopup = CreateStickerPickerPopup(attachmentButton, conv);
-            attachmentButton.Click += (s, e) => stickerPopup.IsOpen = !stickerPopup.IsOpen;
-            Grid.SetColumn(attachmentButton, 1);
-            inputGrid.Children.Add(attachmentButton);
 
             var inputBox = new TextBox
             {
@@ -8404,6 +8326,17 @@ namespace MeuApp
                     await SendConversationMessageAsync(conv, inputBox);
                 }
             };
+
+            var emojiPopup = CreateEmojiPickerPopup(emojiButton, inputBox);
+            emojiButton.Click += (s, e) => emojiPopup.IsOpen = !emojiPopup.IsOpen;
+            Grid.SetColumn(emojiButton, 0);
+            inputGrid.Children.Add(emojiButton);
+
+            var stickerPopup = CreateStickerPickerPopup(attachmentButton, conv);
+            attachmentButton.Click += (s, e) => stickerPopup.IsOpen = !stickerPopup.IsOpen;
+            Grid.SetColumn(attachmentButton, 1);
+            inputGrid.Children.Add(attachmentButton);
+
             Grid.SetColumn(inputBox, 2);
             inputGrid.Children.Add(inputBox);
 
@@ -8534,7 +8467,7 @@ namespace MeuApp
             RefreshChatsUI();
         }
 
-        private Border CreateMessageBubble(ChatMessage msg)
+        private Border CreateMessageBubble(Conversation conv, ChatMessage msg)
         {
             var ownBubbleBackground = _appDarkModeEnabled
                 ? new SolidColorBrush(Color.FromRgb(0, 92, 75))
@@ -8559,7 +8492,7 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 6, 0, 6),
                 HorizontalAlignment = msg.IsOwn ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                MaxWidth = 520
+                MaxWidth = 560
             };
 
             var row = new StackPanel
@@ -8585,9 +8518,7 @@ namespace MeuApp
 
             var bubble = new Border
             {
-                Background = msg.IsOwn 
-                    ? ownBubbleBackground
-                    : otherBubbleBackground,
+                Background = msg.IsDeleted ? Brushes.Transparent : (msg.IsOwn ? ownBubbleBackground : otherBubbleBackground),
                 CornerRadius = msg.IsOwn
                     ? new CornerRadius(16, 16, 4, 16)
                     : new CornerRadius(16, 16, 16, 4),
@@ -8609,7 +8540,11 @@ namespace MeuApp
                 });
             }
 
-            if (msg.IsSticker)
+            if (msg.IsDeleted)
+            {
+                stack.Children.Add(CreateDeletedBubbleContent(msg));
+            }
+            else if (msg.IsSticker)
             {
                 stack.Children.Add(CreateStickerBubbleContent(msg));
             }
@@ -8627,17 +8562,48 @@ namespace MeuApp
             }
             stack.Children.Add(new TextBlock
             {
-                Text = msg.Timestamp.ToString("HH:mm"),
+                Text = msg.IsEdited && !msg.IsDeleted ? $"{msg.Timestamp:HH:mm} • editada" : msg.Timestamp.ToString("HH:mm"),
                 FontSize = 10,
-                Foreground = msg.IsOwn 
-                    ? ownTimeBrush
-                    : otherTimeBrush,
+                Foreground = msg.IsOwn ? ownTimeBrush : otherTimeBrush,
                 Margin = new Thickness(0, 6, 0, 0),
                 TextAlignment = TextAlignment.Right
             });
 
             bubble.Child = stack;
-            row.Children.Add(bubble);
+
+            if (msg.IsOwn)
+            {
+                var actionsMenu = CreateMessageActionsContextMenu(conv, msg);
+                bubble.ContextMenu = actionsMenu;
+
+                var actionButton = new Button
+                {
+                    Content = "⋯",
+                    Width = 28,
+                    Height = 28,
+                    Margin = new Thickness(8, 4, 0, 0),
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(134, 150, 160))
+                        : new SolidColorBrush(Color.FromRgb(71, 85, 105)),
+                    Cursor = Cursors.Hand,
+                    ToolTip = "Ações da mensagem"
+                };
+                actionButton.Click += (_, __) =>
+                {
+                    actionsMenu.PlacementTarget = actionButton;
+                    actionsMenu.IsOpen = true;
+                };
+
+                row.Children.Add(bubble);
+                row.Children.Add(actionButton);
+            }
+            else
+            {
+                row.Children.Add(bubble);
+            }
+
             container.Child = row;
             return container;
         }
@@ -9001,7 +8967,6 @@ namespace MeuApp
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = subtitleBrush
             });
-
             host.Children.Add(new Border
             {
                 Background = _appDarkModeEnabled
@@ -9026,6 +8991,7 @@ namespace MeuApp
                 ItemWidth = 146,
                 Margin = new Thickness(0, 0, -10, -10)
             };
+
             foreach (var stickerAsset in ChatStickerAssets)
             {
                 var stickerCardBackground = _appDarkModeEnabled
@@ -9100,6 +9066,7 @@ namespace MeuApp
                 MaxHeight = 360,
                 Content = stickersWrap
             });
+
             popup.Child = new Border
             {
                 Width = 520,
@@ -9119,6 +9086,371 @@ namespace MeuApp
             };
 
             return popup;
+        }
+
+        private Popup CreateEmojiPickerPopup(Button anchorButton, TextBox inputBox)
+        {
+            var popupBorderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var popupBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                : new SolidColorBrush(Colors.White);
+            var titleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var subtitleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+
+            var popup = new Popup
+            {
+                PlacementTarget = anchorButton,
+                Placement = PlacementMode.Top,
+                HorizontalOffset = -8,
+                VerticalOffset = -10,
+                AllowsTransparency = true,
+                StaysOpen = false
+            };
+
+            var emojisWrap = new WrapPanel
+            {
+                ItemWidth = 54,
+                Margin = new Thickness(0, 0, -8, -8)
+            };
+
+            foreach (var emoji in ChatComposerEmojis)
+            {
+                var emojiButton = new Button
+                {
+                    Content = emoji,
+                    Width = 46,
+                    Height = 46,
+                    FontSize = 22,
+                    Margin = new Thickness(0, 0, 8, 8),
+                    Background = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(30, 41, 59))
+                        : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                    Foreground = titleBrush,
+                    BorderBrush = popupBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand
+                };
+                emojiButton.Click += (_, __) =>
+                {
+                    popup.IsOpen = false;
+                    InsertEmojiIntoChatInput(inputBox, emoji);
+                };
+                emojisWrap.Children.Add(emojiButton);
+            }
+
+            var content = new StackPanel();
+            content.Children.Add(new TextBlock
+            {
+                Text = "Emojis rápidos",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = titleBrush
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = "Selecione um emoji para inserir na mensagem atual.",
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 14),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = subtitleBrush
+            });
+            content.Children.Add(emojisWrap);
+
+            popup.Child = new Border
+            {
+                Width = 340,
+                Background = popupBackground,
+                BorderBrush = popupBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(16),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 24,
+                    ShadowDepth = 8,
+                    Opacity = 0.22,
+                    Color = Colors.Black
+                },
+                Child = content
+            };
+
+            return popup;
+        }
+
+        private static void InsertEmojiIntoChatInput(TextBox inputBox, string emoji)
+        {
+            var currentText = inputBox.Text ?? string.Empty;
+            var insertIndex = Math.Max(0, Math.Min(inputBox.CaretIndex, currentText.Length));
+            var suffix = insertIndex < currentText.Length && !char.IsWhiteSpace(currentText[insertIndex]) ? " " : string.Empty;
+            var prefix = insertIndex > 0 && !char.IsWhiteSpace(currentText[insertIndex - 1]) ? " " : string.Empty;
+            var insertion = $"{prefix}{emoji}{suffix}";
+            inputBox.Text = currentText.Insert(insertIndex, insertion);
+            inputBox.CaretIndex = insertIndex + insertion.Length;
+            inputBox.Focus();
+        }
+
+        private UIElement CreateDeletedBubbleContent(ChatMessage msg)
+        {
+            var deletedBorderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(100, 116, 139))
+                : new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            var deletedTextBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(203, 213, 225))
+                : new SolidColorBrush(Color.FromRgb(71, 85, 105));
+
+            var grid = new Grid
+            {
+                Width = 280,
+                Height = 56
+            };
+
+            grid.Children.Add(new Rectangle
+            {
+                RadiusX = 16,
+                RadiusY = 16,
+                Stroke = deletedBorderBrush,
+                StrokeThickness = 1.4,
+                StrokeDashArray = new DoubleCollection { 4, 3 },
+                Fill = Brushes.Transparent
+            });
+
+            grid.Children.Add(new TextBlock
+            {
+                Text = msg.DeletedDisplayText,
+                Margin = new Thickness(14, 10, 14, 10),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = deletedTextBrush,
+                TextDecorations = TextDecorations.Strikethrough,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            return grid;
+        }
+
+        private ContextMenu CreateMessageActionsContextMenu(Conversation conv, ChatMessage msg)
+        {
+            var menu = new ContextMenu();
+
+            if (msg.IsText && !msg.IsDeleted)
+            {
+                var editItem = new MenuItem { Header = "Editar mensagem" };
+                editItem.Click += async (_, __) => await EditConversationMessageAsync(conv, msg);
+                menu.Items.Add(editItem);
+            }
+
+            if (!msg.IsDeleted)
+            {
+                var deleteItem = new MenuItem { Header = "Apagar mensagem" };
+                deleteItem.Click += async (_, __) => await DeleteConversationMessageAsync(conv, msg);
+                menu.Items.Add(deleteItem);
+            }
+
+            return menu;
+        }
+
+        private async Task EditConversationMessageAsync(Conversation conv, ChatMessage msg)
+        {
+            var updatedText = ShowEditMessageDialog(msg.Content);
+            if (string.IsNullOrWhiteSpace(updatedText) || string.Equals(updatedText, msg.Content, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_idToken))
+            {
+                var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? string.Empty);
+                var result = await chatService.UpdateMessageAsync(conv.ContactId, msg, updatedText.Trim());
+                if (!result.Success)
+                {
+                    MessageBox.Show(
+                        $"Erro ao editar mensagem.\n\n{result.ErrorMessage}",
+                        "Chat",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning
+                    );
+                    return;
+                }
+            }
+
+            msg.Content = updatedText.Trim();
+            msg.IsEdited = true;
+            msg.EditedAt = DateTime.Now;
+            RefreshConversationSummary(conv);
+            RefreshChatsUI();
+        }
+
+        private async Task DeleteConversationMessageAsync(Conversation conv, ChatMessage msg)
+        {
+            if (MessageBox.Show(
+                "Deseja apagar esta mensagem?",
+                "Apagar mensagem",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_idToken))
+            {
+                var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? string.Empty);
+                var result = await chatService.DeleteMessageAsync(conv.ContactId, msg);
+                if (!result.Success)
+                {
+                    MessageBox.Show(
+                        $"Erro ao apagar mensagem.\n\n{result.ErrorMessage}",
+                        "Chat",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning
+                    );
+                    return;
+                }
+            }
+
+            msg.Content = msg.DeletedDisplayText;
+            msg.MessageType = "deleted";
+            msg.StickerAsset = string.Empty;
+            msg.IsDeleted = true;
+            msg.DeletedAt = DateTime.Now;
+            RefreshConversationSummary(conv);
+            RefreshChatsUI();
+        }
+
+        private void RefreshConversationSummary(Conversation conv)
+        {
+            var lastMessage = conv.Messages.OrderBy(message => message.Timestamp).LastOrDefault();
+            if (lastMessage == null)
+            {
+                conv.LastMessage = "Nenhuma mensagem";
+                conv.LastMessageTime = DateTime.Now;
+                conv.LastSenderId = string.Empty;
+                return;
+            }
+
+            conv.LastMessage = lastMessage.ConversationPreview;
+            conv.LastMessageTime = lastMessage.Timestamp;
+            conv.LastSenderId = lastMessage.SenderId;
+        }
+
+        private string? ShowEditMessageDialog(string initialText)
+        {
+            var background = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                : new SolidColorBrush(Colors.White);
+            var borderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var primaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var secondaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+
+            var dialog = new MetroWindow
+            {
+                Title = "Editar mensagem",
+                Width = 520,
+                Height = 340,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                Background = background,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1)
+            };
+
+            var contentBox = new TextBox
+            {
+                Text = initialText,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Height = 140,
+                FontSize = 13,
+                Padding = new Thickness(12),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(30, 41, 59))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                Foreground = primaryText,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            string? result = null;
+            var saveButton = new Button
+            {
+                Content = "Salvar",
+                MinWidth = 100,
+                Height = 38,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = new SolidColorBrush(Color.FromRgb(0, 168, 132)),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand
+            };
+            saveButton.Click += (_, __) =>
+            {
+                result = contentBox.Text;
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                MinWidth = 100,
+                Height = 38,
+                Background = Brushes.Transparent,
+                Foreground = primaryText,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            cancelButton.Click += (_, __) => dialog.Close();
+
+            dialog.Content = new Border
+            {
+                Background = background,
+                Padding = new Thickness(22),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "Ajuste apenas mensagens de texto já enviadas.",
+                            FontSize = 13,
+                            Foreground = secondaryText,
+                            TextWrapping = TextWrapping.Wrap
+                        },
+                        contentBox,
+                        new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            HorizontalAlignment = HorizontalAlignment.Right,
+                            Margin = new Thickness(0, 18, 0, 0),
+                            Children = { saveButton, cancelButton }
+                        }
+                    }
+                }
+            };
+
+            contentBox.Loaded += (_, __) =>
+            {
+                contentBox.Focus();
+                contentBox.CaretIndex = contentBox.Text.Length;
+            };
+
+            return dialog.ShowDialog() == true ? result : null;
         }
 
         private Popup CreateChatActionsPopup(Button anchorButton, Conversation conv)

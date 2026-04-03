@@ -10,12 +10,15 @@ namespace MeuApp
     /// </summary>
     public static class DebugHelper
     {
-        private static readonly string LogFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            "AppDebug.log"
+        private const long MaxLogFileSizeBytes = 2 * 1024 * 1024;
+        private static readonly string LogDirectoryPath = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "logs"
         );
+        private static readonly string LogFilePath = Path.Combine(LogDirectoryPath, "AppDebug.log");
 
         private static StreamWriter? _logWriter;
+        private static TextWriterTraceListener? _traceListener;
         private static bool _initialized = false;
 
         /// <summary>
@@ -27,6 +30,9 @@ namespace MeuApp
 
             try
             {
+                Directory.CreateDirectory(LogDirectoryPath);
+                ResetLogFileIfTooLarge();
+
                 _logWriter = new StreamWriter(LogFilePath, false)
                 {
                     AutoFlush = true
@@ -37,7 +43,8 @@ namespace MeuApp
                 WriteLine("");
 
                 // Adicionar trace listener
-                Trace.Listeners.Add(new TextWriterTraceListener(_logWriter));
+                _traceListener = new TextWriterTraceListener(_logWriter);
+                Trace.Listeners.Add(_traceListener);
                 
                 _initialized = true;
 
@@ -59,27 +66,7 @@ namespace MeuApp
         /// </summary>
         public static void InitializeSilent()
         {
-            if (_initialized) return;
-
-            try
-            {
-                _logWriter = new StreamWriter(LogFilePath, false)
-                {
-                    AutoFlush = true
-                };
-
-                WriteLine($"========== LOG INICIADO EM {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==========");
-                WriteLine($"Caminho do arquivo: {LogFilePath}");
-                WriteLine("Modo silencioso ativado para diagnóstico de rede.");
-                WriteLine("");
-
-                Trace.Listeners.Add(new TextWriterTraceListener(_logWriter));
-                _initialized = true;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Falha ao inicializar log silencioso: {ex.Message}");
-            }
+            Debug.WriteLine("[DebugHelper] Modo silencioso ativo sem gravação em disco.");
         }
 
         /// <summary>
@@ -97,21 +84,11 @@ namespace MeuApp
             catch (IOException ex)
             {
                 Debug.WriteLine($"[DebugHelper] Falha ao gravar log em arquivo: {ex.Message}");
-                try
-                {
-                    _logWriter?.Dispose();
-                }
-                catch
-                {
-                }
-
-                _logWriter = null;
-                _initialized = false;
+                CleanupWriter();
             }
             catch (ObjectDisposedException)
             {
-                _logWriter = null;
-                _initialized = false;
+                CleanupWriter();
             }
 
             Debug.WriteLine(message);
@@ -126,9 +103,7 @@ namespace MeuApp
             {
                 WriteLine($"========== LOG ENCERRADO EM {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==========");
                 _logWriter.Flush();
-                _logWriter.Close();
-                _logWriter.Dispose();
-                _logWriter = null;
+                CleanupWriter();
             }
         }
 
@@ -170,5 +145,43 @@ namespace MeuApp
         /// Verifica se o logging está inicializado
         /// </summary>
         public static bool IsInitialized => _initialized;
+
+        private static void ResetLogFileIfTooLarge()
+        {
+            if (!File.Exists(LogFilePath))
+            {
+                return;
+            }
+
+            var fileInfo = new FileInfo(LogFilePath);
+            if (fileInfo.Length <= MaxLogFileSizeBytes)
+            {
+                return;
+            }
+
+            File.WriteAllText(LogFilePath, string.Empty);
+        }
+
+        private static void CleanupWriter()
+        {
+            if (_traceListener != null)
+            {
+                Trace.Listeners.Remove(_traceListener);
+                _traceListener.Dispose();
+                _traceListener = null;
+            }
+
+            try
+            {
+                _logWriter?.Close();
+                _logWriter?.Dispose();
+            }
+            catch
+            {
+            }
+
+            _logWriter = null;
+            _initialized = false;
+        }
     }
 }

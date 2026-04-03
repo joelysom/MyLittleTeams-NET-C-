@@ -71,6 +71,8 @@ namespace MeuApp
                         content = new { stringValue = content },
                         messageType = new { stringValue = string.IsNullOrWhiteSpace(messageType) ? "text" : messageType },
                         stickerAsset = new { stringValue = stickerAsset ?? string.Empty },
+                        isEdited = new { boolValue = false },
+                        isDeleted = new { boolValue = false },
                         timestamp = new { timestampValue = timestampText },
                         createdAt = new { timestampValue = timestampText },
                         recipientId = new { stringValue = contactId }
@@ -78,10 +80,10 @@ namespace MeuApp
                 };
 
                 // URL para salvar no Firestore
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages";
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{messageId}";
 
                 var requestBody = JsonSerializer.Serialize(messageData);
-                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(
                     requestBody,
@@ -110,6 +112,119 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[ChatService.SendMessage] ERRO: {ex.Message}");
                 DebugHelper.WriteLine($"[ChatService.SendMessage] Stack: {ex.StackTrace}");
+                return ChatOperationResult.Fail($"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        public async Task<ChatOperationResult> UpdateMessageAsync(string contactId, ChatMessage message, string updatedContent)
+        {
+            try
+            {
+                if (message == null || string.IsNullOrWhiteSpace(updatedContent))
+                {
+                    return ChatOperationResult.Fail("Mensagem inválida para edição.");
+                }
+
+                var conversationId = CreateConversationId(_currentUserId, contactId);
+                var documentId = ResolveMessageDocumentId(message);
+                if (string.IsNullOrWhiteSpace(documentId))
+                {
+                    return ChatOperationResult.Fail("Não foi possível localizar a mensagem para edição.");
+                }
+
+                var editedAt = DateTime.UtcNow;
+                var editedAtText = editedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+                var patchBody = JsonSerializer.Serialize(new
+                {
+                    fields = new Dictionary<string, object>
+                    {
+                        ["content"] = new { stringValue = updatedContent },
+                        ["isEdited"] = new { boolValue = true },
+                        ["editedAt"] = new { timestampValue = editedAtText }
+                    }
+                });
+
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{documentId}?updateMask.fieldPaths=content&updateMask.fieldPaths=isEdited&updateMask.fieldPaths=editedAt";
+                var request = new HttpRequestMessage(HttpMethod.Patch, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
+
+                LogRequest("UpdateMessage", request.Method.Method, url, patchBody);
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                LogResponse("UpdateMessage", response, responseBody);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return ChatOperationResult.Fail(BuildDetailedErrorMessage(response, responseBody));
+                }
+
+                await SyncConversationSummaryAsync(contactId);
+                return ChatOperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatService.UpdateMessage] ERRO: {ex.Message}");
+                return ChatOperationResult.Fail($"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        public async Task<ChatOperationResult> DeleteMessageAsync(string contactId, ChatMessage message)
+        {
+            try
+            {
+                if (message == null)
+                {
+                    return ChatOperationResult.Fail("Mensagem inválida para exclusão.");
+                }
+
+                var conversationId = CreateConversationId(_currentUserId, contactId);
+                var documentId = ResolveMessageDocumentId(message);
+                if (string.IsNullOrWhiteSpace(documentId))
+                {
+                    return ChatOperationResult.Fail("Não foi possível localizar a mensagem para exclusão.");
+                }
+
+                var deletedAt = DateTime.UtcNow;
+                var deletedAtText = deletedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+                var deletedContent = BuildDeletedMessageText(message.SenderName);
+                var patchBody = JsonSerializer.Serialize(new
+                {
+                    fields = new Dictionary<string, object>
+                    {
+                        ["content"] = new { stringValue = deletedContent },
+                        ["messageType"] = new { stringValue = "deleted" },
+                        ["stickerAsset"] = new { stringValue = string.Empty },
+                        ["isDeleted"] = new { boolValue = true },
+                        ["deletedAt"] = new { timestampValue = deletedAtText }
+                    }
+                });
+
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{documentId}?updateMask.fieldPaths=content&updateMask.fieldPaths=messageType&updateMask.fieldPaths=stickerAsset&updateMask.fieldPaths=isDeleted&updateMask.fieldPaths=deletedAt";
+                var request = new HttpRequestMessage(HttpMethod.Patch, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
+
+                LogRequest("DeleteMessage", request.Method.Method, url, patchBody);
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+
+                LogResponse("DeleteMessage", response, responseBody);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return ChatOperationResult.Fail(BuildDetailedErrorMessage(response, responseBody));
+                }
+
+                await SyncConversationSummaryAsync(contactId);
+                return ChatOperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatService.DeleteMessage] ERRO: {ex.Message}");
                 return ChatOperationResult.Fail($"{ex.GetType().Name}: {ex.Message}");
             }
         }
@@ -157,7 +272,7 @@ namespace MeuApp
                         {
                             if (msgDoc.TryGetProperty("fields", out var fields))
                             {
-                                var message = ParseMessageFromFirestore(fields);
+                                var message = ParseMessageFromFirestore(msgDoc, fields);
                                 if (message != null)
                                 {
                                     messages.Add(message);
@@ -274,16 +389,27 @@ namespace MeuApp
         /// <summary>
         /// Converte dados do Firestore para ChatMessage
         /// </summary>
-        private ChatMessage? ParseMessageFromFirestore(JsonElement fields)
+        private ChatMessage? ParseMessageFromFirestore(JsonElement messageDocument, JsonElement fields)
         {
             try
             {
+                string? messageId = null;
                 string? senderId = null;
                 string? senderName = null;
                 string? content = null;
                 var messageType = "text";
                 string? stickerAsset = null;
                 DateTime timestamp = DateTime.Now;
+                DateTime? editedAt = null;
+                DateTime? deletedAt = null;
+                var isEdited = false;
+                var isDeleted = false;
+
+                if (fields.TryGetProperty("messageId", out var messageIdField) &&
+                    messageIdField.TryGetProperty("stringValue", out var messageIdValue))
+                {
+                    messageId = messageIdValue.GetString();
+                }
 
                 if (fields.TryGetProperty("senderId", out var senderIdField) && 
                     senderIdField.TryGetProperty("stringValue", out var senderIdValue))
@@ -332,6 +458,23 @@ namespace MeuApp
                     }
                 }
 
+                if (fields.TryGetProperty("editedAt", out var editedAtField) &&
+                    editedAtField.TryGetProperty("timestampValue", out var editedAtValue) &&
+                    DateTime.TryParse(editedAtValue.GetString(), out var parsedEditedAt))
+                {
+                    editedAt = parsedEditedAt;
+                }
+
+                if (fields.TryGetProperty("deletedAt", out var deletedAtField) &&
+                    deletedAtField.TryGetProperty("timestampValue", out var deletedAtValue) &&
+                    DateTime.TryParse(deletedAtValue.GetString(), out var parsedDeletedAt))
+                {
+                    deletedAt = parsedDeletedAt;
+                }
+
+                isEdited = GetBoolField(fields, "isEdited");
+                isDeleted = GetBoolField(fields, "isDeleted") || string.Equals(messageType, "deleted", StringComparison.OrdinalIgnoreCase);
+
                 if (string.IsNullOrEmpty(senderId) || string.IsNullOrEmpty(content))
                 {
                     return null;
@@ -339,13 +482,19 @@ namespace MeuApp
 
                 return new ChatMessage
                 {
+                    MessageId = messageId ?? ExtractDocumentId(messageDocument),
+                    DocumentId = ExtractDocumentId(messageDocument),
                     SenderId = senderId,
                     SenderName = senderName ?? "Usuário",
                     Content = content,
                     MessageType = messageType,
                     StickerAsset = stickerAsset ?? string.Empty,
                     Timestamp = timestamp,
+                    EditedAt = editedAt,
+                    DeletedAt = deletedAt,
                     IsOwn = senderId == _currentUserId
+                    ,IsEdited = isEdited
+                    ,IsDeleted = isDeleted
                 };
             }
             catch (Exception ex)
@@ -657,6 +806,17 @@ namespace MeuApp
             return null;
         }
 
+        private static bool GetBoolField(JsonElement fields, string fieldName)
+        {
+            if (fields.TryGetProperty(fieldName, out var field) &&
+                field.TryGetProperty("boolValue", out var value))
+            {
+                return value.GetBoolean();
+            }
+
+            return false;
+        }
+
         private static string ExtractDocumentId(JsonElement conversationDocument)
         {
             if (conversationDocument.TryGetProperty("name", out var nameElement))
@@ -742,6 +902,59 @@ namespace MeuApp
             }
 
             return conversations;
+        }
+
+        private static string BuildDeletedMessageText(string senderName)
+        {
+            return $"'{(string.IsNullOrWhiteSpace(senderName) ? "Usuário" : senderName)}' apagou essa mensagem (X)";
+        }
+
+        private static string ResolveMessageDocumentId(ChatMessage message)
+        {
+            if (!string.IsNullOrWhiteSpace(message.DocumentId))
+            {
+                return message.DocumentId;
+            }
+
+            return message.MessageId;
+        }
+
+        private async Task SyncConversationSummaryAsync(string contactId)
+        {
+            try
+            {
+                var conversationId = CreateConversationId(_currentUserId, contactId);
+                var messages = await LoadMessagesAsync(contactId);
+                var lastMessage = messages.Count > 0 ? messages[^1] : null;
+                var lastMessageText = lastMessage?.ConversationPreview ?? "Nenhuma mensagem";
+                var lastMessageTime = lastMessage?.Timestamp ?? DateTime.UtcNow;
+                var lastSenderId = lastMessage?.SenderId ?? string.Empty;
+
+                var patchBody = JsonSerializer.Serialize(new
+                {
+                    fields = new Dictionary<string, object>
+                    {
+                        ["lastMessage"] = new { stringValue = lastMessageText },
+                        ["lastMessageTime"] = new { timestampValue = lastMessageTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ") },
+                        ["lastSenderId"] = new { stringValue = lastSenderId }
+                    }
+                });
+
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}?updateMask.fieldPaths=lastMessage&updateMask.fieldPaths=lastMessageTime&updateMask.fieldPaths=lastSenderId";
+                var request = new HttpRequestMessage(HttpMethod.Patch, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
+
+                LogRequest("SyncConversationSummary", request.Method.Method, url, patchBody);
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                LogResponse("SyncConversationSummary", response, responseBody);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatService.SyncConversationSummary] ERRO: {ex.Message}");
+            }
         }
     }
 
