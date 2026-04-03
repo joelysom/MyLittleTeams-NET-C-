@@ -181,3 +181,57 @@
 [2026-04-03 17:46:30.493] Startup completed successfully
 [2026-04-03 17:52:44.881] === App started at 2026-04-03 17:52:44.864 ===
 [2026-04-03 17:52:44.884] Startup completed successfully
+[2026-04-03 17:58:24.107] === App started at 2026-04-03 17:58:24.089 ===
+[2026-04-03 17:58:24.109] Startup completed successfully
+[2026-04-03 17:59:10.223] === App started at 2026-04-03 17:59:10.203 ===
+[2026-04-03 17:59:10.225] Startup completed successfully
+[2026-04-03 18:16:12.222] === App started at 2026-04-03 18:16:12.203 ===
+[2026-04-03 18:16:12.233] Startup completed successfully
+[2026-04-03 18:16:20.540] [UI_ERROR] Não é possível localizar o recurso 'img/error/loginerror.png'.
+   at MS.Internal.AppModel.ResourcePart.GetStreamCore(FileMode mode, FileAccess access)
+   at System.IO.Packaging.PackagePart.GetStream(FileMode mode, FileAccess access)
+   at MS.Internal.IO.Packaging.PackagePartExtensions.GetSeekableStream(PackagePart packPart, FileMode mode, FileAccess access)
+   at System.IO.Packaging.PackWebResponse.CachedResponse.GetResponseStream()
+   at System.Windows.Media.Imaging.BitmapDecoder.SetupDecoderFromUriOrStream(Uri uri, Stream stream, BitmapCacheOption cacheOption, Guid& clsId, Boolean& isOriginalWritable, Stream& uriStream, UnmanagedMemoryStream& unmanagedMemoryStream, SafeFileHandle& safeFilehandle)
+   at System.Windows.Media.Imaging.BitmapDecoder.CreateFromUriOrStream(Uri baseUri, Uri uri, Stream stream, BitmapCreateOptions createOptions, BitmapCacheOption cacheOption, RequestCachePolicy uriCachePolicy, Boolean insertInDecoderCache)
+   at System.Windows.Media.Imaging.BitmapImage.FinalizeCreation()
+   at MeuApp.LoginWindow.ShowLoginFeedbackDialog(LoginFeedbackKind kind, String title, String message, String helperText) in D:\react-js\NETC#\LoginWindow.xaml.cs:line 426
+   at MeuApp.LoginWindow.LoginButton_Click(Object sender, RoutedEventArgs e) in D:\react-js\NETC#\LoginWindow.xaml.cs:line 95
+   at System.Threading.Tasks.Task.<>c.<ThrowAsync>b__128_0(Object state)
+   at System.Windows.Threading.ExceptionWrapper.InternalRealCall(Delegate callback, Object args, Int32 numArgs)
+   at System.Windows.Threading.ExceptionWrapper.TryCatchWhen(Object source, Delegate callback, Object args, Int32 numArgs, Delegate catchHandler)
+[2026-04-03 18:27:06.742] === App started at 2026-04-03 18:27:06.725 ===
+[2026-04-03 18:27:06.745] Startup completed successfully
+[2026-04-03 18:30:03.792] === App started at 2026-04-03 18:30:03.774 ===
+[2026-04-03 18:30:03.796] Startup completed successfully
+[2026-04-03 18:30:42.913] === App started at 2026-04-03 18:30:42.895 ===
+[2026-04-03 18:30:42.915] Startup completed successfully
+[2026-04-03 18:30:57.347] === App started at 2026-04-03 18:30:57.330 ===
+[2026-04-03 18:30:57.350] Startup completed successfully
+[2026-04-03 18:31:26.330] === App started at 2026-04-03 18:31:26.309 ===
+[2026-04-03 18:31:26.332] Startup completed successfully
+[2026-04-03 18:33:46.317] === App started at 2026-04-03 18:33:46.298 ===
+[2026-04-03 18:33:46.320] Startup completed successfully
+[2026-04-03 18:38:22.059] === App started at 2026-04-03 18:38:22.033 ===
+[2026-04-03 18:38:22.062] Startup completed successfully
+[2026-04-03 18:42:10.521] === App started at 2026-04-03 18:42:10.503 ===
+[2026-04-03 18:42:10.524] Startup completed successfully
+[2026-04-03 18:43:44.509] [UI_ERROR] Espaço insuficiente no disco. : 'C:\Users\PC\Desktop\AppDebug.log'
+   at System.IO.RandomAccess.WriteAtOffset(SafeFileHandle handle, ReadOnlySpan`1 buffer, Int64 fileOffset)
+   at System.IO.Strategies.OSFileStreamStrategy.Write(ReadOnlySpan`1 buffer)
+   at System.IO.Strategies.OSFileStreamStrategy.Write(Byte[] buffer, Int32 offset, Int32 count)
+   at System.IO.Strategies.BufferedFileStreamStrategy.FlushWrite()
+   at System.IO.Strategies.BufferedFileStreamStrategy.WriteSpan(ReadOnlySpan`1 source, ArraySegment`1 arraySegment)
+   at System.IO.Strategies.BufferedFileStreamStrategy.Write(ReadOnlySpan`1 buffer)
+   at System.IO.StreamWriter.Flush(Boolean flushStream, Boolean flushEncoder)
+   at System.IO.StreamWriter.WriteLine(String value)
+   at System.Diagnostics.TextWriterTraceListener.WriteLine(String message)
+   at System.Diagnostics.TraceInternal.WriteLine(String message)
+   at MeuApp.DebugHelper.WriteLine(String message) in D:\react-js\NETC#\DebugHelper.cs:line 99
+   at MeuApp.ChatService.SendMessageAsync(String contactId, String contactName, String senderName, String content, String messageType, String stickerAsset) in D:\react-js\NETC#\ChatService.cs:line 111
+   at MeuApp.MainWindow.SendConversationStickerAsync(Conversation conv, String stickerAsset) in D:\react-js\NETC#\MainWindow.xaml.cs:line 8463
+   at MeuApp.MainWindow.<>c__DisplayClass287_1.<<CreateStickerPickerPopup>b__0>d.MoveNext() in D:\react-js\NETC#\MainWindow.xaml.cs:line 9090
+--- End of stack trace from previous location ---
+   at System.Threading.Tasks.Task.<>c.<ThrowAsync>b__128_0(Object state)
+   at System.Windows.Threading.ExceptionWrapper.InternalRealCall(Delegate callback, Object args, Int32 numArgs)
+   at System.Windows.Threading.ExceptionWrapper.TryCatchWhen(Object source, Delegate callback, Object args, Int32 numArgs, Delegate catchHandler)

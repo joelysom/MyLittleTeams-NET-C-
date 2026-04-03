@@ -189,7 +189,7 @@
                                            Stretch="UniformToFill"
                                            HorizontalAlignment="Stretch"
                                            VerticalAlignment="Stretch"
-                                         Margin="-78,0,0,0"/>
+                                         Margin="-220,0,0,0"/>
                                     <Border Height="110" VerticalAlignment="Top" CornerRadius="30,30,120,120" IsHitTestVisible="False">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
@@ -252,7 +252,7 @@
 
                         <Button Content="Entrar" Style="{StaticResource PrimaryButtonStyle}" Click="LoginButton_Click" Foreground="White"/>
 
-                        <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="#0078D4" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline"/>
+                        <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="#0078D4" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline" MouseLeftButtonUp="ForgotPasswordLink_MouseLeftButtonUp"/>
                     </StackPanel>
 
                     <!-- SIGNUP CONTENT -->

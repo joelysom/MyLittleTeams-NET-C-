@@ -7,12 +7,30 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using MahApps.Metro.Controls;
 
 namespace MeuApp
 {
     public partial class LoginWindow : MetroWindow
     {
+        private enum LoginDialogAction
+        {
+            Dismiss,
+            Retry,
+            ForgotPassword,
+            CloseWindow
+        }
+
+        private enum LoginFeedbackKind
+        {
+            LoginError,
+            ConnectionError,
+            Info
+        }
+
         private const string FirebaseApiKey = "AIzaSyA2V4MEzgOoKEEZAAXH49DXbzxUo0_CuWU";
         private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
@@ -60,30 +78,68 @@ namespace MeuApp
                 return;
             }
 
-            try
+            var shouldRetry = true;
+            while (shouldRetry)
             {
-                Mouse.OverrideCursor = Cursors.Wait;
-                IsEnabled = false;
+                shouldRetry = false;
 
-                var loginResult = await FirebaseSignInAsync(email, password);
-                if (!loginResult.Success)
+                try
                 {
-                    MessageBox.Show($"Falha no login: {loginResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
+                    Mouse.OverrideCursor = Cursors.Wait;
+                    IsEnabled = false;
+
+                    var loginResult = await FirebaseSignInAsync(email, password);
+                    if (!loginResult.Success)
+                    {
+                        var isConnectionError = IsConnectionError(loginResult.ErrorMessage);
+                        var action = ShowLoginFeedbackDialog(
+                            isConnectionError ? LoginFeedbackKind.ConnectionError : LoginFeedbackKind.LoginError,
+                            isConnectionError ? "Sem conexão com a internet" : "Não foi possível entrar",
+                            BuildLoginFeedbackMessage(loginResult.ErrorMessage, isConnectionError),
+                            isConnectionError ? "Verifique sua conexão e tente novamente. Se o problema persistir, feche a janela e abra o app novamente." : "Confira suas credenciais ou recupere sua senha para tentar novamente.");
+
+                        if (action == LoginDialogAction.Retry)
+                        {
+                            if (isConnectionError)
+                            {
+                                shouldRetry = true;
+                            }
+                            else
+                            {
+                                LoginPassword.Focus();
+                                LoginPassword.SelectAll();
+                            }
+                        }
+                        else if (action == LoginDialogAction.ForgotPassword)
+                        {
+                            await HandleForgotPasswordAsync();
+                        }
+                        else if (action == LoginDialogAction.CloseWindow)
+                        {
+                            Close();
+                        }
+
+                        continue;
+                    }
+
+                    var bootstrapProfile = CreateBootstrapProfile(loginResult, email);
+                    var mainWindow = new MainWindow(bootstrapProfile, loginResult.IdToken ?? string.Empty);
+                    mainWindow.Show();
+                    this.Close();
+
+                    _ = HydrateProfileAfterLoginAsync(mainWindow, loginResult.LocalId!, loginResult.IdToken!, bootstrapProfile);
                 }
-
-                var bootstrapProfile = CreateBootstrapProfile(loginResult, email);
-                var mainWindow = new MainWindow(bootstrapProfile, loginResult.IdToken ?? string.Empty);
-                mainWindow.Show();
-                this.Close();
-
-                _ = HydrateProfileAfterLoginAsync(mainWindow, loginResult.LocalId!, loginResult.IdToken!, bootstrapProfile);
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                    IsEnabled = true;
+                }
             }
-            finally
-            {
-                Mouse.OverrideCursor = null;
-                IsEnabled = true;
-            }
+        }
+
+        private async void ForgotPasswordLink_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            await HandleForgotPasswordAsync();
         }
 
         private static UserProfile CreateBootstrapProfile(AuthResult loginResult, string email)
@@ -198,43 +254,389 @@ namespace MeuApp
 
         private async Task<AuthResult> FirebaseSignInAsync(string email, string password)
         {
-            var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FirebaseApiKey}";
-            var body = new
+            try
             {
-                email,
-                password,
-                returnSecureToken = true
-            };
-
-            var payload = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-            var resp = await httpClient.PostAsync(endpoint, payload);
-            var content = await resp.Content.ReadAsStringAsync();
-
-            if (resp.IsSuccessStatusCode)
-            {
-                var json = JsonDocument.Parse(content).RootElement;
-                return new AuthResult
+                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FirebaseApiKey}";
+                var body = new
                 {
-                    Success = true,
-                    IdToken = json.GetProperty("idToken").GetString(),
-                    LocalId = json.GetProperty("localId").GetString(),
-                    Email = json.GetProperty("email").GetString()
+                    email,
+                    password,
+                    returnSecureToken = true
                 };
+
+                var payload = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                var resp = await httpClient.PostAsync(endpoint, payload);
+                var content = await resp.Content.ReadAsStringAsync();
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    return new AuthResult
+                    {
+                        Success = true,
+                        IdToken = json.GetProperty("idToken").GetString(),
+                        LocalId = json.GetProperty("localId").GetString(),
+                        Email = json.GetProperty("email").GetString()
+                    };
+                }
+
+                try
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    return new AuthResult
+                    {
+                        Success = false,
+                        ErrorMessage = json.GetProperty("error").GetProperty("message").GetString() ?? "Erro no login"
+                    };
+                }
+                catch
+                {
+                    return new AuthResult { Success = false, ErrorMessage = "Erro desconhecido no login Firebase" };
+                }
             }
+            catch (HttpRequestException)
+            {
+                return new AuthResult { Success = false, ErrorMessage = "NETWORK_ERROR" };
+            }
+            catch (TaskCanceledException)
+            {
+                return new AuthResult { Success = false, ErrorMessage = "NETWORK_TIMEOUT" };
+            }
+        }
+
+        private async Task<(bool Success, string? ErrorMessage)> SendPasswordResetEmailAsync(string email)
+        {
+            try
+            {
+                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FirebaseApiKey}";
+                var body = new
+                {
+                    requestType = "PASSWORD_RESET",
+                    email
+                };
+
+                var payload = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                var response = await httpClient.PostAsync(endpoint, payload);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return (true, null);
+                }
+
+                try
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    return (false, json.GetProperty("error").GetProperty("message").GetString() ?? "Não foi possível enviar o email de recuperação.");
+                }
+                catch
+                {
+                    return (false, "Não foi possível enviar o email de recuperação.");
+                }
+            }
+            catch (HttpRequestException)
+            {
+                return (false, "NETWORK_ERROR");
+            }
+            catch (TaskCanceledException)
+            {
+                return (false, "NETWORK_TIMEOUT");
+            }
+        }
+
+        private async Task HandleForgotPasswordAsync()
+        {
+            var email = LoginEmail.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(email) || !email.Contains("@", StringComparison.Ordinal))
+            {
+                ShowLoginFeedbackDialog(
+                    LoginFeedbackKind.LoginError,
+                    "Informe um email válido",
+                    "Para recuperar a senha, digite primeiro o email usado no login.",
+                    "Depois disso, escolha novamente a opção de recuperação.");
+
+                LoginEmail.Focus();
+                LoginEmail.SelectAll();
+                return;
+            }
+
+            Mouse.OverrideCursor = Cursors.Wait;
+            IsEnabled = false;
 
             try
             {
-                var json = JsonDocument.Parse(content).RootElement;
-                return new AuthResult
+                var result = await SendPasswordResetEmailAsync(email);
+                if (result.Success)
                 {
-                    Success = false,
-                    ErrorMessage = json.GetProperty("error").GetProperty("message").GetString() ?? "Erro no login"
+                    ShowLoginFeedbackDialog(
+                        LoginFeedbackKind.Info,
+                        "Email de recuperação enviado",
+                        $"Enviamos as instruções de redefinição para {email}.",
+                        "Verifique sua caixa de entrada e também a pasta de spam.");
+                    return;
+                }
+
+                ShowLoginFeedbackDialog(
+                    IsConnectionError(result.ErrorMessage) ? LoginFeedbackKind.ConnectionError : LoginFeedbackKind.LoginError,
+                    IsConnectionError(result.ErrorMessage) ? "Não foi possível conectar" : "Não foi possível recuperar a senha",
+                    BuildPasswordResetFeedbackMessage(result.ErrorMessage),
+                    IsConnectionError(result.ErrorMessage)
+                        ? "Confira sua internet e tente novamente."
+                        : "Revise o email informado e tente novamente.");
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+                IsEnabled = true;
+            }
+        }
+
+        private LoginDialogAction ShowLoginFeedbackDialog(LoginFeedbackKind kind, string title, string message, string helperText)
+        {
+            var dialog = new MetroWindow
+            {
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Width = 700,
+                Height = 680,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                Title = title,
+                Background = new SolidColorBrush(Color.FromRgb(245, 247, 250)),
+                BorderThickness = new Thickness(0),
+                BorderBrush = Brushes.Transparent,
+                ShowTitleBar = false,
+                ShowCloseButton = false,
+                WindowTransitionsEnabled = false
+            };
+
+            var result = LoginDialogAction.Dismiss;
+            var isConnection = kind == LoginFeedbackKind.ConnectionError;
+            var isInfo = kind == LoginFeedbackKind.Info;
+            var imagePath = kind switch
+            {
+                LoginFeedbackKind.ConnectionError => "pack://application:,,,/img/Error/ConectionError.png",
+                _ => "pack://application:,,,/img/Error/LoginError.png"
+            };
+
+            var shell = new Border
+            {
+                Margin = new Thickness(14),
+                CornerRadius = new CornerRadius(30),
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1),
+                SnapsToDevicePixels = true
+            };
+            shell.Effect = new DropShadowEffect
+            {
+                BlurRadius = 32,
+                ShadowDepth = 10,
+                Opacity = 0.22,
+                Color = Color.FromRgb(15, 23, 42)
+            };
+
+            var root = new Grid
+            {
+                Margin = new Thickness(30, 28, 30, 30)
+            };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var imageCard = new Border
+            {
+                Height = 210,
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Child = new Image
+                {
+                    Source = TryCreateDialogImageSource(imagePath),
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            imageCard.Effect = new DropShadowEffect
+            {
+                BlurRadius = 34,
+                ShadowDepth = 8,
+                Opacity = 0.16,
+                Color = Color.FromRgb(15, 23, 42)
+            };
+            root.Children.Add(imageCard);
+
+            var contentStack = new StackPanel
+            {
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            contentStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 26,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(15, 23, 42)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 620,
+                LineHeight = 32
+            });
+            contentStack.Children.Add(new TextBlock
+            {
+                Text = message,
+                Margin = new Thickness(0, 14, 0, 0),
+                FontSize = 15,
+                Foreground = new SolidColorBrush(Color.FromRgb(51, 65, 85)),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 620,
+                LineHeight = 24
+            });
+            contentStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Padding = new Thickness(16, 14, 16, 14),
+                CornerRadius = new CornerRadius(16),
+                Background = new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock
+                {
+                    Text = helperText,
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromRgb(71, 85, 105)),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 588,
+                    LineHeight = 21
+                }
+            });
+            Grid.SetRow(contentStack, 1);
+            root.Children.Add(contentStack);
+
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 30, 0, 6)
+            };
+
+            Button CreateDialogButton(string label, Brush background, Brush foreground, Brush borderBrush, LoginDialogAction action)
+            {
+                var button = new Button
+                {
+                    Content = label,
+                    MinWidth = 112,
+                    Height = 42,
+                    Margin = new Thickness(12, 0, 0, 12),
+                    Padding = new Thickness(16, 0, 16, 0),
+                    Background = background,
+                    Foreground = foreground,
+                    BorderBrush = borderBrush,
+                    BorderThickness = borderBrush == Brushes.Transparent ? new Thickness(0) : new Thickness(1),
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand
                 };
+                button.Click += (_, __) =>
+                {
+                    result = action;
+                    dialog.Close();
+                };
+                return button;
+            }
+
+            if (isConnection)
+            {
+                buttons.Children.Add(CreateDialogButton("OK", Brushes.White, new SolidColorBrush(Color.FromRgb(51, 65, 85)), new SolidColorBrush(Color.FromRgb(203, 213, 225)), LoginDialogAction.Dismiss));
+                buttons.Children.Add(CreateDialogButton("Tentar novamente", new SolidColorBrush(Color.FromRgb(37, 99, 235)), Brushes.White, Brushes.Transparent, LoginDialogAction.Retry));
+                buttons.Children.Add(CreateDialogButton("Fechar", new SolidColorBrush(Color.FromRgb(15, 23, 42)), Brushes.White, Brushes.Transparent, LoginDialogAction.CloseWindow));
+            }
+            else if (isInfo)
+            {
+                buttons.Children.Add(CreateDialogButton("OK", new SolidColorBrush(Color.FromRgb(37, 99, 235)), Brushes.White, Brushes.Transparent, LoginDialogAction.Dismiss));
+            }
+            else
+            {
+                buttons.Children.Add(CreateDialogButton("OK", Brushes.White, new SolidColorBrush(Color.FromRgb(51, 65, 85)), new SolidColorBrush(Color.FromRgb(203, 213, 225)), LoginDialogAction.Dismiss));
+                buttons.Children.Add(CreateDialogButton("Tentar novamente", new SolidColorBrush(Color.FromRgb(37, 99, 235)), Brushes.White, Brushes.Transparent, LoginDialogAction.Retry));
+                buttons.Children.Add(CreateDialogButton("Esqueci senha", new SolidColorBrush(Color.FromRgb(15, 23, 42)), Brushes.White, Brushes.Transparent, LoginDialogAction.ForgotPassword));
+            }
+
+            Grid.SetRow(buttons, 2);
+            root.Children.Add(buttons);
+
+            shell.Child = root;
+            dialog.Content = shell;
+            dialog.ShowDialog();
+            return result;
+        }
+
+        private ImageSource? TryCreateDialogImageSource(string imagePath)
+        {
+            try
+            {
+                return new BitmapImage(new Uri(imagePath, UriKind.Absolute));
             }
             catch
             {
-                return new AuthResult { Success = false, ErrorMessage = "Erro desconhecido no login Firebase" };
+                return new BitmapImage(new Uri("pack://application:,,,/img/tesseractICO.png", UriKind.Absolute));
             }
+        }
+
+        private static bool IsConnectionError(string? errorMessage)
+        {
+            if (string.IsNullOrWhiteSpace(errorMessage))
+            {
+                return false;
+            }
+
+            return errorMessage.Contains("NETWORK", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("TIMEOUT", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("UNAVAILABLE", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("socket", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("conex", StringComparison.OrdinalIgnoreCase)
+                || errorMessage.Contains("internet", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildLoginFeedbackMessage(string? errorMessage, bool isConnectionError)
+        {
+            if (isConnectionError)
+            {
+                return "A autenticação não conseguiu conversar com o Firebase neste momento.";
+            }
+
+            if (string.IsNullOrWhiteSpace(errorMessage))
+            {
+                return "Seu email ou senha não foram aceitos.";
+            }
+
+            return errorMessage switch
+            {
+                var message when message.Contains("INVALID_LOGIN_CREDENTIALS", StringComparison.OrdinalIgnoreCase) => "Email ou senha incorretos. Confira os dados e tente novamente.",
+                var message when message.Contains("INVALID_PASSWORD", StringComparison.OrdinalIgnoreCase) => "A senha informada está incorreta.",
+                var message when message.Contains("EMAIL_NOT_FOUND", StringComparison.OrdinalIgnoreCase) => "Não encontramos uma conta com esse email.",
+                var message when message.Contains("USER_DISABLED", StringComparison.OrdinalIgnoreCase) => "Essa conta foi desativada e não pode entrar agora.",
+                _ => $"Falha de autenticação: {errorMessage}."
+            };
+        }
+
+        private static string BuildPasswordResetFeedbackMessage(string? errorMessage)
+        {
+            if (string.IsNullOrWhiteSpace(errorMessage))
+            {
+                return "Não foi possível iniciar a recuperação de senha.";
+            }
+
+            if (IsConnectionError(errorMessage))
+            {
+                return "A solicitação de recuperação não conseguiu chegar ao servidor.";
+            }
+
+            return errorMessage switch
+            {
+                var message when message.Contains("EMAIL_NOT_FOUND", StringComparison.OrdinalIgnoreCase) => "Esse email não está cadastrado na plataforma.",
+                var message when message.Contains("INVALID_EMAIL", StringComparison.OrdinalIgnoreCase) => "O email informado não é válido para recuperação.",
+                _ => $"Falha na recuperação: {errorMessage}."
+            };
         }
 
         private async Task<AuthResult> FirebaseSignUpAsync(string email, string password)

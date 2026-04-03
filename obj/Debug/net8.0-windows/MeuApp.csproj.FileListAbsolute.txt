@@ -66,3 +66,5 @@ D:\react-js\NETC#\obj\Debug\net8.0-windows\UserProfileViewWindow.baml
 D:\react-js\NETC#\obj\Debug\net8.0-windows\UserProfileViewWindow.g.cs
 D:\react-js\NETC#\obj\Debug\net8.0-windows\MeuApp_MarkupCompile.lref
 D:\react-js\NETC#\obj\Debug\net8.0-windows\App.baml
+D:\react-js\NETC#\bin\Debug\net8.0-windows\MeuApp.dll
+D:\react-js\NETC#\obj\Debug\net8.0-windows\ref\MeuApp.dll
