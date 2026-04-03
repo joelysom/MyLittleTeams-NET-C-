@@ -5,5 +5,8 @@
              xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
              StartupUri="LoginWindow.xaml">
     <Application.Resources>
+        <Style TargetType="{x:Type mah:MetroWindow}">
+            <Setter Property="Icon" Value="pack://application:,,,/img/TesseractLogin.png"/>
+        </Style>
     </Application.Resources>
 </Application>

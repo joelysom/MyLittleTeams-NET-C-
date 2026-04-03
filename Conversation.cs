@@ -10,7 +10,9 @@ namespace MeuApp
         public string ContactName { get; set; } = "";
         public string ContactAvatarBody { get; set; } = "";
         public string ContactAvatarHair { get; set; } = "";
+        public string ContactAvatarHat { get; set; } = "";
         public string ContactAvatarAccessory { get; set; } = "";
+        public string ContactAvatarClothing { get; set; } = "";
         public string LastMessage { get; set; } = "";
         public DateTime LastMessageTime { get; set; }
         public string LastSenderId { get; set; } = "";

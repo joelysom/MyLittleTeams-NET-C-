@@ -44,10 +44,89 @@ namespace MeuApp
             "Cassandra CQL", "Cypher", "DAX", "EdgeQL", "GraphQL", "Gremlin", "HiveQL", "KQL", "LINQ", "MQL",
             "Pig Latin", "PQL", "PromQL", "SOQL", "Splunk SPL", "Transact-SQL"
         };
-        private static readonly string[] AvatarBodyOptions = { "1", "2", "3" };
-        private static readonly string[] AvatarHairOptions = { "1", "2", "3", "4", "5", "6" };
+        private const string AvatarDefaultBody = "PelePardo";
+        private static readonly string[] LegacyAvatarBodyOptions = { "1", "2", "3" };
+        private static readonly string[] LegacyAvatarHairOptions = { "1", "2", "3", "4", "5", "6" };
+        private static readonly string[] AvatarBodyOptions = { "PeleBranca", "PelePardo", "PelePreto" };
+        private static readonly string[] AvatarHairOptions =
+        {
+            "FEMALE_CastanhoEscuro_Curto_0",
+            "FEMALE_CastanhoEscuro_Curto_1",
+            "FEMALE_Castanho_Curto_0",
+            "FEMALE_Castanho_Curto_1",
+            "FEMALE_Loiro_Curto_0",
+            "FEMALE_Loiro_Curto_1",
+            "FEMALE_Preto_Curto_0",
+            "FEMALE_Preto_Curto_1",
+            "FEMALE_Ruivo_Curto_0",
+            "FEMALE_Ruivo_Curto_1",
+            "Male_CastanhoClaro_Curto_0",
+            "Male_CastanhoEscuro_Curto_0",
+            "Male_CastanhoEscuro_Curto_1",
+            "Male_Loiro_Curto_0",
+            "Male_Loiro_Curto_1",
+            "Male_Preto_Curto_0",
+            "Male_Preto_Curto_1",
+            "Male_Ruivo_Curto_0",
+            "Male_Ruivo_Curto_1",
+            "FEMALE_CastanhoEscuro_Medio_0",
+            "FEMALE_CastanhoEscuro_Medio_1",
+            "FEMALE_Castanho_Medio_0",
+            "FEMALE_Castanho_Medio_1",
+            "FEMALE_Loiro_medio_0",
+            "FEMALE_Loiro_medio_1",
+            "FEMALE_Preto_Medio_0",
+            "FEMALE_Preto_Medio_1",
+            "FEMALE_Ruivo_Medio_0",
+            "FEMALE_Ruivo_Medio_1",
+            "Male_CastanhoClaro_Medio_0",
+            "Male_CastanhoClaro_Medio_1",
+            "Male_CastanhoEscuro_Medio_0",
+            "Male_CastanhoEscuro_Medio_1",
+            "Male_Loiro_Medio_0",
+            "Male_Loiro_Medio_1",
+            "Male_Preto_Medio_0",
+            "Male_Preto_Medio_1",
+            "Male_Ruivo_Medio_0",
+            "Male_Ruivo_Medio_1",
+            "FEMALE_CastanhoEscuro_Longo_0",
+            "FEMALE_CastanhoEscuro_Longo_1",
+            "FEMALE_Castanho_Longo_0",
+            "FEMALE_Castanho_Longo_1",
+            "FEMALE_Loiro_Longo_0",
+            "FEMALE_Loiro_Longo_1",
+            "FEMALE_Preto_Longo_0",
+            "FEMALE_Preto_Longo_1",
+            "FEMALE_Ruivo_Longo_0",
+            "FEMALE_Ruivo_Longo_1"
+        };
+        private static readonly string[] AvatarHatOptions =
+        {
+            "Hat_0", "Hat_1", "Hat_2", "Hat_3", "Hat_4", "Hat_5", "Hat_6", "Hat_7",
+            "Hat_8", "Hat_9", "Hat_10", "Hat_11", "Hat_12", "Hat_16"
+        };
         private static readonly string[] AvatarAccessoryOptions = { "1", "2", "3" };
-        private static readonly string[] ChatStickerAssets = { "Chao_0.png", "Chao_1.png", "chao_2.png" };
+        private static readonly string[] AvatarClothingOptions =
+        {
+            "Roupa_Azul",
+            "Roupa_AzulEscuro",
+            "Roupa_Branca",
+            "Roupa_Laranja",
+            "Roupa_Preta",
+            "Roupa_Rosa",
+            "Roupa_Roxa",
+            "Roupa_Vermelha"
+        };
+        private static readonly string[] ChatStickerAssets =
+        {
+            "Chao_0.png",
+            "Chao_1.png",
+            "chao_2.png",
+            "chao_3.png",
+            "chao_4.png",
+            "chao_5.png",
+            "chao_6.png"
+        };
         private static readonly string[] KnownTeamCourses =
         {
             "Analise e Desenvolvimento de Sistemas",
@@ -250,7 +329,9 @@ namespace MeuApp
                     LinkedInLink = profile.LinkedInLink,
                     AvatarBody = profile.AvatarBody,
                     AvatarHair = profile.AvatarHair,
-                    AvatarAccessory = profile.AvatarAccessory
+                    AvatarHat = profile.AvatarHat,
+                    AvatarAccessory = profile.AvatarAccessory,
+                    AvatarClothing = profile.AvatarClothing
                 });
             }
 
@@ -368,7 +449,9 @@ namespace MeuApp
                 LinkedInLink = _currentProfile.LinkedInLink,
                 AvatarBody = _currentProfile.AvatarBody,
                 AvatarHair = _currentProfile.AvatarHair,
-                AvatarAccessory = _currentProfile.AvatarAccessory
+                AvatarHat = _currentProfile.AvatarHat,
+                AvatarAccessory = _currentProfile.AvatarAccessory,
+                AvatarClothing = _currentProfile.AvatarClothing
             };
         }
 
@@ -2988,8 +3071,8 @@ namespace MeuApp
             var hasAvatar = HasCustomAvatar(profile);
             AvatarActionButton.Content = hasAvatar ? "Editar avatar" : "Criar seu ícone";
             AvatarEditorHintText.Text = hasAvatar
-                ? "Seu avatar já está configurado. Clique para ajustar corpo, cabelo ou acessório."
-                : "Sem avatar ainda. Clique no + ou em Criar seu ícone para montar sua identidade visual.";
+                ? "Seu avatar já está configurado. Ajuste personagem, cabelo, hat, acessório e roupa quando quiser."
+                : "Monte seu personagem com pele, cabelo, hat e roupa. O acessório continua opcional.";
         }
 
         private void RenderProfileAvatarPreview(UserProfile profile)
@@ -3006,29 +3089,47 @@ namespace MeuApp
 
         private bool HasCustomAvatar(UserInfo? user)
         {
-            return user != null && IsValidAvatarSelection(user.AvatarBody, user.AvatarHair, user.AvatarAccessory);
+            return user != null && IsValidAvatarSelection(user.AvatarBody, user.AvatarHair, user.AvatarHat, user.AvatarAccessory, user.AvatarClothing);
         }
 
         private bool HasCustomAvatar(Conversation? conversation)
         {
-            return conversation != null && IsValidAvatarSelection(conversation.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarAccessory);
+            return conversation != null && IsValidAvatarSelection(conversation.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarHat, conversation.ContactAvatarAccessory, conversation.ContactAvatarClothing);
         }
 
         private bool HasCustomAvatar(UserProfile? profile)
         {
-            return profile != null && IsValidAvatarSelection(profile.AvatarBody, profile.AvatarHair, profile.AvatarAccessory);
+            return profile != null && IsValidAvatarSelection(profile.AvatarBody, profile.AvatarHair, profile.AvatarHat, profile.AvatarAccessory, profile.AvatarClothing);
         }
 
-        private bool IsValidAvatarSelection(string? body, string? hair, string? accessory)
+        private bool IsValidAvatarSelection(string? body, string? hair, string? hat, string? accessory, string? clothing)
         {
             var normalizedBody = body?.Trim() ?? string.Empty;
             var normalizedHair = hair?.Trim() ?? string.Empty;
+            var normalizedHat = hat?.Trim() ?? string.Empty;
             var normalizedAccessory = accessory?.Trim() ?? string.Empty;
+            var normalizedClothing = clothing?.Trim() ?? string.Empty;
 
-            return AvatarBodyOptions.Contains(normalizedBody, StringComparer.Ordinal)
-                && AvatarHairOptions.Contains(normalizedHair, StringComparer.Ordinal)
-                && (string.IsNullOrWhiteSpace(normalizedAccessory)
-                    || AvatarAccessoryOptions.Contains(normalizedAccessory, StringComparer.Ordinal));
+            return IsValidNewAvatarSelection(normalizedBody, normalizedHair, normalizedHat, normalizedAccessory, normalizedClothing)
+                || IsValidLegacyAvatarSelection(normalizedBody, normalizedHair, normalizedAccessory);
+        }
+
+        private bool IsValidNewAvatarSelection(string body, string hair, string hat, string accessory, string clothing)
+        {
+            return AvatarBodyOptions.Contains(body, StringComparer.Ordinal)
+                && AvatarHairOptions.Contains(hair, StringComparer.Ordinal)
+                && AvatarHatOptions.Contains(hat, StringComparer.Ordinal)
+                && AvatarClothingOptions.Contains(clothing, StringComparer.Ordinal)
+                && (string.IsNullOrWhiteSpace(accessory)
+                    || AvatarAccessoryOptions.Contains(accessory, StringComparer.Ordinal));
+        }
+
+        private bool IsValidLegacyAvatarSelection(string body, string hair, string accessory)
+        {
+            return LegacyAvatarBodyOptions.Contains(body, StringComparer.Ordinal)
+                && LegacyAvatarHairOptions.Contains(hair, StringComparer.Ordinal)
+                && (string.IsNullOrWhiteSpace(accessory)
+                    || AvatarAccessoryOptions.Contains(accessory, StringComparer.Ordinal));
         }
 
         private string NormalizeAvatarOption(string? selectedValue, IEnumerable<string> validOptions, string fallback)
@@ -3043,11 +3144,45 @@ namespace MeuApp
             return validOptions.Contains(normalized, StringComparer.Ordinal) ? normalized : string.Empty;
         }
 
+        private string NormalizeAvatarBodySelection(string? selectedValue)
+        {
+            var normalized = selectedValue?.Trim() ?? string.Empty;
+            return normalized switch
+            {
+                "1" => "PeleBranca",
+                "2" => "PelePardo",
+                "3" => "PelePreto",
+                _ => NormalizeAvatarOption(normalized, AvatarBodyOptions, AvatarDefaultBody)
+            };
+        }
+
+        private string NormalizeAvatarHairSelection(string? selectedValue)
+        {
+            var normalized = selectedValue?.Trim() ?? string.Empty;
+            if (AvatarHairOptions.Contains(normalized, StringComparer.Ordinal))
+            {
+                return normalized;
+            }
+
+            return normalized switch
+            {
+                "1" => "Male_CastanhoEscuro_Curto_0",
+                "2" => "Male_Preto_Curto_0",
+                "3" => "Male_Loiro_Curto_0",
+                "4" => "FEMALE_CastanhoEscuro_Medio_0",
+                "5" => "FEMALE_Preto_Longo_0",
+                "6" => "FEMALE_Ruivo_Longo_0",
+                _ => AvatarHairOptions.First()
+            };
+        }
+
         private void NormalizeProfileAvatarSelection(UserProfile profile)
         {
-            profile.AvatarBody = NormalizeAvatarOption(profile.AvatarBody, AvatarBodyOptions, AvatarBodyOptions.First());
-            profile.AvatarHair = NormalizeAvatarOption(profile.AvatarHair, AvatarHairOptions, AvatarHairOptions.First());
+            profile.AvatarBody = NormalizeAvatarBodySelection(profile.AvatarBody);
+            profile.AvatarHair = NormalizeAvatarHairSelection(profile.AvatarHair);
+            profile.AvatarHat = NormalizeAvatarOption(profile.AvatarHat, AvatarHatOptions, AvatarHatOptions.First());
             profile.AvatarAccessory = NormalizeOptionalAvatarOption(profile.AvatarAccessory, AvatarAccessoryOptions);
+            profile.AvatarClothing = NormalizeAvatarOption(profile.AvatarClothing, AvatarClothingOptions, AvatarClothingOptions.First());
         }
 
         private UIElement CreateProfileAvatarVisual(UserProfile? profile)
@@ -3133,10 +3268,10 @@ namespace MeuApp
 
         private Border CreateAvatarCompositeVisual(UserProfile profile, double size, CornerRadius cornerRadius, bool showBorder)
         {
-            return CreateAvatarCompositeVisual(profile.AvatarBody, profile.AvatarHair, profile.AvatarAccessory, size, cornerRadius, showBorder);
+            return CreateAvatarCompositeVisual(profile.AvatarBody, profile.AvatarHair, profile.AvatarHat, profile.AvatarAccessory, profile.AvatarClothing, size, cornerRadius, showBorder);
         }
 
-        private Border CreateAvatarCompositeVisual(string body, string hair, string accessory, double size, CornerRadius cornerRadius, bool showBorder)
+        private Border CreateAvatarCompositeVisual(string body, string hair, string hat, string accessory, string clothing, double size, CornerRadius cornerRadius, bool showBorder)
         {
             var container = new Border
             {
@@ -3161,9 +3296,20 @@ namespace MeuApp
                 ClipToBounds = true
             };
 
-            AddAvatarLayer(layers, "Chars", body);
-            AddAvatarLayer(layers, "Hairs", hair);
-            AddAvatarLayer(layers, "Acessory", accessory);
+            if (IsValidNewAvatarSelection(body, hair, hat, accessory, clothing))
+            {
+                AddAvatarLayer(layers, "Personagens", body);
+                AddAvatarLayer(layers, GetHairFolder(hair), hair);
+                AddAvatarLayer(layers, "Hats", hat);
+                AddAvatarLayer(layers, "Acessory", accessory);
+                AddAvatarLayer(layers, "Roupas", clothing);
+            }
+            else
+            {
+                AddAvatarLayer(layers, "Chars", body);
+                AddAvatarLayer(layers, "Hairs", hair);
+                AddAvatarLayer(layers, "Acessory", accessory);
+            }
 
             viewbox.Child = layers;
             container.Child = viewbox;
@@ -3174,7 +3320,7 @@ namespace MeuApp
         {
             if (HasCustomAvatar(user))
             {
-                return CreateAvatarCompositeVisual(user!.AvatarBody, user.AvatarHair, user.AvatarAccessory, size, new CornerRadius(size / 2), showBorder);
+                return CreateAvatarCompositeVisual(user!.AvatarBody, user.AvatarHair, user.AvatarHat, user.AvatarAccessory, user.AvatarClothing, size, new CornerRadius(size / 2), showBorder);
             }
 
             return CreateFallbackAvatarVisual(user?.Name, size, showBorder, GetThemeBrush("AccentBrush"));
@@ -3184,7 +3330,7 @@ namespace MeuApp
         {
             if (HasCustomAvatar(conversation))
             {
-                return CreateAvatarCompositeVisual(conversation!.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarAccessory, size, new CornerRadius(size / 2), showBorder);
+                return CreateAvatarCompositeVisual(conversation!.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarHat, conversation.ContactAvatarAccessory, conversation.ContactAvatarClothing, size, new CornerRadius(size / 2), showBorder);
             }
 
             return CreateFallbackAvatarVisual(conversation?.ContactName, size, showBorder, new SolidColorBrush(Color.FromRgb(0, 168, 132)));
@@ -3267,7 +3413,9 @@ namespace MeuApp
                     LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
                     AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
                     AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
-                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory")
+                    AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
+                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory"),
+                    AvatarClothing = GetFirestoreStringValue(fields, "avatarClothing")
                 };
             }
             catch (Exception ex)
@@ -3336,7 +3484,9 @@ namespace MeuApp
                     LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
                     AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
                     AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
-                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory")
+                    AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
+                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory"),
+                    AvatarClothing = GetFirestoreStringValue(fields, "avatarClothing")
                 };
             }
             catch (Exception ex)
@@ -3379,7 +3529,9 @@ namespace MeuApp
             profile.LinkedInLink = string.IsNullOrWhiteSpace(profile.LinkedInLink) ? summaryUser.LinkedInLink : profile.LinkedInLink;
             profile.AvatarBody = string.IsNullOrWhiteSpace(profile.AvatarBody) ? summaryUser.AvatarBody : profile.AvatarBody;
             profile.AvatarHair = string.IsNullOrWhiteSpace(profile.AvatarHair) ? summaryUser.AvatarHair : profile.AvatarHair;
+            profile.AvatarHat = string.IsNullOrWhiteSpace(profile.AvatarHat) ? summaryUser.AvatarHat : profile.AvatarHat;
             profile.AvatarAccessory = string.IsNullOrWhiteSpace(profile.AvatarAccessory) ? summaryUser.AvatarAccessory : profile.AvatarAccessory;
+            profile.AvatarClothing = string.IsNullOrWhiteSpace(profile.AvatarClothing) ? summaryUser.AvatarClothing : profile.AvatarClothing;
 
             var avatarUser = new UserInfo
             {
@@ -3390,7 +3542,9 @@ namespace MeuApp
                 Course = profile.Course,
                 AvatarBody = profile.AvatarBody,
                 AvatarHair = profile.AvatarHair,
-                AvatarAccessory = profile.AvatarAccessory
+                AvatarHat = profile.AvatarHat,
+                AvatarAccessory = profile.AvatarAccessory,
+                AvatarClothing = profile.AvatarClothing
             };
 
             var dialog = new UserProfileViewWindow(profile, CreateUserAvatarVisual(avatarUser, 108, true))
@@ -3440,7 +3594,9 @@ namespace MeuApp
 
                 conversation.ContactAvatarBody = user.AvatarBody;
                 conversation.ContactAvatarHair = user.AvatarHair;
+                conversation.ContactAvatarHat = user.AvatarHat;
                 conversation.ContactAvatarAccessory = user.AvatarAccessory;
+                conversation.ContactAvatarClothing = user.AvatarClothing;
             }
         }
 
@@ -3477,8 +3633,76 @@ namespace MeuApp
 
                 member.AvatarBody = user.AvatarBody;
                 member.AvatarHair = user.AvatarHair;
+                member.AvatarHat = user.AvatarHat;
                 member.AvatarAccessory = user.AvatarAccessory;
+                member.AvatarClothing = user.AvatarClothing;
             }
+        }
+
+        private string GetHairFolder(string option)
+        {
+            if (option.Contains("_Curto_", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cabelos_Curtos";
+            }
+
+            if (option.Contains("_Longo_", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cabelos_Longos";
+            }
+
+            return "Cabelos_Medios";
+        }
+
+        private static string GetAvatarBodyLabel(string option)
+        {
+            return option switch
+            {
+                "PeleBranca" => "Pele branca",
+                "PelePardo" => "Pele parda",
+                "PelePreto" => "Pele preta",
+                _ => option
+            };
+        }
+
+        private static string GetAvatarHairLabel(string option)
+        {
+            return option
+                .Replace("FEMALE", "Feminino", StringComparison.Ordinal)
+                .Replace("Male", "Masculino", StringComparison.Ordinal)
+                .Replace("CastanhoEscuro", "Castanho escuro", StringComparison.Ordinal)
+                .Replace("CastanhoClaro", "Castanho claro", StringComparison.Ordinal)
+                .Replace("Castanho", "Castanho", StringComparison.Ordinal)
+                .Replace("Loiro", "Loiro", StringComparison.Ordinal)
+                .Replace("Preto", "Preto", StringComparison.Ordinal)
+                .Replace("Ruivo", "Ruivo", StringComparison.Ordinal)
+                .Replace("Curto", "Curto", StringComparison.Ordinal)
+                .Replace("Medio", "Medio", StringComparison.Ordinal)
+                .Replace("medio", "medio", StringComparison.Ordinal)
+                .Replace("Longo", "Longo", StringComparison.Ordinal)
+                .Replace("_0", " · estilo 1", StringComparison.Ordinal)
+                .Replace("_1", " · estilo 2", StringComparison.Ordinal)
+                .Replace("_", " ", StringComparison.Ordinal)
+                .Trim();
+        }
+
+        private static string GetAvatarHatLabel(string option)
+        {
+            return option.Replace("_", " ", StringComparison.Ordinal);
+        }
+
+        private static string GetAvatarClothingLabel(string option)
+        {
+            return option
+                .Replace("Roupa_", string.Empty, StringComparison.Ordinal)
+                .Replace("AzulEscuro", "Azul escuro", StringComparison.Ordinal)
+                .Replace("Azul", "Azul", StringComparison.Ordinal)
+                .Replace("Branca", "Branca", StringComparison.Ordinal)
+                .Replace("Laranja", "Laranja", StringComparison.Ordinal)
+                .Replace("Preta", "Preta", StringComparison.Ordinal)
+                .Replace("Rosa", "Rosa", StringComparison.Ordinal)
+                .Replace("Roxa", "Roxa", StringComparison.Ordinal)
+                .Replace("Vermelha", "Vermelha", StringComparison.Ordinal);
         }
 
         private void AddAvatarLayer(Panel host, string folder, string option)
@@ -3517,72 +3741,119 @@ namespace MeuApp
             }
         }
 
-        private Button CreateAvatarOptionButton(string title, string? folder, string option, bool isSelected, RoutedEventHandler onClick)
+        private UIElement CreateAvatarOptionPreview(string body, string hair, string hat, string accessory, string clothing, string? overlayLabel = null)
         {
-            var button = new Button
+            var frame = new Border
             {
-                Width = 118,
-                Height = 138,
-                Margin = new Thickness(0, 0, 12, 12),
-                Padding = new Thickness(10),
-                Background = isSelected ? GetThemeBrush("AccentMutedBrush") : GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(isSelected ? 2 : 1),
-                Cursor = Cursors.Hand,
-                Tag = option
-            };
-
-            var stack = new StackPanel();
-            var previewBorder = new Border
-            {
-                Width = 86,
-                Height = 86,
-                CornerRadius = new CornerRadius(14),
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                Width = 96,
+                Height = 96,
+                CornerRadius = new CornerRadius(18),
+                Background = new LinearGradientBrush(
+                    Color.FromRgb(255, 255, 255),
+                    Color.FromRgb(241, 245, 249),
+                    90),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(226, 232, 240)),
                 BorderThickness = new Thickness(1),
                 HorizontalAlignment = HorizontalAlignment.Center
             };
 
-            if (string.IsNullOrWhiteSpace(folder))
+            var previewGrid = new Grid();
+            previewGrid.Children.Add(CreateAvatarCompositeVisual(body, hair, hat, accessory, clothing, 96, new CornerRadius(18), showBorder: false));
+
+            if (!string.IsNullOrWhiteSpace(overlayLabel))
             {
-                previewBorder.Child = new TextBlock
+                previewGrid.Children.Add(new Border
                 {
-                    Text = "Sem\nacessório",
-                    TextAlignment = TextAlignment.Center,
-                    FontSize = 12,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = GetThemeBrush("SecondaryTextBrush"),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Center
-                };
-            }
-            else
-            {
-                var previewGrid = new Grid();
-                var source = TryCreateAvatarImageSource(folder, option);
-                if (source != null)
-                {
-                    previewGrid.Children.Add(new Image
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(6),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    CornerRadius = new CornerRadius(999),
+                    Background = new SolidColorBrush(Color.FromArgb(220, 15, 23, 42)),
+                    Child = new TextBlock
                     {
-                        Source = source,
-                        Stretch = Stretch.Uniform,
-                        Margin = new Thickness(6)
-                    });
-                }
-                previewBorder.Child = previewGrid;
+                        Text = overlayLabel,
+                        Foreground = Brushes.White,
+                        FontSize = 9,
+                        FontWeight = FontWeights.Bold
+                    }
+                });
             }
 
-            stack.Children.Add(previewBorder);
+            frame.Child = previewGrid;
+            return frame;
+        }
+
+        private Button CreateAvatarOptionButton(string title, string? badgeText, UIElement previewContent, bool isSelected, RoutedEventHandler onClick)
+        {
+            var button = new Button
+            {
+                Width = 138,
+                Height = 178,
+                Margin = new Thickness(0, 0, 14, 14),
+                Padding = new Thickness(12),
+                Background = isSelected ? new SolidColorBrush(Color.FromRgb(239, 246, 255)) : GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(isSelected ? 2 : 1),
+                Cursor = Cursors.Hand,
+                Tag = title
+            };
+
+            var stack = new StackPanel();
+            var topRow = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            topRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            if (!string.IsNullOrWhiteSpace(badgeText))
+            {
+                topRow.Children.Add(new Border
+                {
+                    Background = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(999),
+                    Padding = new Thickness(8, 3, 8, 3),
+                    Child = new TextBlock
+                    {
+                        Text = badgeText,
+                        FontSize = 9,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = isSelected ? Brushes.White : GetThemeBrush("SecondaryTextBrush")
+                    }
+                });
+            }
+
+            var statusBadge = new Border
+            {
+                Background = isSelected ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(203, 213, 225)),
+                Width = 10,
+                Height = 10,
+                CornerRadius = new CornerRadius(999),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(statusBadge, 1);
+            topRow.Children.Add(statusBadge);
+
+            stack.Children.Add(topRow);
+            stack.Children.Add(previewContent);
             stack.Children.Add(new TextBlock
             {
                 Text = title,
-                Margin = new Thickness(0, 10, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 12, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                TextAlignment = TextAlignment.Left,
+                TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = isSelected ? "Selecionado" : "Clique para aplicar",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 10,
+                FontWeight = FontWeights.Medium,
+                Foreground = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("TertiaryTextBrush")
             });
 
             button.Content = stack;
@@ -3597,9 +3868,11 @@ namespace MeuApp
                 return;
             }
 
-            var selectedBody = NormalizeAvatarOption(_currentProfile.AvatarBody, AvatarBodyOptions, AvatarBodyOptions.First());
-            var selectedHair = NormalizeAvatarOption(_currentProfile.AvatarHair, AvatarHairOptions, AvatarHairOptions.First());
+            var selectedBody = NormalizeAvatarBodySelection(_currentProfile.AvatarBody);
+            var selectedHair = NormalizeAvatarHairSelection(_currentProfile.AvatarHair);
+            var selectedHat = NormalizeAvatarOption(_currentProfile.AvatarHat, AvatarHatOptions, AvatarHatOptions.First());
             var selectedAccessory = NormalizeOptionalAvatarOption(_currentProfile.AvatarAccessory, AvatarAccessoryOptions);
+            var selectedClothing = NormalizeAvatarOption(_currentProfile.AvatarClothing, AvatarClothingOptions, AvatarClothingOptions.First());
 
             var dialog = new MetroWindow
             {
@@ -3636,7 +3909,7 @@ namespace MeuApp
             });
             header.Children.Add(new TextBlock
             {
-                Text = "Escolha um corpo, um cabelo e, se quiser, um acessório. Corpo e cabelo são obrigatórios.",
+                Text = "A nova composição usa personagem, cabelo, hat, acessório e roupa. Apenas o acessório continua opcional.",
                 Margin = new Thickness(0, 8, 0, 0),
                 FontSize = 13,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -3668,7 +3941,7 @@ namespace MeuApp
             });
             previewStack.Children.Add(new TextBlock
             {
-                Text = "Seu ícone será mostrado no perfil e na navegação lateral.",
+                Text = "Seu personagem aparecerá no perfil, barra lateral, conversas e equipes.",
                 Margin = new Thickness(0, 6, 0, 18),
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -3702,15 +3975,27 @@ namespace MeuApp
             var selectorsStack = new StackPanel();
 
             var bodyPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
-            var hairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var shortHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var mediumHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var longHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var hatPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
             var accessoryPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var clothingPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
 
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Corpo", "Obrigatório · use os tons de pele da layer principal."));
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Personagem", "Layer 0 · obrigatório · começa com pele parda como padrão."));
             selectorsStack.Children.Add(bodyPanel);
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelo", "Obrigatório · escolha uma das seis variações disponíveis."));
-            selectorsStack.Children.Add(hairPanel);
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Acessório", "Opcional · você pode deixar sem acessório."));
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos curtos", "Layer 1 · obrigatório · cortes curtos femininos e masculinos."));
+            selectorsStack.Children.Add(shortHairPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos médios", "Layer 1 · obrigatório · opções médias para compor o visual."));
+            selectorsStack.Children.Add(mediumHairPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos longos", "Layer 1 · obrigatório · opções longas disponíveis."));
+            selectorsStack.Children.Add(longHairPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Hats", "Layer 2 · obrigatório · escolha um chapéu para o personagem."));
+            selectorsStack.Children.Add(hatPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Acessory", "Layer 3 · opcional · mantém os acessórios atuais."));
             selectorsStack.Children.Add(accessoryPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Roupas", "Layer 4 · obrigatório · finalize com uma roupa."));
+            selectorsStack.Children.Add(clothingPanel);
 
             selectorsScroll.Content = selectorsStack;
             Grid.SetColumn(selectorsScroll, 1);
@@ -3723,12 +4008,14 @@ namespace MeuApp
                 {
                     AvatarBody = selectedBody,
                     AvatarHair = selectedHair,
-                    AvatarAccessory = selectedAccessory
+                    AvatarHat = selectedHat,
+                    AvatarAccessory = selectedAccessory,
+                    AvatarClothing = selectedClothing
                 }, 220, new CornerRadius(28), showBorder: true));
 
                 selectionSummary.Text = string.IsNullOrWhiteSpace(selectedAccessory)
-                    ? $"Corpo {selectedBody}, cabelo {selectedHair} e sem acessório."
-                    : $"Corpo {selectedBody}, cabelo {selectedHair} e acessório {selectedAccessory}.";
+                    ? $"{GetAvatarBodyLabel(selectedBody)}, {GetAvatarHairLabel(selectedHair)}, {GetAvatarHatLabel(selectedHat)} e roupa {GetAvatarClothingLabel(selectedClothing)}."
+                    : $"{GetAvatarBodyLabel(selectedBody)}, {GetAvatarHairLabel(selectedHair)}, {GetAvatarHatLabel(selectedHat)}, acessório {selectedAccessory} e roupa {GetAvatarClothingLabel(selectedClothing)}.";
             }
 
             void RenderEditorOptions()
@@ -3737,7 +4024,12 @@ namespace MeuApp
                 foreach (var option in AvatarBodyOptions)
                 {
                     var currentOption = option;
-                    bodyPanel.Children.Add(CreateAvatarOptionButton($"Tom {currentOption}", "Chars", currentOption, selectedBody == currentOption, (buttonSender, buttonArgs) =>
+                    bodyPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarBodyLabel(currentOption),
+                        "Base",
+                        CreateAvatarOptionPreview(currentOption, selectedHair, selectedHat, selectedAccessory, selectedClothing, "Layer 0"),
+                        selectedBody == currentOption,
+                        (buttonSender, buttonArgs) =>
                     {
                         selectedBody = currentOption;
                         RenderEditorOptions();
@@ -3745,11 +4037,16 @@ namespace MeuApp
                     }));
                 }
 
-                hairPanel.Children.Clear();
-                foreach (var option in AvatarHairOptions)
+                shortHairPanel.Children.Clear();
+                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Curto_", StringComparison.OrdinalIgnoreCase)))
                 {
                     var currentOption = option;
-                    hairPanel.Children.Add(CreateAvatarOptionButton($"Cabelo {currentOption}", "Hairs", currentOption, selectedHair == currentOption, (buttonSender, buttonArgs) =>
+                    shortHairPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarHairLabel(currentOption),
+                        "Curto",
+                        CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
+                        selectedHair == currentOption,
+                        (buttonSender, buttonArgs) =>
                     {
                         selectedHair = currentOption;
                         RenderEditorOptions();
@@ -3757,8 +4054,64 @@ namespace MeuApp
                     }));
                 }
 
+                mediumHairPanel.Children.Clear();
+                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Medio_", StringComparison.OrdinalIgnoreCase) || option.Contains("_medio_", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var currentOption = option;
+                    mediumHairPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarHairLabel(currentOption),
+                        "Médio",
+                        CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
+                        selectedHair == currentOption,
+                        (buttonSender, buttonArgs) =>
+                    {
+                        selectedHair = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
+                longHairPanel.Children.Clear();
+                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Longo_", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var currentOption = option;
+                    longHairPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarHairLabel(currentOption),
+                        "Longo",
+                        CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
+                        selectedHair == currentOption,
+                        (buttonSender, buttonArgs) =>
+                    {
+                        selectedHair = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
+                hatPanel.Children.Clear();
+                foreach (var option in AvatarHatOptions)
+                {
+                    var currentOption = option;
+                    hatPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarHatLabel(currentOption),
+                        "Hat",
+                        CreateAvatarOptionPreview(selectedBody, selectedHair, currentOption, selectedAccessory, selectedClothing, "Layer 2"),
+                        selectedHat == currentOption,
+                        (buttonSender, buttonArgs) =>
+                    {
+                        selectedHat = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
                 accessoryPanel.Children.Clear();
-                accessoryPanel.Children.Add(CreateAvatarOptionButton("Sem acessório", null, string.Empty, string.IsNullOrWhiteSpace(selectedAccessory), (buttonSender, buttonArgs) =>
+                accessoryPanel.Children.Add(CreateAvatarOptionButton(
+                    "Sem acessório",
+                    "Opcional",
+                    CreateAvatarOptionPreview(selectedBody, selectedHair, selectedHat, string.Empty, selectedClothing, "Layer 3"),
+                    string.IsNullOrWhiteSpace(selectedAccessory),
+                    (buttonSender, buttonArgs) =>
                 {
                     selectedAccessory = string.Empty;
                     RenderEditorOptions();
@@ -3768,9 +4121,31 @@ namespace MeuApp
                 foreach (var option in AvatarAccessoryOptions)
                 {
                     var currentOption = option;
-                    accessoryPanel.Children.Add(CreateAvatarOptionButton($"Acessório {currentOption}", "Acessory", currentOption, selectedAccessory == currentOption, (buttonSender, buttonArgs) =>
+                    accessoryPanel.Children.Add(CreateAvatarOptionButton(
+                        $"Acessório {currentOption}",
+                        "Acessory",
+                        CreateAvatarOptionPreview(selectedBody, selectedHair, selectedHat, currentOption, selectedClothing, "Layer 3"),
+                        selectedAccessory == currentOption,
+                        (buttonSender, buttonArgs) =>
                     {
                         selectedAccessory = currentOption;
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
+                clothingPanel.Children.Clear();
+                foreach (var option in AvatarClothingOptions)
+                {
+                    var currentOption = option;
+                    clothingPanel.Children.Add(CreateAvatarOptionButton(
+                        GetAvatarClothingLabel(currentOption),
+                        "Roupa",
+                        CreateAvatarOptionPreview(selectedBody, selectedHair, selectedHat, selectedAccessory, currentOption, "Layer 4"),
+                        selectedClothing == currentOption,
+                        (buttonSender, buttonArgs) =>
+                    {
+                        selectedClothing = currentOption;
                         RenderEditorOptions();
                         RenderEditorPreview();
                     }));
@@ -3793,7 +4168,7 @@ namespace MeuApp
 
             var footerHint = new TextBlock
             {
-                Text = "Ao aplicar, o avatar é atualizado na tela e salvo no Firebase imediatamente.",
+                Text = "Ao aplicar, o personagem é atualizado na tela e salvo no Firebase imediatamente.",
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -3821,7 +4196,7 @@ namespace MeuApp
 
             var applyButton = new Button
             {
-                Content = "Aplicar avatar",
+                Content = "Aplicar personagem",
                 Width = 150,
                 Height = 42,
                 Background = GetThemeBrush("AccentBrush"),
@@ -3840,19 +4215,21 @@ namespace MeuApp
 
                 _currentProfile.AvatarBody = selectedBody;
                 _currentProfile.AvatarHair = selectedHair;
+                _currentProfile.AvatarHat = selectedHat;
                 _currentProfile.AvatarAccessory = selectedAccessory;
+                _currentProfile.AvatarClothing = selectedClothing;
                 NormalizeProfileAvatarSelection(_currentProfile);
                 RefreshAvatarUi(_currentProfile);
 
                 applyButton.IsEnabled = false;
                 cancelButton.IsEnabled = false;
-                footerHint.Text = "Salvando avatar no Firebase...";
+                footerHint.Text = "Salvando personagem no Firebase...";
 
                 try
                 {
                     if (string.IsNullOrWhiteSpace(_idToken) || string.IsNullOrWhiteSpace(_currentProfile.UserId))
                     {
-                        ProfessionalProfileStatusText.Text = "Avatar atualizado localmente. Faça login novamente para sincronizar com o Firebase.";
+                        ProfessionalProfileStatusText.Text = "Personagem atualizado localmente. Faça login novamente para sincronizar com o Firebase.";
                         dialog.Close();
                         return;
                     }
@@ -3860,25 +4237,25 @@ namespace MeuApp
                     var saveResult = await SaveProfessionalProfileAsync(_currentProfile, _idToken);
                     if (saveResult.Success)
                     {
-                        ProfessionalProfileStatusText.Text = "Avatar salvo com sucesso no Firebase.";
+                        ProfessionalProfileStatusText.Text = "Personagem salvo com sucesso no Firebase.";
                         dialog.Close();
                         return;
                     }
 
-                    ProfessionalProfileStatusText.Text = "Avatar atualizado localmente, mas o Firebase recusou a gravação.";
-                    footerHint.Text = "Falha ao salvar avatar no Firebase. Você pode tentar novamente.";
+                    ProfessionalProfileStatusText.Text = "Personagem atualizado localmente, mas o Firebase recusou a gravação.";
+                    footerHint.Text = "Falha ao salvar personagem no Firebase. Você pode tentar novamente.";
                     MessageBox.Show(
-                        $"Não foi possível salvar o avatar no Firebase.\n\n{saveResult.ErrorMessage}",
-                        "Erro ao salvar avatar",
+                        $"Não foi possível salvar o personagem no Firebase.\n\n{saveResult.ErrorMessage}",
+                        "Erro ao salvar personagem",
                         MessageBoxButton.OK,
                         MessageBoxImage.Warning);
                 }
                 catch (Exception ex)
                 {
-                    ProfessionalProfileStatusText.Text = "Avatar atualizado localmente, mas ocorreu um erro ao salvar no Firebase.";
-                    footerHint.Text = "Erro ao salvar avatar. Revise sua conexão e tente novamente.";
+                    ProfessionalProfileStatusText.Text = "Personagem atualizado localmente, mas ocorreu um erro ao salvar no Firebase.";
+                    footerHint.Text = "Erro ao salvar personagem. Revise sua conexão e tente novamente.";
                     MessageBox.Show(
-                        $"Erro inesperado ao salvar avatar: {ex.Message}",
+                        $"Erro inesperado ao salvar personagem: {ex.Message}",
                         "Erro",
                         MessageBoxButton.OK,
                         MessageBoxImage.Error);
@@ -3901,14 +4278,28 @@ namespace MeuApp
 
         private StackPanel CreateAvatarSectionHeader(string title, string description)
         {
-            var section = new StackPanel();
+            var section = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+
+            section.Children.Add(new Border
+            {
+                Width = 42,
+                Height = 5,
+                CornerRadius = new CornerRadius(999),
+                Background = GetThemeBrush("AccentBrush"),
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+
             section.Children.Add(new TextBlock
             {
                 Text = title,
-                FontSize = 15,
-                FontWeight = FontWeights.SemiBold,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
+
             section.Children.Add(new TextBlock
             {
                 Text = description,
@@ -6694,7 +7085,9 @@ namespace MeuApp
                     linkedInLink = new { stringValue = profile.LinkedInLink },
                     avatarBody = new { stringValue = profile.AvatarBody },
                     avatarHair = new { stringValue = profile.AvatarHair },
+                    avatarHat = new { stringValue = profile.AvatarHat },
                     avatarAccessory = new { stringValue = profile.AvatarAccessory },
+                    avatarClothing = new { stringValue = profile.AvatarClothing },
                     updatedAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -6774,7 +7167,9 @@ namespace MeuApp
                         ContactName = contactUser.Name,
                         ContactAvatarBody = contactUser.AvatarBody,
                         ContactAvatarHair = contactUser.AvatarHair,
+                        ContactAvatarHat = contactUser.AvatarHat,
                         ContactAvatarAccessory = contactUser.AvatarAccessory,
+                        ContactAvatarClothing = contactUser.AvatarClothing,
                         LastMessage = "Conversa iniciada",
                         LastMessageTime = DateTime.Now,
                         Messages = new List<ChatMessage>()
@@ -8031,6 +8426,10 @@ namespace MeuApp
                 "chao_0.png" => "Feliz",
                 "chao_1.png" => "Triste",
                 "chao_2.png" => "Irritado",
+                "chao_3.png" => "Annya Smile",
+                "chao_4.png" => "Pikachu Shock",
+                "chao_5.png" => "Love Chao",
+                "chao_6.png" => "Close-up Face",
                 _ => "Figurinha"
             };
         }
@@ -8269,27 +8668,52 @@ namespace MeuApp
                 Foreground = subtitleBrush
             });
 
-            var stickersWrap = new WrapPanel();
+            host.Children.Add(new Border
+            {
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(18, 30, 49))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = popupBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 0, 0, 14),
+                Child = new TextBlock
+                {
+                    Text = "7 opções disponíveis. Clique em uma figurinha para enviar instantaneamente.",
+                    FontSize = 11,
+                    Foreground = subtitleBrush,
+                    TextWrapping = TextWrapping.Wrap
+                }
+            });
+
+            var stickersWrap = new WrapPanel
+            {
+                ItemWidth = 146,
+                Margin = new Thickness(0, 0, -10, -10)
+            };
             foreach (var stickerAsset in ChatStickerAssets)
             {
+                var stickerCardBackground = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(18, 30, 49))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252));
+
                 var stickerButton = new Button
                 {
                     Background = Brushes.Transparent,
                     BorderThickness = new Thickness(0),
                     Padding = new Thickness(0),
-                    Margin = new Thickness(0, 0, 10, 0),
+                    Margin = new Thickness(0, 0, 10, 10),
                     Cursor = Cursors.Hand,
                     Tag = stickerAsset,
                     Content = new Border
                     {
-                        Background = _appDarkModeEnabled
-                            ? new SolidColorBrush(Color.FromRgb(18, 30, 49))
-                            : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                        Background = stickerCardBackground,
                         BorderBrush = popupBorderBrush,
                         BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(18),
+                        CornerRadius = new CornerRadius(20),
                         Padding = new Thickness(12),
-                        Width = 126,
+                        Width = 136,
                         Child = new StackPanel
                         {
                             Children =
@@ -8297,8 +8721,8 @@ namespace MeuApp
                                 new Image
                                 {
                                     Source = TryCreateStickerImageSource(stickerAsset),
-                                    Width = 84,
-                                    Height = 84,
+                                    Width = 96,
+                                    Height = 96,
                                     Stretch = Stretch.Uniform,
                                     HorizontalAlignment = HorizontalAlignment.Center
                                 },
@@ -8306,9 +8730,19 @@ namespace MeuApp
                                 {
                                     Text = GetStickerDisplayName(stickerAsset),
                                     FontSize = 11,
+                                    FontWeight = FontWeights.SemiBold,
                                     Margin = new Thickness(0, 8, 0, 0),
                                     TextAlignment = TextAlignment.Center,
                                     Foreground = titleBrush,
+                                    TextWrapping = TextWrapping.Wrap
+                                },
+                                new TextBlock
+                                {
+                                    Text = "Clique para enviar",
+                                    FontSize = 10,
+                                    Margin = new Thickness(0, 6, 0, 0),
+                                    TextAlignment = TextAlignment.Center,
+                                    Foreground = subtitleBrush,
                                     TextWrapping = TextWrapping.Wrap
                                 }
                             }
@@ -8325,10 +8759,16 @@ namespace MeuApp
                 stickersWrap.Children.Add(stickerButton);
             }
 
-            host.Children.Add(stickersWrap);
+            host.Children.Add(new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MaxHeight = 360,
+                Content = stickersWrap
+            });
             popup.Child = new Border
             {
-                Width = 420,
+                Width = 520,
                 Background = popupBackground,
                 BorderBrush = popupBorderBrush,
                 BorderThickness = new Thickness(1),

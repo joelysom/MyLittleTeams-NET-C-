@@ -29,7 +29,9 @@ namespace MeuApp
         public string? Role { get; set; } = "member";
         public string AvatarBody { get; set; } = "";
         public string AvatarHair { get; set; } = "";
+        public string AvatarHat { get; set; } = "";
         public string AvatarAccessory { get; set; } = "";
+        public string AvatarClothing { get; set; } = "";
         private bool _isConnecting;
         private bool _isCurrentUser;
         private string _connectionState = "none";
@@ -330,7 +332,9 @@ namespace MeuApp
 
                     user.AvatarBody = ExtractField(fields, "avatarBody", documentIndex) ?? "";
                     user.AvatarHair = ExtractField(fields, "avatarHair", documentIndex) ?? "";
+                    user.AvatarHat = ExtractField(fields, "avatarHat", documentIndex) ?? "";
                     user.AvatarAccessory = ExtractField(fields, "avatarAccessory", documentIndex) ?? "";
+                    user.AvatarClothing = ExtractField(fields, "avatarClothing", documentIndex) ?? "";
 
                     // Listar campos disponíveis se houver campos não esperados
                     var availableFields = fields.EnumerateObject().Select(p => p.Name).ToList();

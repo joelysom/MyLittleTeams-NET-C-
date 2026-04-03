@@ -555,7 +555,9 @@ namespace MeuApp
                             role = new { stringValue = member.Role ?? "member" },
                             avatarBody = new { stringValue = member.AvatarBody ?? "" },
                             avatarHair = new { stringValue = member.AvatarHair ?? "" },
-                            avatarAccessory = new { stringValue = member.AvatarAccessory ?? "" }
+                            avatarHat = new { stringValue = member.AvatarHat ?? "" },
+                            avatarAccessory = new { stringValue = member.AvatarAccessory ?? "" },
+                            avatarClothing = new { stringValue = member.AvatarClothing ?? "" }
                         }
                     }
                 });
@@ -828,7 +830,9 @@ namespace MeuApp
                                 Role = GetString(memberFields, "role"),
                                 AvatarBody = GetString(memberFields, "avatarBody"),
                                 AvatarHair = GetString(memberFields, "avatarHair"),
-                                AvatarAccessory = GetString(memberFields, "avatarAccessory")
+                                AvatarHat = GetString(memberFields, "avatarHat"),
+                                AvatarAccessory = GetString(memberFields, "avatarAccessory"),
+                                AvatarClothing = GetString(memberFields, "avatarClothing")
                             };
 
                             if (!string.IsNullOrEmpty(member.UserId))

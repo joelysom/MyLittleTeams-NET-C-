@@ -299,7 +299,9 @@ namespace MeuApp
                     linkedInLink = new { stringValue = string.Empty },
                     avatarBody = new { stringValue = string.Empty },
                     avatarHair = new { stringValue = string.Empty },
+                    avatarHat = new { stringValue = string.Empty },
                     avatarAccessory = new { stringValue = string.Empty },
+                    avatarClothing = new { stringValue = string.Empty },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -354,7 +356,9 @@ namespace MeuApp
                 LinkedInLink = TryGetStringField(fields, "linkedInLink"),
                 AvatarBody = TryGetStringField(fields, "avatarBody"),
                 AvatarHair = TryGetStringField(fields, "avatarHair"),
-                AvatarAccessory = TryGetStringField(fields, "avatarAccessory")
+                AvatarHat = TryGetStringField(fields, "avatarHat"),
+                AvatarAccessory = TryGetStringField(fields, "avatarAccessory"),
+                AvatarClothing = TryGetStringField(fields, "avatarClothing")
             };
         }
 
@@ -386,7 +390,9 @@ namespace MeuApp
         public string LinkedInLink { get; set; } = string.Empty;
         public string AvatarBody { get; set; } = string.Empty;
         public string AvatarHair { get; set; } = string.Empty;
+        public string AvatarHat { get; set; } = string.Empty;
         public string AvatarAccessory { get; set; } = string.Empty;
+        public string AvatarClothing { get; set; } = string.Empty;
     }
 
     public class AuthResult
