@@ -3686,6 +3686,79 @@ namespace MeuApp
                 .Trim();
         }
 
+        private static string GetAvatarHairPresentation(string option)
+        {
+            return option.StartsWith("FEMALE", StringComparison.OrdinalIgnoreCase)
+                ? "Feminino"
+                : "Masculino";
+        }
+
+        private static string GetAvatarHairLength(string option)
+        {
+            if (option.Contains("_Curto_", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Curto";
+            }
+
+            if (option.Contains("_Longo_", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Longo";
+            }
+
+            return "Médio";
+        }
+
+        private static string ExtractAvatarHairColorKey(string option)
+        {
+            var colors = new[]
+            {
+                "CastanhoEscuro",
+                "CastanhoClaro",
+                "Castanho",
+                "Loiro",
+                "Preto",
+                "Ruivo"
+            };
+
+            return colors.FirstOrDefault(color => option.Contains(color, StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
+        }
+
+        private static int GetAvatarHairVariantIndex(string option)
+        {
+            return option.EndsWith("_1", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        }
+
+        private static int GetAvatarHairSimilarityScore(string referenceHair, string candidateHair)
+        {
+            if (string.Equals(referenceHair, candidateHair, StringComparison.Ordinal))
+            {
+                return 1000;
+            }
+
+            var score = 0;
+            if (string.Equals(GetAvatarHairPresentation(referenceHair), GetAvatarHairPresentation(candidateHair), StringComparison.Ordinal))
+            {
+                score += 220;
+            }
+
+            if (string.Equals(GetAvatarHairLength(referenceHair), GetAvatarHairLength(candidateHair), StringComparison.Ordinal))
+            {
+                score += 180;
+            }
+
+            if (string.Equals(ExtractAvatarHairColorKey(referenceHair), ExtractAvatarHairColorKey(candidateHair), StringComparison.Ordinal))
+            {
+                score += 120;
+            }
+
+            if (GetAvatarHairVariantIndex(referenceHair) == GetAvatarHairVariantIndex(candidateHair))
+            {
+                score += 40;
+            }
+
+            return score;
+        }
+
         private static string GetAvatarHatLabel(string option)
         {
             return option.Replace("_", " ", StringComparison.Ordinal);
@@ -3703,6 +3776,59 @@ namespace MeuApp
                 .Replace("Rosa", "Rosa", StringComparison.Ordinal)
                 .Replace("Roxa", "Roxa", StringComparison.Ordinal)
                 .Replace("Vermelha", "Vermelha", StringComparison.Ordinal);
+        }
+
+        private static int GetAvatarHatNumber(string option)
+        {
+            return int.TryParse(option.Replace("Hat_", string.Empty, StringComparison.OrdinalIgnoreCase), out var number)
+                ? number
+                : int.MaxValue;
+        }
+
+        private static int GetAvatarHatSimilarityScore(string referenceHat, string candidateHat)
+        {
+            if (string.Equals(referenceHat, candidateHat, StringComparison.Ordinal))
+            {
+                return 1000;
+            }
+
+            return Math.Max(0, 100 - Math.Abs(GetAvatarHatNumber(referenceHat) - GetAvatarHatNumber(candidateHat)) * 8);
+        }
+
+        private static int GetAvatarClothingSimilarityScore(string referenceClothing, string candidateClothing)
+        {
+            if (string.Equals(referenceClothing, candidateClothing, StringComparison.Ordinal))
+            {
+                return 1000;
+            }
+
+            var referenceLabel = GetAvatarClothingLabel(referenceClothing);
+            var candidateLabel = GetAvatarClothingLabel(candidateClothing);
+
+            if (string.Equals(referenceLabel, candidateLabel, StringComparison.Ordinal))
+            {
+                return 600;
+            }
+
+            var isReferenceDark = referenceLabel.Contains("escuro", StringComparison.OrdinalIgnoreCase)
+                || referenceLabel.Contains("preta", StringComparison.OrdinalIgnoreCase);
+            var isCandidateDark = candidateLabel.Contains("escuro", StringComparison.OrdinalIgnoreCase)
+                || candidateLabel.Contains("preta", StringComparison.OrdinalIgnoreCase);
+
+            return isReferenceDark == isCandidateDark ? 120 : 40;
+        }
+
+        private sealed class AvatarQuickSuggestion
+        {
+            public string Title { get; init; } = string.Empty;
+            public string Subtitle { get; init; } = string.Empty;
+            public string Badge { get; init; } = string.Empty;
+            public string Body { get; init; } = string.Empty;
+            public string Hair { get; init; } = string.Empty;
+            public string Hat { get; init; } = string.Empty;
+            public string Accessory { get; init; } = string.Empty;
+            public string Clothing { get; init; } = string.Empty;
+            public int Score { get; init; }
         }
 
         private void AddAvatarLayer(Panel host, string folder, string option)
@@ -3861,6 +3987,197 @@ namespace MeuApp
             return button;
         }
 
+        private Button CreateAvatarFilterChipButton(string label, bool isSelected, RoutedEventHandler onClick)
+        {
+            var button = new Button
+            {
+                Content = label,
+                MinWidth = 88,
+                Height = 34,
+                Margin = new Thickness(0, 0, 10, 10),
+                Padding = new Thickness(14, 0, 14, 0),
+                Background = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBackgroundBrush"),
+                Foreground = isSelected ? Brushes.White : GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold
+            };
+            button.Click += onClick;
+            return button;
+        }
+
+        private Border CreateAvatarQuickSuggestionButton(AvatarQuickSuggestion suggestion, bool isSelected, RoutedEventHandler onClick)
+        {
+            var button = new Button
+            {
+                Width = 210,
+                Height = 230,
+                Padding = new Thickness(12),
+                Background = isSelected ? new SolidColorBrush(Color.FromRgb(239, 246, 255)) : GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(isSelected ? 2 : 1),
+                Cursor = Cursors.Hand
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(CreateAvatarOptionPreview(suggestion.Body, suggestion.Hair, suggestion.Hat, suggestion.Accessory, suggestion.Clothing, suggestion.Badge));
+            stack.Children.Add(new TextBlock
+            {
+                Text = suggestion.Title,
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = suggestion.Subtitle,
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = isSelected ? "Combinação aplicada no editor" : "Aplicar combinação completa",
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = isSelected ? GetThemeBrush("AccentBrush") : GetThemeBrush("TertiaryTextBrush")
+            });
+
+            button.Content = stack;
+            button.Click += onClick;
+
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 14, 14),
+                Child = button
+            };
+        }
+
+        private IEnumerable<string> GetFilteredHairOptions(string referenceHair, string presentationFilter, string lengthFilter)
+        {
+            return AvatarHairOptions
+                .Where(option => presentationFilter == "Todos" || string.Equals(GetAvatarHairPresentation(option), presentationFilter, StringComparison.Ordinal))
+                .Where(option => lengthFilter == "Todos" || string.Equals(GetAvatarHairLength(option), lengthFilter, StringComparison.Ordinal))
+                .OrderByDescending(option => GetAvatarHairSimilarityScore(referenceHair, option))
+                .ThenBy(option => GetAvatarHairLabel(option), StringComparer.OrdinalIgnoreCase);
+        }
+
+        private List<AvatarQuickSuggestion> BuildAvatarQuickSuggestions(string body, string hair, string hat, string accessory, string clothing)
+        {
+            var hairCandidates = AvatarHairOptions
+                .OrderByDescending(option => GetAvatarHairSimilarityScore(hair, option))
+                .Take(4)
+                .ToList();
+
+            var hatCandidates = AvatarHatOptions
+                .OrderByDescending(option => GetAvatarHatSimilarityScore(hat, option))
+                .Take(3)
+                .ToList();
+
+            var clothingCandidates = AvatarClothingOptions
+                .OrderByDescending(option => GetAvatarClothingSimilarityScore(clothing, option))
+                .Take(3)
+                .ToList();
+
+            var accessoryCandidates = new List<string> { accessory };
+            if (!string.IsNullOrWhiteSpace(accessory))
+            {
+                accessoryCandidates.Add(string.Empty);
+            }
+            else
+            {
+                accessoryCandidates.AddRange(AvatarAccessoryOptions.Take(1));
+            }
+
+            var combinations = new List<AvatarQuickSuggestion>();
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var hairOption in hairCandidates)
+            {
+                foreach (var hatOption in hatCandidates)
+                {
+                    foreach (var clothingOption in clothingCandidates)
+                    {
+                        foreach (var accessoryOption in accessoryCandidates)
+                        {
+                            var key = string.Join("|", body, hairOption, hatOption, accessoryOption, clothingOption);
+                            if (!seenKeys.Add(key))
+                            {
+                                continue;
+                            }
+
+                            var score = 0;
+                            score += string.Equals(body, body, StringComparison.Ordinal) ? 120 : 0;
+                            score += GetAvatarHairSimilarityScore(hair, hairOption);
+                            score += GetAvatarHatSimilarityScore(hat, hatOption);
+                            score += GetAvatarClothingSimilarityScore(clothing, clothingOption);
+                            score += string.Equals(accessory, accessoryOption, StringComparison.Ordinal) ? 180 : 40;
+
+                            var title = "Combinação próxima";
+                            var subtitle = $"{GetAvatarHairLabel(hairOption)} com {GetAvatarHatLabel(hatOption)} e roupa {GetAvatarClothingLabel(clothingOption)}.";
+                            var badge = "Próxima";
+
+                            if (string.Equals(hair, hairOption, StringComparison.Ordinal)
+                                && string.Equals(hat, hatOption, StringComparison.Ordinal)
+                                && string.Equals(clothing, clothingOption, StringComparison.Ordinal)
+                                && string.Equals(accessory, accessoryOption, StringComparison.Ordinal))
+                            {
+                                title = "Seu visual atual";
+                                subtitle = "Atalho para voltar rapidamente ao conjunto que já está montado.";
+                                badge = "Atual";
+                            }
+                            else if (!string.Equals(hair, hairOption, StringComparison.Ordinal)
+                                && string.Equals(hat, hatOption, StringComparison.Ordinal)
+                                && string.Equals(clothing, clothingOption, StringComparison.Ordinal))
+                            {
+                                title = "Mesmo estilo, novo cabelo";
+                                badge = "Cabelo";
+                            }
+                            else if (string.Equals(hair, hairOption, StringComparison.Ordinal)
+                                && !string.Equals(hat, hatOption, StringComparison.Ordinal)
+                                && string.Equals(clothing, clothingOption, StringComparison.Ordinal))
+                            {
+                                title = "Mesmo estilo, novo hat";
+                                badge = "Hat";
+                            }
+                            else if (string.Equals(hair, hairOption, StringComparison.Ordinal)
+                                && string.Equals(hat, hatOption, StringComparison.Ordinal)
+                                && !string.Equals(clothing, clothingOption, StringComparison.Ordinal))
+                            {
+                                title = "Mesmo estilo, nova roupa";
+                                badge = "Roupa";
+                            }
+
+                            combinations.Add(new AvatarQuickSuggestion
+                            {
+                                Title = title,
+                                Subtitle = subtitle,
+                                Badge = badge,
+                                Body = body,
+                                Hair = hairOption,
+                                Hat = hatOption,
+                                Accessory = accessoryOption,
+                                Clothing = clothingOption,
+                                Score = score
+                            });
+                        }
+                    }
+                }
+            }
+
+            return combinations
+                .OrderByDescending(item => item.Score)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .Take(4)
+                .ToList();
+        }
+
         private void OpenAvatarEditor_Click(object sender, RoutedEventArgs e)
         {
             if (_currentProfile == null)
@@ -3873,6 +4190,8 @@ namespace MeuApp
             var selectedHat = NormalizeAvatarOption(_currentProfile.AvatarHat, AvatarHatOptions, AvatarHatOptions.First());
             var selectedAccessory = NormalizeOptionalAvatarOption(_currentProfile.AvatarAccessory, AvatarAccessoryOptions);
             var selectedClothing = NormalizeAvatarOption(_currentProfile.AvatarClothing, AvatarClothingOptions, AvatarClothingOptions.First());
+            var selectedHairPresentationFilter = "Todos";
+            var selectedHairLengthFilter = "Todos";
 
             var dialog = new MetroWindow
             {
@@ -3974,22 +4293,23 @@ namespace MeuApp
             };
             var selectorsStack = new StackPanel();
 
+            var quickSuggestionsPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 18) };
             var bodyPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
-            var shortHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
-            var mediumHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
-            var longHairPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
+            var hairPresentationFiltersPanel = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+            var hairLengthFiltersPanel = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            var hairPanel = new WrapPanel { Margin = new Thickness(0, 12, 0, 14) };
             var hatPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
             var accessoryPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
             var clothingPanel = new WrapPanel { Margin = new Thickness(0, 10, 0, 14) };
 
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Combinações rápidas", "Sugestões automáticas baseadas no visual atual para acelerar a escolha."));
+            selectorsStack.Children.Add(quickSuggestionsPanel);
             selectorsStack.Children.Add(CreateAvatarSectionHeader("Personagem", "Layer 0 · obrigatório · começa com pele parda como padrão."));
             selectorsStack.Children.Add(bodyPanel);
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos curtos", "Layer 1 · obrigatório · cortes curtos femininos e masculinos."));
-            selectorsStack.Children.Add(shortHairPanel);
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos médios", "Layer 1 · obrigatório · opções médias para compor o visual."));
-            selectorsStack.Children.Add(mediumHairPanel);
-            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos longos", "Layer 1 · obrigatório · opções longas disponíveis."));
-            selectorsStack.Children.Add(longHairPanel);
+            selectorsStack.Children.Add(CreateAvatarSectionHeader("Cabelos", "Layer 1 · filtre por apresentação e comprimento para chegar mais rápido ao estilo certo."));
+            selectorsStack.Children.Add(hairPresentationFiltersPanel);
+            selectorsStack.Children.Add(hairLengthFiltersPanel);
+            selectorsStack.Children.Add(hairPanel);
             selectorsStack.Children.Add(CreateAvatarSectionHeader("Hats", "Layer 2 · obrigatório · escolha um chapéu para o personagem."));
             selectorsStack.Children.Add(hatPanel);
             selectorsStack.Children.Add(CreateAvatarSectionHeader("Acessory", "Layer 3 · opcional · mantém os acessórios atuais."));
@@ -4020,6 +4340,30 @@ namespace MeuApp
 
             void RenderEditorOptions()
             {
+                quickSuggestionsPanel.Children.Clear();
+                foreach (var suggestion in BuildAvatarQuickSuggestions(selectedBody, selectedHair, selectedHat, selectedAccessory, selectedClothing))
+                {
+                    var currentSuggestion = suggestion;
+                    var isSuggestionSelected = string.Equals(selectedBody, currentSuggestion.Body, StringComparison.Ordinal)
+                        && string.Equals(selectedHair, currentSuggestion.Hair, StringComparison.Ordinal)
+                        && string.Equals(selectedHat, currentSuggestion.Hat, StringComparison.Ordinal)
+                        && string.Equals(selectedAccessory, currentSuggestion.Accessory, StringComparison.Ordinal)
+                        && string.Equals(selectedClothing, currentSuggestion.Clothing, StringComparison.Ordinal);
+
+                    quickSuggestionsPanel.Children.Add(CreateAvatarQuickSuggestionButton(currentSuggestion, isSuggestionSelected, (buttonSender, buttonArgs) =>
+                    {
+                        selectedBody = currentSuggestion.Body;
+                        selectedHair = currentSuggestion.Hair;
+                        selectedHat = currentSuggestion.Hat;
+                        selectedAccessory = currentSuggestion.Accessory;
+                        selectedClothing = currentSuggestion.Clothing;
+                        selectedHairPresentationFilter = GetAvatarHairPresentation(selectedHair);
+                        selectedHairLengthFilter = GetAvatarHairLength(selectedHair);
+                        RenderEditorOptions();
+                        RenderEditorPreview();
+                    }));
+                }
+
                 bodyPanel.Children.Clear();
                 foreach (var option in AvatarBodyOptions)
                 {
@@ -4037,52 +4381,42 @@ namespace MeuApp
                     }));
                 }
 
-                shortHairPanel.Children.Clear();
-                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Curto_", StringComparison.OrdinalIgnoreCase)))
+                hairPresentationFiltersPanel.Children.Clear();
+                foreach (var option in new[] { "Todos", "Feminino", "Masculino" })
                 {
                     var currentOption = option;
-                    shortHairPanel.Children.Add(CreateAvatarOptionButton(
-                        GetAvatarHairLabel(currentOption),
-                        "Curto",
-                        CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
-                        selectedHair == currentOption,
-                        (buttonSender, buttonArgs) =>
+                    hairPresentationFiltersPanel.Children.Add(CreateAvatarFilterChipButton(currentOption, selectedHairPresentationFilter == currentOption, (buttonSender, buttonArgs) =>
                     {
-                        selectedHair = currentOption;
+                        selectedHairPresentationFilter = currentOption;
                         RenderEditorOptions();
-                        RenderEditorPreview();
                     }));
                 }
 
-                mediumHairPanel.Children.Clear();
-                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Medio_", StringComparison.OrdinalIgnoreCase) || option.Contains("_medio_", StringComparison.OrdinalIgnoreCase)))
+                hairLengthFiltersPanel.Children.Clear();
+                foreach (var option in new[] { "Todos", "Curto", "Médio", "Longo" })
                 {
                     var currentOption = option;
-                    mediumHairPanel.Children.Add(CreateAvatarOptionButton(
-                        GetAvatarHairLabel(currentOption),
-                        "Médio",
-                        CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
-                        selectedHair == currentOption,
-                        (buttonSender, buttonArgs) =>
+                    hairLengthFiltersPanel.Children.Add(CreateAvatarFilterChipButton(currentOption, selectedHairLengthFilter == currentOption, (buttonSender, buttonArgs) =>
                     {
-                        selectedHair = currentOption;
+                        selectedHairLengthFilter = currentOption;
                         RenderEditorOptions();
-                        RenderEditorPreview();
                     }));
                 }
 
-                longHairPanel.Children.Clear();
-                foreach (var option in AvatarHairOptions.Where(option => option.Contains("_Longo_", StringComparison.OrdinalIgnoreCase)))
+                hairPanel.Children.Clear();
+                foreach (var option in GetFilteredHairOptions(selectedHair, selectedHairPresentationFilter, selectedHairLengthFilter))
                 {
                     var currentOption = option;
-                    longHairPanel.Children.Add(CreateAvatarOptionButton(
+                    hairPanel.Children.Add(CreateAvatarOptionButton(
                         GetAvatarHairLabel(currentOption),
-                        "Longo",
+                        $"{GetAvatarHairPresentation(currentOption)} · {GetAvatarHairLength(currentOption)}",
                         CreateAvatarOptionPreview(selectedBody, currentOption, selectedHat, selectedAccessory, selectedClothing, "Layer 1"),
                         selectedHair == currentOption,
                         (buttonSender, buttonArgs) =>
                     {
                         selectedHair = currentOption;
+                        selectedHairPresentationFilter = GetAvatarHairPresentation(currentOption);
+                        selectedHairLengthFilter = GetAvatarHairLength(currentOption);
                         RenderEditorOptions();
                         RenderEditorPreview();
                     }));

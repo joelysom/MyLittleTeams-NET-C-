@@ -189,7 +189,7 @@
                                            Stretch="UniformToFill"
                                            HorizontalAlignment="Stretch"
                                            VerticalAlignment="Stretch"
-                                           Margin="-36,0,0,0"/>
+                                         Margin="-78,0,0,0"/>
                                     <Border Height="110" VerticalAlignment="Top" CornerRadius="30,30,120,120" IsHitTestVisible="False">
                                         <Border.Background>
                                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
