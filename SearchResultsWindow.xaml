@@ -51,8 +51,9 @@
 
                                     <!-- ACTIONS -->
                                     <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center">
-                                        <Button Content="💬 Conversa" Background="#FF0078D4" Foreground="White" FontSize="11" Padding="8,6" BorderThickness="0" Cursor="Hand" Click="StartConversation_Click" Tag="{Binding UserId}" Margin="0,0,0,8"/>
-                                        <Button Content="{Binding ConnectionButtonLabel}" Background="#FFF8FAFC" Foreground="#FF0F172A" FontSize="11" Padding="8,6" BorderBrush="#FFCBD5E1" BorderThickness="1" Cursor="Hand" IsEnabled="{Binding CanCreateConnection}" Click="AddFriend_Click"/>
+                                        <Button Content="Conversar" Background="#FF0078D4" Foreground="White" FontSize="11" Padding="10,6" BorderThickness="0" Cursor="Hand" Click="StartConversation_Click" Tag="{Binding UserId}" Margin="0,0,0,8"/>
+                                        <Button Content="Detalhes" Background="#FFFFFFFF" Foreground="#FF0F172A" FontSize="11" Padding="10,6" BorderBrush="#FFCBD5E1" BorderThickness="1" Cursor="Hand" Click="ViewProfile_Click" Margin="0,0,0,8"/>
+                                        <Button Content="{Binding ConnectionButtonLabel}" Background="#FFF8FAFC" Foreground="#FF0F172A" FontSize="11" Padding="10,6" BorderBrush="#FFCBD5E1" BorderThickness="1" Cursor="Hand" IsEnabled="{Binding CanCreateConnection}" Click="AddFriend_Click"/>
                                     </StackPanel>
                                 </Grid>
                             </Border>

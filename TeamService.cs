@@ -279,10 +279,17 @@ namespace MeuApp
                 var teamIds = await GetUserTeamIdsAsync(_currentUserId);
                 DebugHelper.WriteLine($"[TeamService.LoadTeams] Equipes encontradas: {teamIds.Count}");
 
-                // Depois, carregar cada equipe
-                foreach (var teamId in teamIds.Distinct(StringComparer.OrdinalIgnoreCase))
+                var loadTasks = teamIds
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(LoadTeamByIdAsync)
+                    .ToArray();
+
+                var loadedTeams = loadTasks.Length > 0
+                    ? await Task.WhenAll(loadTasks)
+                    : Array.Empty<TeamWorkspaceInfo?>();
+
+                foreach (var team in loadedTeams)
                 {
-                    var team = await LoadTeamByIdAsync(teamId);
                     if (team != null)
                     {
                         teams.Add(team);
@@ -318,11 +325,34 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[TeamService.GetUserTeamIds] Buscando equipes para '{userId}'...");
 
-                // Buscar documentos em userTeams que pertencem a este usuário
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/userTeams";
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
+                var requestBody = JsonSerializer.Serialize(new
+                {
+                    structuredQuery = new
+                    {
+                        select = new
+                        {
+                            fields = new[]
+                            {
+                                new { fieldPath = "teamId" }
+                            }
+                        },
+                        from = new[] { new { collectionId = "userTeams" } },
+                        where = new
+                        {
+                            fieldFilter = new
+                            {
+                                field = new { fieldPath = "userId" },
+                                op = "EQUAL",
+                                value = new { stringValue = userId }
+                            }
+                        }
+                    }
+                });
 
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
                 var response = await httpClient.SendAsync(request);
                 var jsonContent = await response.Content.ReadAsStringAsync();
@@ -335,34 +365,27 @@ namespace MeuApp
 
                 using (JsonDocument doc = JsonDocument.Parse(jsonContent))
                 {
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("documents", out var documentsArray))
+                    if (doc.RootElement.ValueKind != JsonValueKind.Array)
                     {
-                        foreach (var userTeamDoc in documentsArray.EnumerateArray())
+                        return teamIds;
+                    }
+
+                    foreach (var result in doc.RootElement.EnumerateArray())
+                    {
+                        if (!result.TryGetProperty("document", out var userTeamDoc) ||
+                            !userTeamDoc.TryGetProperty("fields", out var fields))
                         {
-                            if (userTeamDoc.TryGetProperty("fields", out var fields))
+                            continue;
+                        }
+
+                        if (fields.TryGetProperty("teamId", out var teamIdField) &&
+                            teamIdField.TryGetProperty("stringValue", out var teamIdValue))
+                        {
+                            var teamId = teamIdValue.GetString();
+                            if (!string.IsNullOrEmpty(teamId))
                             {
-                                // Verificar se o userId corresponde
-                                if (fields.TryGetProperty("userId", out var userIdField) &&
-                                    userIdField.TryGetProperty("stringValue", out var userIdValue))
-                                {
-                                    var docUserId = userIdValue.GetString();
-                                    if (docUserId == userId)
-                                    {
-                                        // Extrair o teamId
-                                        if (fields.TryGetProperty("teamId", out var teamIdField) &&
-                                            teamIdField.TryGetProperty("stringValue", out var teamIdValue))
-                                        {
-                                            var teamId = teamIdValue.GetString();
-                                            if (!string.IsNullOrEmpty(teamId))
-                                            {
-                                                teamIds.Add(teamId);
-                                                DebugHelper.WriteLine($"[TeamService.GetUserTeamIds] TeamId: '{teamId}'");
-                                            }
-                                        }
-                                    }
-                                }
+                                teamIds.Add(teamId);
+                                DebugHelper.WriteLine($"[TeamService.GetUserTeamIds] TeamId: '{teamId}'");
                             }
                         }
                     }

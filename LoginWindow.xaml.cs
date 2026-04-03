@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using MahApps.Metro.Controls;
 
 namespace MeuApp
@@ -59,27 +60,70 @@ namespace MeuApp
                 return;
             }
 
-            var loginResult = await FirebaseSignInAsync(email, password);
-            if (!loginResult.Success)
+            try
             {
-                MessageBox.Show($"Falha no login: {loginResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
+                Mouse.OverrideCursor = Cursors.Wait;
+                IsEnabled = false;
 
-            var profile = await GetUserProfileAsync(loginResult.LocalId!, loginResult.IdToken!);
-            if (profile == null)
-            {
-                MessageBox.Show("Perfil do usuário não encontrado no banco de dados.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Information);
-                profile = new UserProfile
+                var loginResult = await FirebaseSignInAsync(email, password);
+                if (!loginResult.Success)
                 {
-                    UserId = loginResult.LocalId!,
-                    Name = "Usuário", Email = email, Phone = "", Course = "", Registration = ""
-                };
+                    MessageBox.Show($"Falha no login: {loginResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var bootstrapProfile = CreateBootstrapProfile(loginResult, email);
+                var mainWindow = new MainWindow(bootstrapProfile, loginResult.IdToken ?? string.Empty);
+                mainWindow.Show();
+                this.Close();
+
+                _ = HydrateProfileAfterLoginAsync(mainWindow, loginResult.LocalId!, loginResult.IdToken!, bootstrapProfile);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+                IsEnabled = true;
+            }
+        }
+
+        private static UserProfile CreateBootstrapProfile(AuthResult loginResult, string email)
+        {
+            var inferredName = email;
+            var atIndex = inferredName.IndexOf('@');
+            if (atIndex > 0)
+            {
+                inferredName = inferredName[..atIndex];
             }
 
-            var mainWindow = new MainWindow(profile, loginResult.IdToken ?? string.Empty);
-            mainWindow.Show();
-            this.Close();
+            inferredName = inferredName.Replace('.', ' ').Replace('_', ' ').Trim();
+            if (string.IsNullOrWhiteSpace(inferredName))
+            {
+                inferredName = "Usuário";
+            }
+
+            return new UserProfile
+            {
+                UserId = loginResult.LocalId ?? string.Empty,
+                Name = inferredName,
+                Email = loginResult.Email ?? email,
+                Phone = string.Empty,
+                Course = string.Empty,
+                Registration = string.Empty
+            };
+        }
+
+        private async Task HydrateProfileAfterLoginAsync(MainWindow mainWindow, string localId, string idToken, UserProfile fallbackProfile)
+        {
+            try
+            {
+                var profile = await GetUserProfileAsync(localId, idToken) ?? fallbackProfile;
+
+                await mainWindow.Dispatcher.InvokeAsync(() => mainWindow.UpdateUserProfile(profile));
+            }
+            catch
+            {
+                await mainWindow.Dispatcher.InvokeAsync(() => mainWindow.UpdateUserProfile(fallbackProfile));
+            }
         }
 
         private async void SignupButton_Click(object sender, RoutedEventArgs e)
@@ -117,28 +161,39 @@ namespace MeuApp
                 return;
             }
 
-            var signupResult = await FirebaseSignUpAsync(email, password);
-            if (!signupResult.Success)
+            try
             {
-                MessageBox.Show($"Falha no cadastro: {signupResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                Mouse.OverrideCursor = Cursors.Wait;
+                IsEnabled = false;
+
+                var signupResult = await FirebaseSignUpAsync(email, password);
+                if (!signupResult.Success)
+                {
+                    MessageBox.Show($"Falha no cadastro: {signupResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var saveResult = await SaveUserProfileAsync(signupResult.LocalId!, signupResult.IdToken!, name, email, phone, course, registration);
+                if (!saveResult.Success)
+                {
+                    MessageBox.Show($"Não foi possível salvar o perfil: {saveResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                var profile = new UserProfile
+                {
+                    UserId = signupResult.LocalId!, Name = name, Email = email, Phone = phone, Course = course, Registration = registration
+                };
+
+                var mainWindow = new MainWindow(profile, signupResult.IdToken ?? string.Empty);
+                mainWindow.Show();
+                this.Close();
             }
-
-            var saveResult = await SaveUserProfileAsync(signupResult.LocalId!, signupResult.IdToken!, name, email, phone, course, registration);
-            if (!saveResult.Success)
+            finally
             {
-                MessageBox.Show($"Não foi possível salvar o perfil: {saveResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
+                Mouse.OverrideCursor = null;
+                IsEnabled = true;
             }
-
-            var profile = new UserProfile
-            {
-                UserId = signupResult.LocalId!, Name = name, Email = email, Phone = phone, Course = course, Registration = registration
-            };
-
-            var mainWindow = new MainWindow(profile, signupResult.IdToken ?? string.Empty);
-            mainWindow.Show();
-            this.Close();
         }
 
         private async Task<AuthResult> FirebaseSignInAsync(string email, string password)

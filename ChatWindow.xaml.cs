@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using MahApps.Metro.Controls;
 
@@ -55,6 +57,11 @@ namespace MeuApp
                 DebugHelper.WriteLine($"[ChatWindow ERRO StackTrace] {ex.StackTrace}");
                 throw;
             }
+        }
+
+        private Brush GetThemeBrush(string key, Color fallback)
+        {
+            return TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
         }
 
         private void ChatWindow_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -138,8 +145,8 @@ namespace MeuApp
             var button = new Button
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = isSelected ? new SolidColorBrush(Color.FromRgb(245, 245, 245)) : new SolidColorBrush(Colors.White),
-                Foreground = new SolidColorBrush(Color.FromRgb(51, 51, 51)),
+                Background = isSelected ? GetThemeBrush("MutedCardBackgroundBrush", Color.FromRgb(245, 245, 245)) : GetThemeBrush("CardBackgroundBrush", Colors.White),
+                Foreground = GetThemeBrush("PrimaryTextBrush", Color.FromRgb(51, 51, 51)),
                 BorderThickness = new Thickness(0),
                 Height = 76,
                 Padding = new Thickness(12),
@@ -174,7 +181,7 @@ namespace MeuApp
                 Text = name,
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(51, 51, 51)),
+                Foreground = GetThemeBrush("PrimaryTextBrush", Color.FromRgb(51, 51, 51)),
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
             content.Children.Add(nameBlock);
@@ -183,7 +190,7 @@ namespace MeuApp
             {
                 Text = unread ? $"• {lastMessage}" : lastMessage,
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.FromRgb(119, 119, 119)),
+                Foreground = GetThemeBrush("SecondaryTextBrush", Color.FromRgb(119, 119, 119)),
                 Margin = new Thickness(0, 4, 0, 0),
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 FontWeight = unread ? FontWeights.SemiBold : FontWeights.Normal
@@ -320,21 +327,58 @@ namespace MeuApp
                 CornerRadius = new CornerRadius(12),
                 Background = msg.IsOwn 
                     ? new SolidColorBrush(Color.FromRgb(0, 120, 212))
-                    : new SolidColorBrush(Color.FromRgb(240, 240, 240)),
-                Padding = new Thickness(12, 8, 12, 8)
+                    : GetThemeBrush("MutedCardBackgroundBrush", Color.FromRgb(240, 240, 240)),
+                Padding = msg.IsSticker ? new Thickness(8) : new Thickness(12, 8, 12, 8)
             };
 
-            var msgText = new TextBlock
+            if (msg.IsSticker)
             {
-                Text = msg.Content,
-                FontSize = 13,
-                Foreground = msg.IsOwn 
-                    ? new SolidColorBrush(Colors.White)
-                    : new SolidColorBrush(Color.FromRgb(51, 51, 51)),
-                TextWrapping = TextWrapping.WrapWithOverflow
-            };
+                var stickerContent = new StackPanel
+                {
+                    Orientation = Orientation.Vertical,
+                    Width = 150
+                };
 
-            msgBorder.Child = msgText;
+                var stickerSource = TryCreateStickerImageSource(msg.StickerAsset);
+                if (stickerSource != null)
+                {
+                    stickerContent.Children.Add(new Image
+                    {
+                        Source = stickerSource,
+                        Width = 110,
+                        Height = 110,
+                        Stretch = Stretch.Uniform,
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    });
+                }
+
+                stickerContent.Children.Add(new TextBlock
+                {
+                    Text = GetStickerDisplayName(msg.StickerAsset),
+                    FontSize = 11,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    TextAlignment = TextAlignment.Center,
+                    Foreground = msg.IsOwn
+                        ? new SolidColorBrush(Color.FromArgb(230, 255, 255, 255))
+                        : GetThemeBrush("SecondaryTextBrush", Color.FromRgb(100, 116, 139))
+                });
+
+                msgBorder.Child = stickerContent;
+            }
+            else
+            {
+                var msgText = new TextBlock
+                {
+                    Text = msg.Content,
+                    FontSize = 13,
+                    Foreground = msg.IsOwn 
+                        ? new SolidColorBrush(Colors.White)
+                        : GetThemeBrush("PrimaryTextBrush", Color.FromRgb(51, 51, 51)),
+                    TextWrapping = TextWrapping.WrapWithOverflow
+                };
+
+                msgBorder.Child = msgText;
+            }
             content.Children.Add(msgBorder);
 
             var timeBlock = new TextBlock
@@ -348,6 +392,91 @@ namespace MeuApp
 
             container.Children.Add(content);
             return container;
+        }
+
+        private ImageSource? TryCreateStickerImageSource(string? assetFileName)
+        {
+            if (string.IsNullOrWhiteSpace(assetFileName))
+            {
+                return null;
+            }
+
+            static string? ResolveStickerPath(string fileName)
+            {
+                var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                var candidateDirectories = new[]
+                {
+                    System.IO.Path.Combine(baseDirectory, "img", "emojiobsseract"),
+                    System.IO.Path.Combine(baseDirectory, "..", "..", "..", "img", "emojiobsseract")
+                };
+
+                foreach (var directory in candidateDirectories)
+                {
+                    if (!Directory.Exists(directory))
+                    {
+                        continue;
+                    }
+
+                    var directPath = System.IO.Path.Combine(directory, fileName);
+                    if (File.Exists(directPath))
+                    {
+                        return System.IO.Path.GetFullPath(directPath);
+                    }
+
+                    foreach (var candidatePath in Directory.GetFiles(directory, "*.png"))
+                    {
+                        if (string.Equals(System.IO.Path.GetFileName(candidatePath), fileName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return System.IO.Path.GetFullPath(candidatePath);
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            try
+            {
+                return new BitmapImage(new Uri($"pack://application:,,,/img/emojiobsseract/{assetFileName}", UriKind.Absolute));
+            }
+            catch
+            {
+                try
+                {
+                    var stickerPath = ResolveStickerPath(assetFileName);
+                    if (string.IsNullOrWhiteSpace(stickerPath))
+                    {
+                        DebugHelper.WriteLine($"[Sticker] Arquivo não encontrado: {assetFileName}");
+                        return null;
+                    }
+
+                    return new BitmapImage(new Uri(stickerPath, UriKind.Absolute));
+                }
+                catch (Exception fallbackEx)
+                {
+                    DebugHelper.WriteLine($"[Sticker] Falha no fallback de arquivo {assetFileName}: {fallbackEx.Message}");
+                    return null;
+                }
+            }
+        }
+
+        private string GetStickerDisplayName(string? assetFileName)
+        {
+            if (string.IsNullOrWhiteSpace(assetFileName))
+            {
+                return "Figurinha";
+            }
+
+            var normalized = System.IO.Path.GetFileNameWithoutExtension(assetFileName)
+                ?.Replace('_', ' ')
+                ?.Trim();
+
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "Figurinha";
+            }
+
+            return normalized ?? "Figurinha";
         }
 
         private async void SendButton_Click(object? sender, RoutedEventArgs? e)
@@ -406,14 +535,5 @@ namespace MeuApp
             DebugHelper.WriteLine($"[SendButton_Click] Mensagem exibida localmente");
         }
 
-    }
-
-    public class ChatMessage
-    {
-        public string SenderId { get; set; } = string.Empty;
-        public string SenderName { get; set; } = string.Empty;
-        public string Content { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; }
-        public bool IsOwn { get; set; }
     }
 }

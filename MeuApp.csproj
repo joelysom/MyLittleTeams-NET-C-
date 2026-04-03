@@ -17,6 +17,7 @@
     <Resource Include="img\TesseractLogin.png" />
     <Resource Include="img\tesseractICO.png" />
     <Resource Include="img\avatar\**\*.png" />
+    <Resource Include="img\emojiobsseract\**\*.png" />
   </ItemGroup>
 
   <ItemGroup>

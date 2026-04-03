@@ -33,9 +33,45 @@ namespace MeuApp
                     return connections;
                 }
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/userConnections";
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
+                var requestBody = JsonSerializer.Serialize(new
+                {
+                    structuredQuery = new
+                    {
+                        select = new
+                        {
+                            fields = new[]
+                            {
+                                new { fieldPath = "userId" },
+                                new { fieldPath = "connectionId" },
+                                new { fieldPath = "connectedUserId" },
+                                new { fieldPath = "connectedUserName" },
+                                new { fieldPath = "connectedUserEmail" },
+                                new { fieldPath = "requestedBy" },
+                                new { fieldPath = "status" },
+                                new { fieldPath = "notificationType" },
+                                new { fieldPath = "notificationMessage" },
+                                new { fieldPath = "isRead" },
+                                new { fieldPath = "addedAt" },
+                                new { fieldPath = "updatedAt" }
+                            }
+                        },
+                        from = new[] { new { collectionId = "userConnections" } },
+                        where = new
+                        {
+                            fieldFilter = new
+                            {
+                                field = new { fieldPath = "userId" },
+                                op = "EQUAL",
+                                value = new { stringValue = _currentProfile.UserId }
+                            }
+                        }
+                    }
+                });
+
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
                 var response = await httpClient.SendAsync(request);
                 var jsonContent = await response.Content.ReadAsStringAsync();
@@ -46,27 +82,21 @@ namespace MeuApp
                 }
 
                 using var doc = JsonDocument.Parse(jsonContent);
-                if (!doc.RootElement.TryGetProperty("documents", out var documentsArray))
+                if (doc.RootElement.ValueKind != JsonValueKind.Array)
                 {
                     return connections;
                 }
 
-                foreach (var item in documentsArray.EnumerateArray())
+                foreach (var result in doc.RootElement.EnumerateArray())
                 {
-                    if (!item.TryGetProperty("fields", out var fields))
-                    {
-                        continue;
-                    }
-
-                    var ownerUserId = GetStringField(fields, "userId");
-                    if (!string.Equals(ownerUserId, _currentProfile.UserId, StringComparison.OrdinalIgnoreCase))
+                    if (!result.TryGetProperty("document", out var item) || !item.TryGetProperty("fields", out var fields))
                     {
                         continue;
                     }
 
                     connections.Add(new UserConnectionInfo
                     {
-                        UserId = ownerUserId,
+                        UserId = GetStringField(fields, "userId"),
                         ConnectionId = GetStringField(fields, "connectionId"),
                         ConnectedUserId = GetStringField(fields, "connectedUserId"),
                         ConnectedUserName = GetStringField(fields, "connectedUserName"),

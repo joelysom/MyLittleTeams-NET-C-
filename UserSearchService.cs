@@ -18,6 +18,14 @@ namespace MeuApp
         public string Email { get; set; } = "";
         public string Registration { get; set; } = "";
         public string Course { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Nickname { get; set; } = "";
+        public string ProfessionalTitle { get; set; } = "";
+        public string Bio { get; set; } = "";
+        public string Skills { get; set; } = "";
+        public string ProgrammingLanguages { get; set; } = "";
+        public string PortfolioLink { get; set; } = "";
+        public string LinkedInLink { get; set; } = "";
         public string? Role { get; set; } = "member";
         public string AvatarBody { get; set; } = "";
         public string AvatarHair { get; set; } = "";

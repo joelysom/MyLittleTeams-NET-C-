@@ -199,7 +199,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="🔍 Pesquisar conexões..." KeyDown="SearchFriendsBox_KeyDown"/>
+                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="🔍 Pesquisar conexões..." KeyDown="SearchFriendsBox_KeyDown" TextChanged="SearchFriendsBox_TextChanged"/>
                             <Button Grid.Column="1" Content="🔍" Background="Transparent" Foreground="{DynamicResource AccentBrush}" FontSize="14" Padding="8" Width="40" Cursor="Hand" BorderThickness="0" Click="SearchFriends_Click"/>
                         </Grid>
                     </Border>
@@ -787,89 +787,99 @@
                         </StackPanel>
                     </ScrollViewer>
 
-                    <Border x:Name="SearchSlidePanel"
-                            Visibility="Collapsed"
-                            Panel.ZIndex="40"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Top"
-                            Width="440"
-                            MaxHeight="620"
-                            Margin="0,4,0,0"
-                            Background="{DynamicResource CardBackgroundBrush}"
-                            BorderBrush="{DynamicResource AccentBrush}"
-                            BorderThickness="1"
-                            CornerRadius="24"
-                            Padding="0"
-                            Opacity="0">
-                        <Border.RenderTransform>
-                            <TranslateTransform Y="-18"/>
-                        </Border.RenderTransform>
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
-                            </Grid.RowDefinitions>
+                    <Grid x:Name="SearchSlideOverlay"
+                          Visibility="Collapsed"
+                          Panel.ZIndex="40">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="620"/>
+                        </Grid.ColumnDefinitions>
 
-                            <Border Background="{DynamicResource MutedCardBackgroundBrush}" CornerRadius="24,24,0,0" Padding="18,16,18,14">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Background="#3B020617"
+                                BorderThickness="0"
+                                Cursor="Arrow"
+                                Click="CloseSearchSlide_Click"/>
 
+                        <Border x:Name="SearchSlidePanel"
+                                Grid.Column="1"
+                                Margin="16,0,0,0"
+                                Background="{DynamicResource CardBackgroundBrush}"
+                                BorderBrush="{DynamicResource AccentBrush}"
+                                BorderThickness="1"
+                                CornerRadius="28,0,0,28"
+                                Padding="0"
+                                Opacity="0">
+                            <Border.RenderTransform>
+                                <TranslateTransform X="56"/>
+                            </Border.RenderTransform>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <Border Background="{DynamicResource MutedCardBackgroundBrush}" CornerRadius="28,0,0,0" Padding="22,20,22,16">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel>
+                                            <TextBlock x:Name="SearchSlideTitleText"
+                                                       Text="Pesquisar conexões"
+                                                       FontSize="18"
+                                                       FontWeight="ExtraBold"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                            <TextBlock Text="Busque por nome, matrícula ou email com resultados vivos enquanto você digita."
+                                                       Margin="0,6,0,0"
+                                                       FontSize="12"
+                                                       TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                        </StackPanel>
+
+                                        <Button Grid.Column="1"
+                                                Content="✕"
+                                                Width="40"
+                                                Height="40"
+                                                Margin="12,0,0,0"
+                                                Background="Transparent"
+                                                Foreground="{DynamicResource PrimaryTextBrush}"
+                                                BorderThickness="0"
+                                                FontSize="14"
+                                                Cursor="Hand"
+                                                Click="CloseSearchSlide_Click"/>
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock x:Name="SearchSlideStatusText"
+                                           Grid.Row="1"
+                                           Text=""
+                                           Margin="22,16,22,14"
+                                           FontSize="12"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+
+                                <ScrollViewer Grid.Row="2"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Padding="22,0,22,22">
                                     <StackPanel>
-                                        <TextBlock x:Name="SearchSlideTitleText"
-                                                   Text="Pesquisar conexões"
-                                                   FontSize="16"
-                                                   FontWeight="ExtraBold"
-                                                   Foreground="{DynamicResource PrimaryTextBrush}"/>
-                                        <TextBlock Text="Busque por nome, matrícula ou email sem sair da tela de conversas."
-                                                   Margin="0,6,0,0"
-                                                   FontSize="11"
+                                        <TextBlock x:Name="SearchSlideEmptyStateText"
+                                                   Text=""
+                                                   Visibility="Collapsed"
+                                                   Margin="0,8,0,4"
+                                                   FontSize="12"
                                                    TextWrapping="Wrap"
                                                    Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                        <StackPanel x:Name="SearchSlideResultsHost" Margin="0,4,0,0"/>
                                     </StackPanel>
-
-                                    <Button Grid.Column="1"
-                                            Content="✕"
-                                            Width="36"
-                                            Height="36"
-                                            Margin="12,0,0,0"
-                                            Background="Transparent"
-                                            Foreground="{DynamicResource PrimaryTextBrush}"
-                                            BorderThickness="0"
-                                            FontSize="14"
-                                            Cursor="Hand"
-                                            Click="CloseSearchSlide_Click"/>
-                                </Grid>
-                            </Border>
-
-                            <TextBlock x:Name="SearchSlideStatusText"
-                                       Grid.Row="1"
-                                       Text=""
-                                       Margin="18,14,18,12"
-                                       FontSize="12"
-                                       TextWrapping="Wrap"
-                                       Foreground="{DynamicResource SecondaryTextBrush}"/>
-
-                            <ScrollViewer Grid.Row="2"
-                                          VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Disabled"
-                                          Padding="18,0,18,18">
-                                <StackPanel>
-                                    <TextBlock x:Name="SearchSlideEmptyStateText"
-                                               Text=""
-                                               Visibility="Collapsed"
-                                               Margin="0,6,0,0"
-                                               FontSize="12"
-                                               TextWrapping="Wrap"
-                                               Foreground="{DynamicResource SecondaryTextBrush}"/>
-                                    <StackPanel x:Name="SearchSlideResultsHost" Margin="0,2,0,0"/>
-                                </StackPanel>
-                            </ScrollViewer>
-                        </Grid>
-                    </Border>
+                                </ScrollViewer>
+                            </Grid>
+                        </Border>
+                    </Grid>
             </Grid>
         </Grid>
     </Grid>

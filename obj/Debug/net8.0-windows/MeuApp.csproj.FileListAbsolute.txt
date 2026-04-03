@@ -64,3 +64,5 @@ D:\react-js\NETC#\obj\Debug\net8.0-windows\refint\MeuApp.dll
 D:\react-js\NETC#\obj\Debug\net8.0-windows\MeuApp.pdb
 D:\react-js\NETC#\obj\Debug\net8.0-windows\MeuApp.genruntimeconfig.cache
 D:\react-js\NETC#\obj\Debug\net8.0-windows\ref\MeuApp.dll
+D:\react-js\NETC#\obj\Debug\net8.0-windows\UserProfileViewWindow.baml
+D:\react-js\NETC#\obj\Debug\net8.0-windows\UserProfileViewWindow.g.cs

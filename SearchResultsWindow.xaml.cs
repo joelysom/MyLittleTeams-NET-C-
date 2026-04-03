@@ -16,6 +16,8 @@ namespace MeuApp
         public event ConversationStartedEventHandler? OnConversationStarted;
         public delegate void ConnectionCreatedEventHandler(UserInfo selectedUser);
         public event ConnectionCreatedEventHandler? OnConnectionCreated;
+        public delegate void ProfileRequestedEventHandler(UserInfo selectedUser);
+        public event ProfileRequestedEventHandler? OnProfileRequested;
 
         public ObservableCollection<UserInfo> Results { get; set; }
         private string _searchQuery;
@@ -143,6 +145,28 @@ namespace MeuApp
                     MessageBoxButton.OK,
                     MessageBoxImage.Error
                 );
+            }
+        }
+
+        private void ViewProfile_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (sender is Button button && button.DataContext is UserInfo user)
+                {
+                    OnProfileRequested?.Invoke(user);
+                    return;
+                }
+
+                MessageBox.Show("Erro: usuário não selecionado.", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Erro ao abrir detalhes do perfil:\n\n{ex.Message}",
+                    "Erro",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
         }
     }

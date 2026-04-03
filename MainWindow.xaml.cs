@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -7,6 +9,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -44,6 +47,7 @@ namespace MeuApp
         private static readonly string[] AvatarBodyOptions = { "1", "2", "3" };
         private static readonly string[] AvatarHairOptions = { "1", "2", "3", "4", "5", "6" };
         private static readonly string[] AvatarAccessoryOptions = { "1", "2", "3" };
+        private static readonly string[] ChatStickerAssets = { "Chao_0.png", "Chao_1.png", "chao_2.png" };
         private static readonly string[] KnownTeamCourses =
         {
             "Analise e Desenvolvimento de Sistemas",
@@ -107,9 +111,13 @@ namespace MeuApp
         private TeamService? _teamService = null;
         private ConnectionService? _connectionService = null;
         private readonly HashSet<string> _connectedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<UserInfo?>> _userInfoCache = new ConcurrentDictionary<string, Task<UserInfo?>>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<UserProfile?>> _userProfileCache = new ConcurrentDictionary<string, Task<UserProfile?>>(StringComparer.OrdinalIgnoreCase);
         private List<UserConnectionInfo> _connectionEntries = new List<UserConnectionInfo>();
         private List<UserInfo> _searchSlideResults = new List<UserInfo>();
         private string _searchSlideQuery = string.Empty;
+        private int _searchSlideTypingVersion = 0;
+        private int _searchSlideRequestVersion = 0;
         private int _teamSyncSequence = 0;
 
         public MainWindow()
@@ -133,9 +141,10 @@ namespace MeuApp
                 _connectionService = new ConnectionService(_idToken, _currentProfile);
 
                 RenderChatsLoadingState();
-                await LoadActiveConversationsAsync();
-                await LoadTeamsFromDatabaseAsync();
-                await RefreshConnectionsCacheAsync();
+                await Task.WhenAll(
+                    LoadActiveConversationsAsync(),
+                    LoadTeamsFromDatabaseAsync(),
+                    RefreshConnectionsCacheAsync());
             }
             else
             {
@@ -179,6 +188,7 @@ namespace MeuApp
         {
             if (e.Key == Key.Enter)
             {
+                _searchSlideTypingVersion++;
                 SearchFriends_Click(sender, new RoutedEventArgs());
                 e.Handled = true;
                 return;
@@ -191,6 +201,26 @@ namespace MeuApp
             }
         }
 
+        private async void SearchFriendsBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var query = SearchFriendsBox.Text?.Trim() ?? string.Empty;
+            var typingVersion = ++_searchSlideTypingVersion;
+
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                HideSearchSlidePanel();
+                return;
+            }
+
+            await Task.Delay(260);
+            if (typingVersion != _searchSlideTypingVersion)
+            {
+                return;
+            }
+
+            await ExecuteSearchFriendsAsync(query, true);
+        }
+
         public MainWindow(UserProfile profile) : this()
         {
             _currentProfile = profile;
@@ -199,6 +229,31 @@ namespace MeuApp
 
         private void ApplyUserProfile(UserProfile profile)
         {
+            _currentProfile = profile;
+            if (!string.IsNullOrWhiteSpace(profile.UserId))
+            {
+                _userProfileCache[profile.UserId] = Task.FromResult<UserProfile?>(profile);
+                _userInfoCache[profile.UserId] = Task.FromResult<UserInfo?>(new UserInfo
+                {
+                    UserId = profile.UserId,
+                    Name = profile.Name,
+                    Email = profile.Email,
+                    Registration = profile.Registration,
+                    Course = profile.Course,
+                    Phone = profile.Phone,
+                    Nickname = profile.Nickname,
+                    ProfessionalTitle = profile.ProfessionalTitle,
+                    Bio = profile.Bio,
+                    Skills = profile.Skills,
+                    ProgrammingLanguages = profile.ProgrammingLanguages,
+                    PortfolioLink = profile.PortfolioLink,
+                    LinkedInLink = profile.LinkedInLink,
+                    AvatarBody = profile.AvatarBody,
+                    AvatarHair = profile.AvatarHair,
+                    AvatarAccessory = profile.AvatarAccessory
+                });
+            }
+
             WelcomeText.Text = $"Bem-vindo, {profile.Name}";
             SidebarUserName.Text = profile.Name;
             SidebarUserEmail.Text = profile.Email;
@@ -206,6 +261,17 @@ namespace MeuApp
             PopulateProfessionalProfileFields(profile);
             RefreshAvatarUi(profile);
             SyncTeamDefaultsWithProfile(profile);
+        }
+
+        public void UpdateUserProfile(UserProfile profile)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => UpdateUserProfile(profile));
+                return;
+            }
+
+            ApplyUserProfile(profile);
         }
 
         private enum TeamEntryMode
@@ -290,11 +356,29 @@ namespace MeuApp
                 UserId = string.IsNullOrWhiteSpace(_currentProfile.UserId) ? "current-user" : _currentProfile.UserId,
                 Name = _currentProfile.Name,
                 Email = _currentProfile.Email,
+                Phone = _currentProfile.Phone,
                 Registration = _currentProfile.Registration,
                 Course = _currentProfile.Course,
+                Nickname = _currentProfile.Nickname,
+                ProfessionalTitle = _currentProfile.ProfessionalTitle,
+                Bio = _currentProfile.Bio,
+                Skills = _currentProfile.Skills,
+                ProgrammingLanguages = _currentProfile.ProgrammingLanguages,
+                PortfolioLink = _currentProfile.PortfolioLink,
+                LinkedInLink = _currentProfile.LinkedInLink,
                 AvatarBody = _currentProfile.AvatarBody,
                 AvatarHair = _currentProfile.AvatarHair,
                 AvatarAccessory = _currentProfile.AvatarAccessory
+            };
+        }
+
+        private UserInfo CreateUserFromConnection(UserConnectionInfo item)
+        {
+            return new UserInfo
+            {
+                UserId = item.ConnectedUserId,
+                Name = item.ConnectedUserName,
+                Email = item.ConnectedUserEmail
             };
         }
 
@@ -2645,44 +2729,28 @@ namespace MeuApp
 
             if (mode == ConnectionSectionMode.IncomingRequests)
             {
+                actions.Children.Add(CreateConnectionSecondaryButton("Detalhes", item, OpenConnectionProfile_Click));
+                actions.Children.Add(CreateConnectionSecondaryButton("Conversar", item, OpenConnectionChat_Click));
                 actions.Children.Add(CreateConnectionActionButton("Recusar", item, DeclineConnectionRequest_Click, false));
                 actions.Children.Add(CreateConnectionActionButton("Aceitar", item, AcceptConnectionRequest_Click, true));
             }
             else if (mode == ConnectionSectionMode.Notifications)
             {
+                actions.Children.Add(CreateConnectionSecondaryButton("Detalhes", item, OpenConnectionProfile_Click));
+                actions.Children.Add(CreateConnectionSecondaryButton("Conversar", item, OpenConnectionChat_Click));
                 actions.Children.Add(CreateConnectionActionButton("Marcar como lida", item, DismissConnectionNotification_Click, false));
             }
             else if (mode == ConnectionSectionMode.OutgoingRequests)
             {
-                actions.Children.Add(new Border
-                {
-                    Background = GetThemeBrush("AccentMutedBrush"),
-                    CornerRadius = new CornerRadius(999),
-                    Padding = new Thickness(10, 5, 10, 5),
-                    Child = new TextBlock
-                    {
-                        Text = "Aguardando resposta",
-                        Foreground = GetThemeBrush("AccentBrush"),
-                        FontSize = 11,
-                        FontWeight = FontWeights.SemiBold
-                    }
-                });
+                actions.Children.Add(CreateConnectionSecondaryButton("Detalhes", item, OpenConnectionProfile_Click));
+                actions.Children.Add(CreateConnectionSecondaryButton("Conversar", item, OpenConnectionChat_Click));
+                actions.Children.Add(CreateConnectionStatusPill("Aguardando resposta"));
             }
             else
             {
-                actions.Children.Add(new Border
-                {
-                    Background = GetThemeBrush("AccentMutedBrush"),
-                    CornerRadius = new CornerRadius(999),
-                    Padding = new Thickness(10, 5, 10, 5),
-                    Child = new TextBlock
-                    {
-                        Text = "Conectado",
-                        Foreground = GetThemeBrush("AccentBrush"),
-                        FontSize = 11,
-                        FontWeight = FontWeights.SemiBold
-                    }
-                });
+                actions.Children.Add(CreateConnectionSecondaryButton("Detalhes", item, OpenConnectionProfile_Click));
+                actions.Children.Add(CreateConnectionActionButton("Conversar", item, OpenConnectionChat_Click, true));
+                actions.Children.Add(CreateConnectionStatusPill("Conectado"));
             }
 
             Grid.SetColumn(actions, 1);
@@ -2710,6 +2778,29 @@ namespace MeuApp
             };
             button.Click += clickHandler;
             return button;
+        }
+
+        private Button CreateConnectionSecondaryButton(string label, UserConnectionInfo item, RoutedEventHandler clickHandler)
+        {
+            return CreateConnectionActionButton(label, item, clickHandler, false);
+        }
+
+        private Border CreateConnectionStatusPill(string text)
+        {
+            return new Border
+            {
+                Background = GetThemeBrush("AccentMutedBrush"),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(10, 5, 10, 5),
+                Margin = new Thickness(10, 0, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = text,
+                    Foreground = GetThemeBrush("AccentBrush"),
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold
+                }
+            };
         }
 
         private async void RefreshConnections_Click(object sender, RoutedEventArgs e)
@@ -2776,6 +2867,26 @@ namespace MeuApp
             await RefreshConnectionsCacheAsync();
             ConnectionsStatusText.Text = "Atualização arquivada.";
             ConnectionsStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+        }
+
+        private void OpenConnectionChat_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserConnectionInfo item })
+            {
+                return;
+            }
+
+            ShowConversationInMainWindow(CreateUserFromConnection(item));
+        }
+
+        private async void OpenConnectionProfile_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserConnectionInfo item })
+            {
+                return;
+            }
+
+            await ShowUserProfileDialogAsync(CreateUserFromConnection(item));
         }
 
         private void UpdateConnectionsBadge()
@@ -3113,6 +3224,11 @@ namespace MeuApp
                 return null;
             }
 
+            if (string.Equals(userId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase) && _currentProfile != null)
+            {
+                return CreateCurrentUserInfo();
+            }
+
             try
             {
                 var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{userId}";
@@ -3138,9 +3254,17 @@ namespace MeuApp
                     UserId = userId,
                     Name = GetFirestoreStringValue(fields, "name"),
                     Email = GetFirestoreStringValue(fields, "email"),
+                    Phone = GetFirestoreStringValue(fields, "phone"),
                     Registration = GetFirestoreStringValue(fields, "registration"),
                     Course = GetFirestoreStringValue(fields, "course"),
                     Role = GetFirestoreStringValue(fields, "role"),
+                    Nickname = GetFirestoreStringValue(fields, "nickname"),
+                    ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
+                    Bio = GetFirestoreStringValue(fields, "bio"),
+                    Skills = GetFirestoreStringValue(fields, "skills"),
+                    ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
+                    PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
+                    LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
                     AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
                     AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
                     AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory")
@@ -3153,6 +3277,130 @@ namespace MeuApp
             }
         }
 
+        private Task<UserInfo?> LoadUserInfoCachedAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return Task.FromResult<UserInfo?>(null);
+            }
+
+            return _userInfoCache.GetOrAdd(userId, LoadUserInfoByIdAsync);
+        }
+
+        private async Task<UserProfile?> LoadUserProfileByIdAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(_idToken))
+            {
+                return null;
+            }
+
+            if (string.Equals(userId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase) && _currentProfile != null)
+            {
+                return _currentProfile;
+            }
+
+            try
+            {
+                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{userId}";
+                var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var content = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    DebugHelper.WriteLine($"[LoadUserProfileByIdAsync] Falha ao carregar {userId}: {response.StatusCode} | {content}");
+                    return null;
+                }
+
+                using var doc = JsonDocument.Parse(content);
+                if (!doc.RootElement.TryGetProperty("fields", out var fields))
+                {
+                    return null;
+                }
+
+                return new UserProfile
+                {
+                    UserId = userId,
+                    Name = GetFirestoreStringValue(fields, "name"),
+                    Email = GetFirestoreStringValue(fields, "email"),
+                    Phone = GetFirestoreStringValue(fields, "phone"),
+                    Course = GetFirestoreStringValue(fields, "course"),
+                    Registration = GetFirestoreStringValue(fields, "registration"),
+                    Nickname = GetFirestoreStringValue(fields, "nickname"),
+                    ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
+                    Bio = GetFirestoreStringValue(fields, "bio"),
+                    Skills = GetFirestoreStringValue(fields, "skills"),
+                    ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
+                    PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
+                    LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
+                    AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
+                    AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
+                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory")
+                };
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[LoadUserProfileByIdAsync] Exceção ao carregar {userId}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private Task<UserProfile?> LoadUserProfileCachedAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return Task.FromResult<UserProfile?>(null);
+            }
+
+            return _userProfileCache.GetOrAdd(userId, LoadUserProfileByIdAsync);
+        }
+
+        private async Task ShowUserProfileDialogAsync(UserInfo summaryUser)
+        {
+            if (summaryUser == null || string.IsNullOrWhiteSpace(summaryUser.UserId))
+            {
+                return;
+            }
+
+            var profile = await LoadUserProfileCachedAsync(summaryUser.UserId) ?? new UserProfile();
+            profile.UserId = string.IsNullOrWhiteSpace(profile.UserId) ? summaryUser.UserId : profile.UserId;
+            profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? summaryUser.Name : profile.Name;
+            profile.Email = string.IsNullOrWhiteSpace(profile.Email) ? summaryUser.Email : profile.Email;
+            profile.Phone = string.IsNullOrWhiteSpace(profile.Phone) ? summaryUser.Phone : profile.Phone;
+            profile.Course = string.IsNullOrWhiteSpace(profile.Course) ? summaryUser.Course : profile.Course;
+            profile.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? summaryUser.Registration : profile.Registration;
+            profile.Nickname = string.IsNullOrWhiteSpace(profile.Nickname) ? summaryUser.Nickname : profile.Nickname;
+            profile.ProfessionalTitle = string.IsNullOrWhiteSpace(profile.ProfessionalTitle) ? summaryUser.ProfessionalTitle : profile.ProfessionalTitle;
+            profile.Bio = string.IsNullOrWhiteSpace(profile.Bio) ? summaryUser.Bio : profile.Bio;
+            profile.Skills = string.IsNullOrWhiteSpace(profile.Skills) ? summaryUser.Skills : profile.Skills;
+            profile.ProgrammingLanguages = string.IsNullOrWhiteSpace(profile.ProgrammingLanguages) ? summaryUser.ProgrammingLanguages : profile.ProgrammingLanguages;
+            profile.PortfolioLink = string.IsNullOrWhiteSpace(profile.PortfolioLink) ? summaryUser.PortfolioLink : profile.PortfolioLink;
+            profile.LinkedInLink = string.IsNullOrWhiteSpace(profile.LinkedInLink) ? summaryUser.LinkedInLink : profile.LinkedInLink;
+            profile.AvatarBody = string.IsNullOrWhiteSpace(profile.AvatarBody) ? summaryUser.AvatarBody : profile.AvatarBody;
+            profile.AvatarHair = string.IsNullOrWhiteSpace(profile.AvatarHair) ? summaryUser.AvatarHair : profile.AvatarHair;
+            profile.AvatarAccessory = string.IsNullOrWhiteSpace(profile.AvatarAccessory) ? summaryUser.AvatarAccessory : profile.AvatarAccessory;
+
+            var avatarUser = new UserInfo
+            {
+                UserId = profile.UserId,
+                Name = profile.Name,
+                Email = profile.Email,
+                Registration = profile.Registration,
+                Course = profile.Course,
+                AvatarBody = profile.AvatarBody,
+                AvatarHair = profile.AvatarHair,
+                AvatarAccessory = profile.AvatarAccessory
+            };
+
+            var dialog = new UserProfileViewWindow(profile, CreateUserAvatarVisual(avatarUser, 108, true))
+            {
+                Owner = this
+            };
+
+            dialog.ShowDialog();
+        }
+
         private string GetFirestoreStringValue(JsonElement fields, string fieldName)
         {
             return fields.TryGetProperty(fieldName, out var field) && field.TryGetProperty("stringValue", out var value)
@@ -3162,15 +3410,30 @@ namespace MeuApp
 
         private async Task EnrichConversationAvatarsAsync(List<Conversation> conversations)
         {
-            foreach (var conversation in conversations)
-            {
-                if (HasCustomAvatar(conversation))
-                {
-                    continue;
-                }
+            var pendingConversations = conversations
+                .Where(conversation => !HasCustomAvatar(conversation) && !string.IsNullOrWhiteSpace(conversation.ContactId))
+                .ToList();
 
-                var user = await LoadUserInfoByIdAsync(conversation.ContactId);
-                if (user == null)
+            if (pendingConversations.Count == 0)
+            {
+                return;
+            }
+
+            var usersById = await Task.WhenAll(pendingConversations
+                .Select(async conversation => new
+                {
+                    conversation.ContactId,
+                    User = await LoadUserInfoCachedAsync(conversation.ContactId)
+                }));
+
+            var userLookup = usersById
+                .Where(item => item.User != null)
+                .GroupBy(item => item.ContactId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().User!, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var conversation in pendingConversations)
+            {
+                if (!userLookup.TryGetValue(conversation.ContactId, out var user))
                 {
                     continue;
                 }
@@ -3183,25 +3446,38 @@ namespace MeuApp
 
         private async Task EnrichTeamMembersAvatarsAsync(List<TeamWorkspaceInfo> teams)
         {
-            foreach (var team in teams)
+            var pendingMembers = teams
+                .SelectMany(team => team.Members)
+                .Where(member => !HasCustomAvatar(member) && !string.IsNullOrWhiteSpace(member.UserId))
+                .ToList();
+
+            if (pendingMembers.Count == 0)
             {
-                foreach (var member in team.Members)
+                return;
+            }
+
+            var usersById = await Task.WhenAll(pendingMembers
+                .Select(async member => new
                 {
-                    if (HasCustomAvatar(member))
-                    {
-                        continue;
-                    }
+                    member.UserId,
+                    User = await LoadUserInfoCachedAsync(member.UserId)
+                }));
 
-                    var user = await LoadUserInfoByIdAsync(member.UserId);
-                    if (user == null)
-                    {
-                        continue;
-                    }
+            var userLookup = usersById
+                .Where(item => item.User != null)
+                .GroupBy(item => item.UserId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().User!, StringComparer.OrdinalIgnoreCase);
 
-                    member.AvatarBody = user.AvatarBody;
-                    member.AvatarHair = user.AvatarHair;
-                    member.AvatarAccessory = user.AvatarAccessory;
+            foreach (var member in pendingMembers)
+            {
+                if (!userLookup.TryGetValue(member.UserId, out var user))
+                {
+                    continue;
                 }
+
+                member.AvatarBody = user.AvatarBody;
+                member.AvatarHair = user.AvatarHair;
+                member.AvatarAccessory = user.AvatarAccessory;
             }
         }
 
@@ -3262,7 +3538,7 @@ namespace MeuApp
                 Width = 86,
                 Height = 86,
                 CornerRadius = new CornerRadius(14),
-                Background = Brushes.White,
+                Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
                 HorizontalAlignment = HorizontalAlignment.Center
@@ -4679,7 +4955,7 @@ namespace MeuApp
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
+                Background = GetThemeBrush("CardBackgroundBrush")
             };
 
             var root = new Grid { Margin = new Thickness(20) };
@@ -4852,7 +5128,7 @@ namespace MeuApp
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
+                Background = GetThemeBrush("CardBackgroundBrush")
             };
 
             var root = new Grid { Margin = new Thickness(20) };
@@ -5071,7 +5347,7 @@ namespace MeuApp
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
-                Background = Brushes.White
+                Background = GetThemeBrush("CardBackgroundBrush")
             };
 
             var root = new StackPanel { Margin = new Thickness(20) };
@@ -5545,8 +5821,12 @@ namespace MeuApp
 
         private async void SearchFriends_Click(object sender, RoutedEventArgs e)
         {
-            var query = SearchFriendsBox.Text?.Trim() ?? string.Empty;
+            _searchSlideTypingVersion++;
+            await ExecuteSearchFriendsAsync(SearchFriendsBox.Text?.Trim() ?? string.Empty, false);
+        }
 
+        private async Task ExecuteSearchFriendsAsync(string query, bool triggeredByTyping)
+        {
             DebugHelper.WriteLine($"=== BUSCA INICIADA ===");
             DebugHelper.WriteLine($"Query do usuário: '{query}'");
             DebugHelper.WriteLine($"ID Token disponível: {!string.IsNullOrEmpty(_idToken)}");
@@ -5561,22 +5841,31 @@ namespace MeuApp
 
             if (string.IsNullOrWhiteSpace(_idToken))
             {
-                MessageBox.Show("Token de autenticação não disponível. Faça login novamente.", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                if (!triggeredByTyping)
+                {
+                    MessageBox.Show("Token de autenticação não disponível. Faça login novamente.", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
                 DebugHelper.WriteLine("Busca cancelada: token vazio");
                 return;
             }
 
-            await RefreshConnectionsCacheAsync();
-            SetSearchSlideLoadingState(query);
-            DebugHelper.WriteLine("Painel inline de resultados aberto, iniciando busca...");
+            var requestVersion = ++_searchSlideRequestVersion;
 
-            // Executar busca assincronamente
+            await RefreshConnectionsCacheAsync();
+            SetSearchSlideLoadingState(query, triggeredByTyping);
+            DebugHelper.WriteLine("Drawer de busca aberto, iniciando busca...");
+
             try
             {
                 var searchService = new UserSearchService(_idToken);
                 DebugHelper.WriteLine("UserSearchService criado");
 
-                var results = await searchService.SearchUsersAsync(query);
+                List<UserInfo> results = await searchService.SearchUsersAsync(query) ?? new List<UserInfo>();
+                if (requestVersion != _searchSlideRequestVersion)
+                {
+                    return;
+                }
+
                 results = results
                     .Where(user => !string.Equals(user.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -5587,9 +5876,9 @@ namespace MeuApp
                     user.ConnectionState = _connectionService?.GetRelationshipState(user.UserId, _connectionEntries) ?? "none";
                 }
 
-                DebugHelper.WriteLine($"Busca concluída. Resultados: {results?.Count ?? 0}");
+                DebugHelper.WriteLine($"Busca concluída. Resultados: {results.Count}");
 
-                if (results != null && results.Count > 0)
+                if (results.Count > 0)
                 {
                     foreach (var result in results)
                     {
@@ -5597,10 +5886,15 @@ namespace MeuApp
                     }
                 }
 
-                RenderSearchSlideResults(results ?? new List<UserInfo>());
+                RenderSearchSlideResults(results);
             }
             catch (Exception ex)
             {
+                if (requestVersion != _searchSlideRequestVersion)
+                {
+                    return;
+                }
+
                 DebugHelper.WriteLine($"EXCEÇÃO na busca: {ex.GetType().Name}");
                 DebugHelper.WriteLine($"Mensagem: {ex.Message}");
                 DebugHelper.WriteLine($"Stack: {ex.StackTrace}");
@@ -5615,12 +5909,14 @@ namespace MeuApp
             DebugHelper.WriteLine("=== BUSCA FINALIZADA ===\n");
         }
 
-        private void SetSearchSlideLoadingState(string query)
+        private void SetSearchSlideLoadingState(string query, bool triggeredByTyping)
         {
             _searchSlideQuery = query;
             _searchSlideResults.Clear();
             SearchSlideTitleText.Text = $"Resultados para \"{query}\"";
-            SearchSlideStatusText.Text = "Buscando por nome, matricula e email dentro da sua rede academica...";
+            SearchSlideStatusText.Text = triggeredByTyping
+                ? "Atualizando resultados enquanto você digita..."
+                : "Buscando por nome, matricula e email dentro da sua rede academica...";
             SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
             SearchSlideResultsHost.Children.Clear();
             SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
@@ -5646,8 +5942,8 @@ namespace MeuApp
 
             SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
             SearchSlideStatusText.Text = results.Count == 1
-                ? "1 perfil encontrado. Você já pode iniciar conversa ou enviar conexão daqui."
-                : $"{results.Count} perfis encontrados. Escolha quem deseja abrir no fluxo de conversas.";
+                ? "1 perfil encontrado. Você já pode conversar, conectar ou abrir os detalhes daqui."
+                : $"{results.Count} perfis encontrados. Converse, conecte ou abra os detalhes do aluno.";
             SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
 
             foreach (var user in results)
@@ -5721,36 +6017,33 @@ namespace MeuApp
             {
                 VerticalAlignment = VerticalAlignment.Center
             };
-            info.Children.Add(new TextBlock
+            info.Children.Add(CreateHighlightedSearchTextBlock(
+                string.IsNullOrWhiteSpace(user.Name) ? "Sem nome" : user.Name,
+                GetThemeBrush("PrimaryTextBrush"),
+                14,
+                FontWeights.SemiBold));
+            var emailBlock = CreateHighlightedSearchTextBlock(
+                string.IsNullOrWhiteSpace(user.Email) ? "Email indisponivel" : user.Email,
+                GetThemeBrush("SecondaryTextBrush"),
+                11,
+                FontWeights.Normal);
+            emailBlock.Margin = new Thickness(0, 4, 0, 0);
+            info.Children.Add(emailBlock);
+
+            var registrationBlock = new TextBlock
             {
-                Text = string.IsNullOrWhiteSpace(user.Name) ? "Sem nome" : user.Name,
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush")
-            });
-            info.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(user.Email) ? "Email indisponivel" : user.Email,
-                Margin = new Thickness(0, 4, 0, 0),
-                FontSize = 11,
-                Foreground = GetThemeBrush("SecondaryTextBrush")
-            });
-            info.Children.Add(new TextBlock
-            {
-                Text = $"Matricula: {(!string.IsNullOrWhiteSpace(user.Registration) ? user.Registration : "nao informada")}",
                 Margin = new Thickness(0, 2, 0, 0),
                 FontSize = 11,
                 Foreground = GetThemeBrush("TertiaryTextBrush")
-            });
+            };
+            registrationBlock.Inlines.Add(new Run("Matricula: "));
+            AppendHighlightedInlines(registrationBlock.Inlines, !string.IsNullOrWhiteSpace(user.Registration) ? user.Registration : "nao informada", GetThemeBrush("TertiaryTextBrush"));
+            info.Children.Add(registrationBlock);
             if (!string.IsNullOrWhiteSpace(user.Course))
             {
-                info.Children.Add(new TextBlock
-                {
-                    Text = user.Course,
-                    Margin = new Thickness(0, 2, 0, 0),
-                    FontSize = 11,
-                    Foreground = GetThemeBrush("TertiaryTextBrush")
-                });
+                var courseBlock = CreateHighlightedSearchTextBlock(user.Course, GetThemeBrush("TertiaryTextBrush"), 11, FontWeights.Normal);
+                courseBlock.Margin = new Thickness(0, 2, 0, 0);
+                info.Children.Add(courseBlock);
             }
             Grid.SetColumn(info, 1);
             layout.Children.Add(info);
@@ -5764,7 +6057,7 @@ namespace MeuApp
 
             var conversationButton = new Button
             {
-                Content = "Abrir conversa",
+                Content = "Conversar",
                 Background = GetThemeBrush("AccentBrush"),
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
@@ -5776,6 +6069,22 @@ namespace MeuApp
             };
             conversationButton.Click += SearchSlideStartConversation_Click;
             actions.Children.Add(conversationButton);
+
+            var detailsButton = new Button
+            {
+                Content = "Detalhes",
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(0, 0, 0, 8),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = user
+            };
+            detailsButton.Click += SearchSlideShowProfile_Click;
+            actions.Children.Add(detailsButton);
 
             var connectionButton = new Button
             {
@@ -5798,6 +6107,70 @@ namespace MeuApp
 
             card.Child = layout;
             return card;
+        }
+
+        private TextBlock CreateHighlightedSearchTextBlock(string text, Brush baseForeground, double fontSize, FontWeight fontWeight)
+        {
+            var block = new TextBlock
+            {
+                FontSize = fontSize,
+                FontWeight = fontWeight,
+                Foreground = baseForeground,
+                TextWrapping = TextWrapping.Wrap
+            };
+            AppendHighlightedInlines(block.Inlines, text, baseForeground);
+            return block;
+        }
+
+        private void AppendHighlightedInlines(InlineCollection inlines, string text, Brush baseForeground)
+        {
+            var value = text ?? string.Empty;
+            var query = _searchSlideQuery?.Trim() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(query) || string.IsNullOrWhiteSpace(value))
+            {
+                inlines.Add(new Run(value) { Foreground = baseForeground });
+                return;
+            }
+
+            var comparison = StringComparison.OrdinalIgnoreCase;
+            var startIndex = 0;
+            while (startIndex < value.Length)
+            {
+                var matchIndex = value.IndexOf(query, startIndex, comparison);
+                if (matchIndex < 0)
+                {
+                    inlines.Add(new Run(value[startIndex..]) { Foreground = baseForeground });
+                    break;
+                }
+
+                if (matchIndex > startIndex)
+                {
+                    inlines.Add(new Run(value[startIndex..matchIndex]) { Foreground = baseForeground });
+                }
+
+                inlines.Add(new Run(value.Substring(matchIndex, query.Length))
+                {
+                    Foreground = GetSearchHighlightForeground(),
+                    Background = GetSearchHighlightBackground(),
+                    FontWeight = FontWeights.Bold
+                });
+                startIndex = matchIndex + query.Length;
+            }
+        }
+
+        private Brush GetSearchHighlightBackground()
+        {
+            return _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(30, 64, 175))
+                : new SolidColorBrush(Color.FromRgb(219, 234, 254));
+        }
+
+        private Brush GetSearchHighlightForeground()
+        {
+            return _appDarkModeEnabled
+                ? Brushes.White
+                : new SolidColorBrush(Color.FromRgb(30, 64, 175));
         }
 
         private async void SearchSlideCreateConnection_Click(object sender, RoutedEventArgs e)
@@ -5849,6 +6222,16 @@ namespace MeuApp
             HideSearchSlidePanel();
         }
 
+        private async void SearchSlideShowProfile_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: UserInfo user })
+            {
+                return;
+            }
+
+            await ShowUserProfileDialogAsync(user);
+        }
+
         private void CloseSearchSlide_Click(object sender, RoutedEventArgs e)
         {
             HideSearchSlidePanel();
@@ -5856,6 +6239,7 @@ namespace MeuApp
 
         private void ShowSearchSlidePanel()
         {
+            SearchSlideOverlay.Visibility = Visibility.Visible;
             SearchSlidePanel.Visibility = Visibility.Visible;
 
             var opacityAnimation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180));
@@ -5863,13 +6247,13 @@ namespace MeuApp
 
             if (SearchSlidePanel.RenderTransform is TranslateTransform transform)
             {
-                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-18, 0, TimeSpan.FromMilliseconds(180)));
+                transform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(56, 0, TimeSpan.FromMilliseconds(220)));
             }
         }
 
         private void HideSearchSlidePanel()
         {
-            if (SearchSlidePanel.Visibility != Visibility.Visible)
+            if (SearchSlideOverlay.Visibility != Visibility.Visible)
             {
                 return;
             }
@@ -5877,6 +6261,7 @@ namespace MeuApp
             var opacityAnimation = new DoubleAnimation(0, TimeSpan.FromMilliseconds(160));
             opacityAnimation.Completed += (s, e) =>
             {
+                SearchSlideOverlay.Visibility = Visibility.Collapsed;
                 SearchSlidePanel.Visibility = Visibility.Collapsed;
                 SearchSlideResultsHost.Children.Clear();
                 SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
@@ -5885,7 +6270,7 @@ namespace MeuApp
 
             if (SearchSlidePanel.RenderTransform is TranslateTransform transform)
             {
-                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(-18, TimeSpan.FromMilliseconds(160)));
+                transform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(56, TimeSpan.FromMilliseconds(160)));
             }
         }
 
@@ -6928,11 +7313,11 @@ namespace MeuApp
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            actionPanel.Children.Add(CreateHeaderIconButton("Call", "Iniciar audio"));
-            actionPanel.Children.Add(CreateHeaderIconButton("Video", "Iniciar video"));
-            actionPanel.Children.Add(CreateHeaderIconButton("Find", "Buscar na conversa"));
+            actionPanel.Children.Add(CreateHeaderIconButton("📞", "Iniciar audio"));
+            actionPanel.Children.Add(CreateHeaderIconButton("🎥", "Iniciar video"));
+            actionPanel.Children.Add(CreateHeaderIconButton("🔎", "Buscar na conversa"));
 
-            var menuButton = CreateHeaderIconButton("...", "Mais acoes");
+            var menuButton = CreateHeaderIconButton("⋯", "Mais acoes");
             var actionsPopup = CreateChatActionsPopup(menuButton, conv);
             menuButton.Click += (s, e) => actionsPopup.IsOpen = !actionsPopup.IsOpen;
             actionPanel.Children.Add(menuButton);
@@ -7060,11 +7445,11 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 0, 0, 12)
             };
-            quickActionPanel.Children.Add(CreateComposerChipButton("Emoji"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("GIF"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Imagem"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Arquivo"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Audio"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("✨ Ações rápidas"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("🖼️ Midia"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("📎 Arquivo"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("🎓 Professor"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("📤 Exportar"));
             composerStack.Children.Add(quickActionPanel);
 
             var inputGrid = new Grid();
@@ -7074,11 +7459,18 @@ namespace MeuApp
             inputGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             inputGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var emojiButton = CreateHeaderIconButton(":)", "Emoji");
+            var emojiButton = CreateHeaderIconButton("😊", "Emoji");
             Grid.SetColumn(emojiButton, 0);
             inputGrid.Children.Add(emojiButton);
 
-            var attachmentButton = CreateHeaderIconButton("+", "Anexar arquivo");
+            var attachmentButton = CreateHeaderIconButton("＋", "Enviar figurinha");
+            attachmentButton.Background = new SolidColorBrush(Color.FromRgb(0, 168, 132));
+            attachmentButton.Foreground = Brushes.White;
+            attachmentButton.MinWidth = 40;
+            attachmentButton.Height = 40;
+            attachmentButton.FontSize = 16;
+            var stickerPopup = CreateStickerPickerPopup(attachmentButton, conv);
+            attachmentButton.Click += (s, e) => stickerPopup.IsOpen = !stickerPopup.IsOpen;
             Grid.SetColumn(attachmentButton, 1);
             inputGrid.Children.Add(attachmentButton);
 
@@ -7108,22 +7500,23 @@ namespace MeuApp
             Grid.SetColumn(inputBox, 2);
             inputGrid.Children.Add(inputBox);
 
-            var micButton = CreateHeaderIconButton("Mic", "Gravar audio");
+            var micButton = CreateHeaderIconButton("🎙", "Gravar audio");
             Grid.SetColumn(micButton, 3);
             inputGrid.Children.Add(micButton);
 
             var sendButton = new Button
             {
-                Content = "Enviar",
+                Content = "➤",
                 Background = new SolidColorBrush(Color.FromRgb(0, 168, 132)),
                 Foreground = Brushes.White,
-                FontSize = 12,
-                Width = 72,
+                FontSize = 16,
+                Width = 52,
                 Height = 42,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 FontWeight = FontWeights.SemiBold,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Enviar mensagem"
             };
             sendButton.Click += async (s, e) => await SendConversationMessageAsync(conv, inputBox);
             Grid.SetColumn(sendButton, 4);
@@ -7136,6 +7529,51 @@ namespace MeuApp
 
             panel.Child = mainGrid;
             return panel;
+        }
+
+        private async Task SendConversationStickerAsync(Conversation conv, string stickerAsset)
+        {
+            if (string.IsNullOrWhiteSpace(stickerAsset))
+            {
+                return;
+            }
+
+            var previewText = GetStickerPreviewText(stickerAsset);
+            var stickerMessage = new ChatMessage
+            {
+                SenderId = _currentProfile?.UserId ?? "self",
+                SenderName = _currentProfile?.Name ?? "Voce",
+                Content = previewText,
+                MessageType = "sticker",
+                StickerAsset = stickerAsset,
+                Timestamp = DateTime.Now,
+                IsOwn = true
+            };
+
+            if (!string.IsNullOrEmpty(_idToken))
+            {
+                var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
+                var sendResult = await chatService.SendMessageAsync(conv.ContactId, conv.ContactName, stickerMessage.SenderName, stickerMessage.Content, stickerMessage.MessageType, stickerMessage.StickerAsset);
+                if (!sendResult.Success)
+                {
+                    MessageBox.Show(
+                        $"Erro ao enviar figurinha.\n\n{sendResult.ErrorMessage}\n\nLog salvo em:\n{DebugHelper.GetLogFilePath()}",
+                        "Erro",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning
+                    );
+                    return;
+                }
+            }
+
+            conv.Messages.Add(stickerMessage);
+            conv.LastMessage = stickerMessage.ConversationPreview;
+            conv.LastMessageTime = stickerMessage.Timestamp;
+            conv.LastSenderId = stickerMessage.SenderId;
+            conv.LastReadAt = stickerMessage.Timestamp;
+            conv.HasUnread = false;
+            UpdateChatsBadge();
+            RefreshChatsUI();
         }
 
         private async Task SendConversationMessageAsync(Conversation conv, TextBox inputBox)
@@ -7151,6 +7589,7 @@ namespace MeuApp
                 SenderId = _currentProfile?.UserId ?? "self",
                 SenderName = _currentProfile?.Name ?? "Voce",
                 Content = messageText,
+                MessageType = "text",
                 Timestamp = DateTime.Now,
                 IsOwn = true
             };
@@ -7159,7 +7598,7 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine("[SendConversationMessageAsync] Enviando mensagem para Firebase");
                 var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
-                var sendResult = await chatService.SendMessageAsync(conv.ContactId, conv.ContactName, newMsg.SenderName, newMsg.Content);
+                var sendResult = await chatService.SendMessageAsync(conv.ContactId, conv.ContactName, newMsg.SenderName, newMsg.Content, newMsg.MessageType, newMsg.StickerAsset);
 
                 if (!sendResult.Success)
                 {
@@ -7177,7 +7616,7 @@ namespace MeuApp
             }
 
             conv.Messages.Add(newMsg);
-            conv.LastMessage = messageText;
+            conv.LastMessage = newMsg.ConversationPreview;
             conv.LastMessageTime = newMsg.Timestamp;
             conv.LastSenderId = newMsg.SenderId;
             conv.LastReadAt = newMsg.Timestamp;
@@ -7245,7 +7684,7 @@ namespace MeuApp
                 CornerRadius = msg.IsOwn
                     ? new CornerRadius(16, 16, 4, 16)
                     : new CornerRadius(16, 16, 16, 4),
-                Padding = new Thickness(14, 10, 14, 10)
+                Padding = msg.IsSticker ? new Thickness(8) : new Thickness(14, 10, 14, 10)
             };
 
             var stack = new StackPanel { Orientation = Orientation.Vertical };
@@ -7263,15 +7702,22 @@ namespace MeuApp
                 });
             }
 
-            stack.Children.Add(new TextBlock
+            if (msg.IsSticker)
             {
-                Text = msg.Content,
-                FontSize = 13,
-                Foreground = msg.IsOwn 
-                    ? ownTextBrush
-                    : otherTextBrush,
-                TextWrapping = TextWrapping.Wrap
-            });
+                stack.Children.Add(CreateStickerBubbleContent(msg));
+            }
+            else
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = msg.Content,
+                    FontSize = 13,
+                    Foreground = msg.IsOwn 
+                        ? ownTextBrush
+                        : otherTextBrush,
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
             stack.Children.Add(new TextBlock
             {
                 Text = msg.Timestamp.ToString("HH:mm"),
@@ -7287,6 +7733,128 @@ namespace MeuApp
             row.Children.Add(bubble);
             container.Child = row;
             return container;
+        }
+
+        private UIElement CreateStickerBubbleContent(ChatMessage msg)
+        {
+            var stickerSource = TryCreateStickerImageSource(msg.StickerAsset);
+            if (stickerSource == null)
+            {
+                return new TextBlock
+                {
+                    Text = msg.ConversationPreview,
+                    FontSize = 13,
+                    Foreground = msg.IsOwn ? Brushes.White : GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                };
+            }
+
+            return new StackPanel
+            {
+                Children =
+                {
+                    new Image
+                    {
+                        Source = stickerSource,
+                        Width = 148,
+                        Height = 148,
+                        Stretch = Stretch.Uniform,
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    },
+                    new TextBlock
+                    {
+                        Text = GetStickerDisplayName(msg.StickerAsset),
+                        FontSize = 10,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Foreground = msg.IsOwn
+                            ? new SolidColorBrush(Color.FromRgb(209, 250, 229))
+                            : GetThemeBrush("SecondaryTextBrush")
+                    }
+                }
+            };
+        }
+
+        private ImageSource? TryCreateStickerImageSource(string? assetFileName)
+        {
+            if (string.IsNullOrWhiteSpace(assetFileName))
+            {
+                return null;
+            }
+
+            static string? ResolveStickerPath(string fileName)
+            {
+                var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                var candidateDirectories = new[]
+                {
+                    System.IO.Path.Combine(baseDirectory, "img", "emojiobsseract"),
+                    System.IO.Path.Combine(baseDirectory, "..", "..", "..", "img", "emojiobsseract")
+                };
+
+                foreach (var directory in candidateDirectories)
+                {
+                    if (!Directory.Exists(directory))
+                    {
+                        continue;
+                    }
+
+                    var directPath = System.IO.Path.Combine(directory, fileName);
+                    if (File.Exists(directPath))
+                    {
+                        return System.IO.Path.GetFullPath(directPath);
+                    }
+
+                    foreach (var candidatePath in Directory.GetFiles(directory, "*.png"))
+                    {
+                        if (string.Equals(System.IO.Path.GetFileName(candidatePath), fileName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return System.IO.Path.GetFullPath(candidatePath);
+                        }
+                    }
+                }
+
+                return null;
+            }
+
+            try
+            {
+                return new BitmapImage(new Uri($"pack://application:,,,/img/emojiobsseract/{assetFileName}", UriKind.Absolute));
+            }
+            catch
+            {
+                try
+                {
+                    var stickerPath = ResolveStickerPath(assetFileName);
+                    if (string.IsNullOrWhiteSpace(stickerPath))
+                    {
+                        DebugHelper.WriteLine($"[Sticker] Arquivo não encontrado: {assetFileName}");
+                        return null;
+                    }
+
+                    return new BitmapImage(new Uri(stickerPath, UriKind.Absolute));
+                }
+                catch (Exception fallbackEx)
+                {
+                    DebugHelper.WriteLine($"[Sticker] Falha no fallback de arquivo {assetFileName}: {fallbackEx.Message}");
+                    return null;
+                }
+            }
+        }
+
+        private string GetStickerPreviewText(string? assetFileName)
+        {
+            return $"Figurinha • {GetStickerDisplayName(assetFileName)}";
+        }
+
+        private string GetStickerDisplayName(string? assetFileName)
+        {
+            return (assetFileName ?? string.Empty).ToLowerInvariant() switch
+            {
+                "chao_0.png" => "Feliz",
+                "chao_1.png" => "Triste",
+                "chao_2.png" => "Irritado",
+                _ => "Figurinha"
+            };
         }
 
         private async Task LoadActiveConversationsAsync()
@@ -7479,6 +8047,126 @@ namespace MeuApp
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold
             };
+        }
+
+        private Popup CreateStickerPickerPopup(Button anchorButton, Conversation conv)
+        {
+            var popupBorderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var popupBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                : new SolidColorBrush(Colors.White);
+            var titleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var subtitleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+
+            var popup = new Popup
+            {
+                PlacementTarget = anchorButton,
+                Placement = PlacementMode.Top,
+                HorizontalOffset = -24,
+                VerticalOffset = -12,
+                AllowsTransparency = true,
+                StaysOpen = false
+            };
+
+            var host = new StackPanel();
+            host.Children.Add(new TextBlock
+            {
+                Text = "Figurinhas do app",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = titleBrush
+            });
+            host.Children.Add(new TextBlock
+            {
+                Text = "Envie uma despedida rápida com as figurinhas nativas do Obsseract.",
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 14),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = subtitleBrush
+            });
+
+            var stickersWrap = new WrapPanel();
+            foreach (var stickerAsset in ChatStickerAssets)
+            {
+                var stickerButton = new Button
+                {
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0, 0, 10, 0),
+                    Cursor = Cursors.Hand,
+                    Tag = stickerAsset,
+                    Content = new Border
+                    {
+                        Background = _appDarkModeEnabled
+                            ? new SolidColorBrush(Color.FromRgb(18, 30, 49))
+                            : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                        BorderBrush = popupBorderBrush,
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(18),
+                        Padding = new Thickness(12),
+                        Width = 126,
+                        Child = new StackPanel
+                        {
+                            Children =
+                            {
+                                new Image
+                                {
+                                    Source = TryCreateStickerImageSource(stickerAsset),
+                                    Width = 84,
+                                    Height = 84,
+                                    Stretch = Stretch.Uniform,
+                                    HorizontalAlignment = HorizontalAlignment.Center
+                                },
+                                new TextBlock
+                                {
+                                    Text = GetStickerDisplayName(stickerAsset),
+                                    FontSize = 11,
+                                    Margin = new Thickness(0, 8, 0, 0),
+                                    TextAlignment = TextAlignment.Center,
+                                    Foreground = titleBrush,
+                                    TextWrapping = TextWrapping.Wrap
+                                }
+                            }
+                        }
+                    }
+                };
+
+                stickerButton.Click += async (_, __) =>
+                {
+                    popup.IsOpen = false;
+                    await SendConversationStickerAsync(conv, stickerAsset);
+                };
+
+                stickersWrap.Children.Add(stickerButton);
+            }
+
+            host.Children.Add(stickersWrap);
+            popup.Child = new Border
+            {
+                Width = 420,
+                Background = popupBackground,
+                BorderBrush = popupBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(16),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 28,
+                    ShadowDepth = 8,
+                    Opacity = 0.22,
+                    Color = Colors.Black
+                },
+                Child = host
+            };
+
+            return popup;
         }
 
         private Popup CreateChatActionsPopup(Button anchorButton, Conversation conv)

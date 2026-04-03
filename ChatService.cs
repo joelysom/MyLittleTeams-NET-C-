@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -33,7 +34,7 @@ namespace MeuApp
         /// <summary>
         /// Envia uma mensagem para uma conversa no Firebase
         /// </summary>
-        public async Task<ChatOperationResult> SendMessageAsync(string contactId, string contactName, string senderName, string content)
+        public async Task<ChatOperationResult> SendMessageAsync(string contactId, string contactName, string senderName, string content, string messageType = "text", string? stickerAsset = null)
         {
             try
             {
@@ -45,7 +46,8 @@ namespace MeuApp
                     contactName,
                     senderName,
                     content,
-                    timestampUtc
+                    timestampUtc,
+                    messageType
                 );
 
                 if (!metadataResult.Success)
@@ -67,6 +69,8 @@ namespace MeuApp
                         senderId = new { stringValue = _currentUserId },
                         senderName = new { stringValue = senderName },
                         content = new { stringValue = content },
+                        messageType = new { stringValue = string.IsNullOrWhiteSpace(messageType) ? "text" : messageType },
+                        stickerAsset = new { stringValue = stickerAsset ?? string.Empty },
                         timestamp = new { timestampValue = timestampText },
                         createdAt = new { timestampValue = timestampText },
                         recipientId = new { stringValue = contactId }
@@ -184,8 +188,25 @@ namespace MeuApp
             try
             {
                 var seenConversationIds = new HashSet<string>(StringComparer.Ordinal);
-                await LoadConversationsByParticipantFieldAsync("userAId", conversations, seenConversationIds);
-                await LoadConversationsByParticipantFieldAsync("userBId", conversations, seenConversationIds);
+                var userAConversationsTask = LoadConversationsByParticipantFieldAsync("userAId");
+                var userBConversationsTask = LoadConversationsByParticipantFieldAsync("userBId");
+                var results = await Task.WhenAll(userAConversationsTask, userBConversationsTask);
+
+                foreach (var batch in results)
+                {
+                    foreach (var conversation in batch)
+                    {
+                        if (conversation == null || string.IsNullOrWhiteSpace(conversation.ConversationId))
+                        {
+                            continue;
+                        }
+
+                        if (seenConversationIds.Add(conversation.ConversationId))
+                        {
+                            conversations.Add(conversation);
+                        }
+                    }
+                }
 
                 conversations.Sort((left, right) => right.LastMessageTime.CompareTo(left.LastMessageTime));
                 return conversations;
@@ -260,6 +281,8 @@ namespace MeuApp
                 string? senderId = null;
                 string? senderName = null;
                 string? content = null;
+                var messageType = "text";
+                string? stickerAsset = null;
                 DateTime timestamp = DateTime.Now;
 
                 if (fields.TryGetProperty("senderId", out var senderIdField) && 
@@ -278,6 +301,18 @@ namespace MeuApp
                     contentField.TryGetProperty("stringValue", out var contentValue))
                 {
                     content = contentValue.GetString();
+                }
+
+                if (fields.TryGetProperty("messageType", out var messageTypeField) &&
+                    messageTypeField.TryGetProperty("stringValue", out var messageTypeValue))
+                {
+                    messageType = messageTypeValue.GetString() ?? "text";
+                }
+
+                if (fields.TryGetProperty("stickerAsset", out var stickerAssetField) &&
+                    stickerAssetField.TryGetProperty("stringValue", out var stickerAssetValue))
+                {
+                    stickerAsset = stickerAssetValue.GetString();
                 }
 
                 if (fields.TryGetProperty("timestamp", out var timestampField) && 
@@ -307,6 +342,8 @@ namespace MeuApp
                     SenderId = senderId,
                     SenderName = senderName ?? "Usuário",
                     Content = content,
+                    MessageType = messageType,
+                    StickerAsset = stickerAsset ?? string.Empty,
                     Timestamp = timestamp,
                     IsOwn = senderId == _currentUserId
                 };
@@ -333,7 +370,7 @@ namespace MeuApp
                 }
 
                 var lastMessage = messages[messages.Count - 1];
-                return (lastMessage.Content, lastMessage.Timestamp);
+                return (lastMessage.ConversationPreview, lastMessage.Timestamp);
             }
             catch
             {
@@ -344,8 +381,7 @@ namespace MeuApp
         private static void LogRequest(string operation, string method, string url, string? body)
         {
             DebugHelper.WriteLine($"[HTTP {operation}] {method} {url}");
-            DebugHelper.WriteLine($"[HTTP {operation}] Authorization: Bearer <redacted>");
-            if (!string.IsNullOrWhiteSpace(body))
+            if (Debugger.IsAttached && !string.IsNullOrWhiteSpace(body))
             {
                 DebugHelper.WriteLine($"[HTTP {operation}] Request Body: {body}");
             }
@@ -354,6 +390,12 @@ namespace MeuApp
         private static void LogResponse(string operation, HttpResponseMessage response, string body)
         {
             DebugHelper.WriteLine($"[HTTP {operation}] Status: {(int)response.StatusCode} {response.StatusCode}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                DebugHelper.WriteLine($"[HTTP {operation}] PayloadLength: {body?.Length ?? 0}");
+                return;
+            }
 
             foreach (var header in response.Headers)
             {
@@ -475,7 +517,8 @@ namespace MeuApp
             string contactName,
             string senderName,
             string content,
-            DateTime timestampUtc)
+            DateTime timestampUtc,
+            string messageType)
         {
             try
             {
@@ -501,7 +544,7 @@ namespace MeuApp
                             }
                         }
                     },
-                    ["lastMessage"] = new { stringValue = content },
+                    ["lastMessage"] = new { stringValue = string.Equals(messageType, "sticker", StringComparison.OrdinalIgnoreCase) ? (string.IsNullOrWhiteSpace(content) ? "Figurinha enviada" : content) : content },
                     ["lastMessageTime"] = new { timestampValue = timestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") },
                     ["lastSenderId"] = new { stringValue = _currentUserId },
                     [senderReadField] = new { timestampValue = timestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ") }
@@ -629,16 +672,30 @@ namespace MeuApp
             return string.Empty;
         }
 
-        private async Task LoadConversationsByParticipantFieldAsync(
-            string fieldName,
-            List<Conversation> conversations,
-            HashSet<string> seenConversationIds)
+        private async Task<List<Conversation>> LoadConversationsByParticipantFieldAsync(string fieldName)
         {
+            var conversations = new List<Conversation>();
             var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
             var requestBody = JsonSerializer.Serialize(new
             {
                 structuredQuery = new
                 {
+                    select = new
+                    {
+                        fields = new[]
+                        {
+                            new { fieldPath = "conversationId" },
+                            new { fieldPath = "userAId" },
+                            new { fieldPath = "userAName" },
+                            new { fieldPath = "userBId" },
+                            new { fieldPath = "userBName" },
+                            new { fieldPath = "lastMessage" },
+                            new { fieldPath = "lastMessageTime" },
+                            new { fieldPath = "lastSenderId" },
+                            new { fieldPath = "lastReadAtUserA" },
+                            new { fieldPath = "lastReadAtUserB" }
+                        }
+                    },
                     from = new[] { new { collectionId = "conversations" } },
                     where = new
                     {
@@ -666,28 +723,25 @@ namespace MeuApp
             if (!response.IsSuccessStatusCode)
             {
                 DebugHelper.WriteLine($"[ChatService.LoadConversations] Erro ao carregar por {fieldName}: {BuildDetailedErrorMessage(response, responseBody)}");
-                return;
+                return conversations;
             }
 
             using var doc = JsonDocument.Parse(responseBody);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
-                return;
+                return conversations;
             }
 
             foreach (var result in doc.RootElement.EnumerateArray())
             {
                 var conversation = ParseConversationFromFirestore(result);
-                if (conversation == null || string.IsNullOrWhiteSpace(conversation.ConversationId))
-                {
-                    continue;
-                }
-
-                if (seenConversationIds.Add(conversation.ConversationId))
+                if (conversation != null && !string.IsNullOrWhiteSpace(conversation.ConversationId))
                 {
                     conversations.Add(conversation);
                 }
             }
+
+            return conversations;
         }
     }
 
