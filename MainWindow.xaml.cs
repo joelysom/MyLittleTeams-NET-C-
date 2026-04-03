@@ -6392,13 +6392,7 @@ namespace MeuApp
 
         private void LogoutButton_Click(object sender, RoutedEventArgs e)
         {
-            var result = MessageBox.Show(
-                "Deseja encerrar a sessão atual e voltar para a tela de login?",
-                "Sair da conta",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-
-            if (result != MessageBoxResult.Yes)
+            if (!ShowLogoutConfirmationDialog())
             {
                 return;
             }
@@ -6406,6 +6400,190 @@ namespace MeuApp
             var loginWindow = new LoginWindow();
             loginWindow.Show();
             Close();
+        }
+
+        private bool ShowLogoutConfirmationDialog()
+        {
+            var dialog = new Window
+            {
+                Title = "Sair da conta",
+                Width = 460,
+                Height = 280,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.None,
+                AllowsTransparency = true,
+                Background = Brushes.Transparent,
+                ShowInTaskbar = false
+            };
+
+            var outerBorder = new Border
+            {
+                Background = GetThemeBrush("SurfaceBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(24),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 24,
+                    ShadowDepth = 8,
+                    Opacity = 0.24,
+                    Color = Colors.Black
+                }
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 18) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var iconHost = new Border
+            {
+                Width = 56,
+                Height = 56,
+                CornerRadius = new CornerRadius(18),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(59, 24, 24))
+                    : new SolidColorBrush(Color.FromRgb(254, 242, 242)),
+                Child = new TextBlock
+                {
+                    Text = "↩",
+                    FontSize = 24,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(252, 165, 165))
+                        : new SolidColorBrush(Color.FromRgb(220, 38, 38))
+                }
+            };
+            header.Children.Add(iconHost);
+
+            var titleStack = new StackPanel
+            {
+                Margin = new Thickness(16, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Encerrar sessão",
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Você voltará para a tela de login imediatamente.",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            Grid.SetColumn(titleStack, 1);
+            header.Children.Add(titleStack);
+            root.Children.Add(header);
+
+            var body = new StackPanel();
+            body.Children.Add(new TextBlock
+            {
+                Text = "Deseja realmente sair da conta atual?",
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            body.Children.Add(new TextBlock
+            {
+                Text = "Suas informações permanecem salvas, mas será necessário fazer login novamente para acessar conversas, conexões e equipes.",
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            body.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Padding = new Thickness(14, 12, 14, 12),
+                CornerRadius = new CornerRadius(16),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock
+                {
+                    Text = "Nenhuma alteração do seu perfil será perdida.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush")
+                }
+            });
+            Grid.SetRow(body, 1);
+            root.Children.Add(body);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                Width = 118,
+                Height = 42,
+                Margin = new Thickness(0, 0, 10, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold
+            };
+            cancelButton.Click += (_, __) =>
+            {
+                dialog.DialogResult = false;
+                dialog.Close();
+            };
+
+            var confirmButton = new Button
+            {
+                Content = "Sair agora",
+                Width = 118,
+                Height = 42,
+                Background = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.Bold
+            };
+            confirmButton.Click += (_, __) =>
+            {
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            footer.Children.Add(cancelButton);
+            footer.Children.Add(confirmButton);
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.KeyDown += (_, args) =>
+            {
+                if (args.Key == Key.Escape)
+                {
+                    dialog.DialogResult = false;
+                    dialog.Close();
+                }
+            };
+
+            outerBorder.Child = root;
+            dialog.Content = outerBorder;
+
+            return dialog.ShowDialog() == true;
         }
 
         private void ChatDarkModeToggle_Changed(object sender, RoutedEventArgs e)
