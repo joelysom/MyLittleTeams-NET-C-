@@ -616,8 +616,11 @@ namespace MeuApp
                 {
                     fields = new
                     {
+                        assetId = new { stringValue = asset.AssetId ?? Guid.NewGuid().ToString() },
                         category = new { stringValue = asset.Category ?? "" },
                         fileName = new { stringValue = asset.FileName ?? "" },
+                        previewImageDataUri = new { stringValue = asset.PreviewImageDataUri ?? "" },
+                        addedByUserId = new { stringValue = asset.AddedByUserId ?? "" },
                         addedAt = new { timestampValue = ToFirestoreTimestamp(asset.AddedAt == default ? DateTime.UtcNow : asset.AddedAt) }
                     }
                 }
@@ -639,6 +642,11 @@ namespace MeuApp
                     }
                 }
             }).Cast<object>().ToArray();
+        }
+
+        public Task<TeamWorkspaceInfo?> GetTeamByIdAsync(string teamId)
+        {
+            return LoadTeamByIdAsync(teamId);
         }
 
         private object[] ConvertTaskCardsToFirestoreArray(List<TeamTaskCardInfo> cards)
@@ -929,8 +937,11 @@ namespace MeuApp
 
                     assets.Add(new TeamAssetInfo
                     {
+                        AssetId = GetString(assetFields, "assetId"),
                         Category = GetString(assetFields, "category"),
                         FileName = GetString(assetFields, "fileName"),
+                        PreviewImageDataUri = GetString(assetFields, "previewImageDataUri"),
+                        AddedByUserId = GetString(assetFields, "addedByUserId"),
                         AddedAt = GetTimestamp(assetFields, "addedAt")
                     });
                 }

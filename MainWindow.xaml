@@ -104,14 +104,11 @@
                 <!-- Header Sidebar -->
                 <Border Padding="16,20" Background="#FF0078D4">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="38" Height="38" CornerRadius="19" Background="#1FFFFFFF">
-                            <iconPacks:PackIconMaterial Kind="ViewDashboardOutline"
-                                                        Width="20"
-                                                        Height="20"
-                                                        HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        Foreground="#FFBAE6FD"/>
-                        </Border>
+                        <Image Source="pack://application:,,,/img/tesseractICO.png"
+                               Width="38"
+                               Height="38"
+                               Stretch="Uniform"
+                               VerticalAlignment="Center"/>
                         <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="obsseract"
                                        FontFamily="{StaticResource AppDisplayFontFamily}"
@@ -462,6 +459,50 @@
                                         </StackPanel>
                                     </Grid>
 
+                                    <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Width="90" Height="90" CornerRadius="45" Background="White" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Padding="4">
+                                                <ContentControl x:Name="TeamLogoPreviewHost"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                VerticalContentAlignment="Stretch"/>
+                                            </Border>
+
+                                            <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="Logo do projeto" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                                <TextBlock Text="Envie a identidade visual da equipe. Ao escolher a imagem, o app abre um recorte guiado com preview circular e quadrado." FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                                    <Button x:Name="SelectTeamLogoButton"
+                                                            Content="Escolher logo"
+                                                            Padding="16,10"
+                                                            MinWidth="128"
+                                                            Background="{DynamicResource AccentBrush}"
+                                                            Foreground="White"
+                                                            BorderThickness="0"
+                                                            FontWeight="SemiBold"
+                                                            Cursor="Hand"
+                                                            Click="SelectDraftTeamLogo_Click"/>
+                                                    <Button x:Name="ClearTeamLogoButton"
+                                                            Content="Remover"
+                                                            Margin="10,0,0,0"
+                                                            Padding="14,10"
+                                                            MinWidth="112"
+                                                            Background="{DynamicResource CardBackgroundBrush}"
+                                                            Foreground="{DynamicResource PrimaryTextBrush}"
+                                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                                            FontWeight="SemiBold"
+                                                            Cursor="Hand"
+                                                            Click="ClearDraftTeamLogo_Click"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
                                     <Grid Margin="0,0,0,12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -626,22 +667,78 @@
                     </ScrollViewer>
 
                     <!-- Calendar -->
-                    <StackPanel x:Name="CalendarContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                            <iconPacks:PackIconMaterial Kind="CalendarMonthOutline" Width="20" Height="20" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Calendário" Style="{StaticResource DisplaySectionTitleStyle}"/>
+                    <Grid x:Name="CalendarContent" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Vertical" Margin="0,0,0,18">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <iconPacks:PackIconMaterial Kind="CalendarMonthOutline" Width="20" Height="20" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Agenda integradora" Style="{StaticResource DisplaySectionTitleStyle}"/>
+                            </StackPanel>
+                            <TextBlock Text="Consolide as entregas, marcos e tarefas do semestre em uma agenda de acompanhamento profissional." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="CalendarStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
-                        <TextBlock Text="Nenhum evento agendado" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
-                    </StackPanel>
+
+                        <ScrollViewer Grid.Row="1" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="CalendarAgendaHost" Orientation="Vertical" Margin="0,0,0,24"/>
+                        </ScrollViewer>
+                    </Grid>
 
                     <!-- Files -->
-                    <StackPanel x:Name="FilesContent" Orientation="Vertical" Visibility="Collapsed" VerticalAlignment="Top">
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                            <iconPacks:PackIconMaterial Kind="FolderOutline" Width="20" Height="20" Foreground="{DynamicResource FilesIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Arquivos" Style="{StaticResource DisplaySectionTitleStyle}"/>
-                        </StackPanel>
-                        <TextBlock Text="Nenhum arquivo compartilhado" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
-                    </StackPanel>
+                    <Grid x:Name="FilesContent" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Margin="0,0,0,18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <iconPacks:PackIconMaterial Kind="FolderOutline" Width="20" Height="20" Foreground="{DynamicResource FilesIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Arquivos" Style="{StaticResource DisplaySectionTitleStyle}"/>
+                                </StackPanel>
+                                <TextBlock Text="Monte sua mochila de materiais, marque o contexto e deixe o CHOAS lembrar onde cada peça entra." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="FilesStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Visibility="Collapsed"/>
+                            </StackPanel>
+
+                            <Button x:Name="FilesAddButton"
+                                    Grid.Column="1"
+                                    Width="46"
+                                    Height="46"
+                                    Background="{DynamicResource AccentBrush}"
+                                    Foreground="White"
+                                    BorderThickness="0"
+                                    FontWeight="SemiBold"
+                                    Cursor="Hand"
+                                    ToolTip="Adicionar arquivos"
+                                    Click="AddFilesHub_Click">
+                                <iconPacks:PackIconMaterial Kind="Plus" Width="22" Height="22" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Button>
+                        </Grid>
+
+                        <Grid Grid.Row="1">
+                            <ScrollViewer VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="FilesHubScrollStack" Margin="0,0,0,316">
+                                    <WrapPanel x:Name="FilesHubSummaryHost" Margin="0,0,0,12"/>
+                                    <StackPanel x:Name="FilesHubBodyHost" Orientation="Vertical"/>
+                                </StackPanel>
+                            </ScrollViewer>
+
+                            <Border x:Name="FilesChoasHost"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,0,16"
+                                    Background="Transparent"/>
+                        </Grid>
+                    </Grid>
 
                     <!-- Settings -->
                     <ScrollViewer x:Name="SettingsContent" Visibility="Collapsed" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
@@ -788,6 +885,59 @@
                                         <TextBox x:Name="LinkedInLinkTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
                                     </StackPanel>
                                 </Grid>
+
+                                <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel>
+                                                <TextBlock Text="Galeria do currículo" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                                <TextBlock Text="Adicione imagens avulsas ou monte uma galeria em pasta para eventos, bancas e entregas. Toda imagem continua passando pelo recorte antes de entrar no perfil." FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                                            </StackPanel>
+
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="14,0,0,0">
+                                                <Button x:Name="AddProfileGalleryButton"
+                                                        Content="Adicionar imagens"
+                                                        MinWidth="144"
+                                                        Height="36"
+                                                        Background="{DynamicResource AccentBrush}"
+                                                        Foreground="White"
+                                                        BorderThickness="0"
+                                                        FontWeight="SemiBold"
+                                                        Cursor="Hand"
+                                                        Click="AddProfileGalleryImages_Click"/>
+                                                <Button x:Name="AddProfileGalleryAlbumButton"
+                                                        Content="Adicionar galeria em pasta"
+                                                        MinWidth="188"
+                                                        Height="36"
+                                                        Margin="10,0,0,0"
+                                                        Background="{DynamicResource MutedCardBackgroundBrush}"
+                                                        Foreground="{DynamicResource PrimaryTextBrush}"
+                                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                                        BorderThickness="1"
+                                                        FontWeight="SemiBold"
+                                                        Cursor="Hand"
+                                                        Click="AddProfileGalleryAlbum_Click"/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock x:Name="ProfileGalleryStatusText" Text="Você pode manter até 6 imagens no currículo." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,10,0,12" TextWrapping="Wrap"/>
+                                        <WrapPanel x:Name="ProfileGalleryHost"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="16" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <TextBlock Text="Projetos no currículo" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                        <TextBlock Text="Selecione quais equipes devem aparecer no seu perfil. Os detalhes e imagens do projeto continuam respeitando a permissão da equipe." FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,10" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="ProfileProjectHighlightsStatusText" Text="Carregando equipes vinculadas ao perfil..." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+                                        <StackPanel x:Name="ProfileProjectHighlightsHost"/>
+                                    </StackPanel>
+                                </Border>
 
                                 <StackPanel Orientation="Horizontal">
                                     <Button x:Name="SaveProfessionalProfileButton"

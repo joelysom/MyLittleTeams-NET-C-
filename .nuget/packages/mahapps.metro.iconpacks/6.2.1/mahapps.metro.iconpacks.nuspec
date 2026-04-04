@@ -1,0 +1,210 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>MahApps.Metro.IconPacks</id>
+    <version>6.2.1</version>
+    <title>MahApps.Metro.IconPacks</title>
+    <authors>Jan Karger</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>logo_small.png</icon>
+    <projectUrl>https://github.com/MahApps/MahApps.Metro.IconPacks</projectUrl>
+    <description>IconPacks for stylish awesome WPF and UWP applications.</description>
+    <releaseNotes>https://github.com/MahApps/MahApps.Metro.IconPacks/releases</releaseNotes>
+    <copyright>Copyright © 2016 - 2025 MahApps.Metro</copyright>
+    <tags>WPF UWP UAP Windows Windows10 WinRT App Universal UI Metro Modern ModernUI Material XAML Toolkit Library .NET Icon</tags>
+    <repository type="git" url="https://github.com/MahApps/MahApps.Metro.IconPacks.git" branch="main" commit="d7d1c4ab6202143fd83410d715d323a2dbddf320" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.6.2">
+        <dependency id="MahApps.Metro.IconPacks.BootstrapIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons2" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.CircumIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Codicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Coolicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Core" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Entypo" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.EvaIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FileIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontaudio" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome5" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome6" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontisto" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.ForkAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.GameIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Ionicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.JamIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.KeyruneIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Lucide" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialDesign" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialLight" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Material" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MemoryIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Microns" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MingCuteIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Modern" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MynaUIIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Octicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PhosphorIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PicolIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PixelartIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RadixIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RemixIcon" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RPGAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.SimpleIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Typicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Unicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.VaadinIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.WeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Zondicons" version="6.2.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETFramework4.7">
+        <dependency id="MahApps.Metro.IconPacks.BootstrapIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons2" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.CircumIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Codicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Coolicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Core" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Entypo" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.EvaIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FileIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontaudio" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome5" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome6" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontisto" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.ForkAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.GameIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Ionicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.JamIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.KeyruneIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Lucide" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialDesign" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialLight" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Material" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MemoryIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Microns" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MingCuteIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Modern" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MynaUIIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Octicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PhosphorIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PicolIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PixelartIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RadixIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RemixIcon" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RPGAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.SimpleIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Typicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Unicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.VaadinIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.WeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Zondicons" version="6.2.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net6.0-windows7.0">
+        <dependency id="MahApps.Metro.IconPacks.BootstrapIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons2" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.CircumIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Codicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Coolicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Core" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Entypo" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.EvaIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FileIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontaudio" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome5" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome6" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontisto" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.ForkAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.GameIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Ionicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.JamIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.KeyruneIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Lucide" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialDesign" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialLight" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Material" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MemoryIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Microns" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MingCuteIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Modern" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MynaUIIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Octicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PhosphorIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PicolIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PixelartIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RadixIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RemixIcon" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RPGAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.SimpleIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Typicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Unicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.VaadinIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.WeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Zondicons" version="6.2.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net8.0-windows7.0">
+        <dependency id="MahApps.Metro.IconPacks.BootstrapIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons2" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.BoxIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.CircumIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Codicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Coolicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Core" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Entypo" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.EvaIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FileIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontaudio" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome5" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome6" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.FontAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Fontisto" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.ForkAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.GameIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Ionicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.JamIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.KeyruneIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Lucide" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialDesign" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MaterialLight" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Material" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MemoryIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Microns" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MingCuteIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Modern" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.MynaUIIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Octicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PhosphorIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PicolIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.PixelartIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RadixIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RemixIcon" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.RPGAwesome" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.SimpleIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Typicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Unicons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.VaadinIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.WeatherIcons" version="6.2.1" exclude="Build,Analyzers" />
+        <dependency id="MahApps.Metro.IconPacks.Zondicons" version="6.2.1" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+    <frameworkReferences>
+      <group targetFramework="net6.0-windows7.0">
+        <frameworkReference name="Microsoft.WindowsDesktop.App.WPF" />
+      </group>
+      <group targetFramework="net8.0-windows7.0">
+        <frameworkReference name="Microsoft.WindowsDesktop.App.WPF" />
+      </group>
+      <group targetFramework=".NETFramework4.6.2" />
+      <group targetFramework=".NETFramework4.7" />
+    </frameworkReferences>
+  </metadata>
+</package>

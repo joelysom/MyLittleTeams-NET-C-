@@ -704,6 +704,8 @@ namespace MeuApp
                     avatarHat = new { stringValue = string.Empty },
                     avatarAccessory = new { stringValue = string.Empty },
                     avatarClothing = new { stringValue = string.Empty },
+                    galleryImages = new { arrayValue = new { } },
+                    featuredProjectIds = new { arrayValue = new { } },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -760,7 +762,9 @@ namespace MeuApp
                 AvatarHair = TryGetStringField(fields, "avatarHair"),
                 AvatarHat = TryGetStringField(fields, "avatarHat"),
                 AvatarAccessory = TryGetStringField(fields, "avatarAccessory"),
-                AvatarClothing = TryGetStringField(fields, "avatarClothing")
+                AvatarClothing = TryGetStringField(fields, "avatarClothing"),
+                GalleryImages = TryGetProfileGalleryField(fields, "galleryImages"),
+                FeaturedProjectIds = TryGetStringListField(fields, "featuredProjectIds")
             };
         }
 
@@ -772,6 +776,79 @@ namespace MeuApp
             }
 
             return string.Empty;
+        }
+
+        private List<string> TryGetStringListField(JsonElement fields, string fieldName)
+        {
+            var items = new List<string>();
+
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var values))
+            {
+                return items;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (value.TryGetProperty("stringValue", out var stringValue))
+                {
+                    var item = stringValue.GetString();
+                    if (!string.IsNullOrWhiteSpace(item))
+                    {
+                        items.Add(item);
+                    }
+                }
+            }
+
+            return items;
+        }
+
+        private List<ProfileGalleryImage> TryGetProfileGalleryField(JsonElement fields, string fieldName)
+        {
+            var images = new List<ProfileGalleryImage>();
+
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var values))
+            {
+                return images;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (!value.TryGetProperty("mapValue", out var mapValue) ||
+                    !mapValue.TryGetProperty("fields", out var imageFields))
+                {
+                    continue;
+                }
+
+                images.Add(new ProfileGalleryImage
+                {
+                    ImageId = TryGetStringField(imageFields, "imageId"),
+                    Title = TryGetStringField(imageFields, "title"),
+                    Description = TryGetStringField(imageFields, "description"),
+                    GalleryAlbumId = TryGetStringField(imageFields, "galleryAlbumId"),
+                    GalleryAlbumTitle = TryGetStringField(imageFields, "galleryAlbumTitle"),
+                    GalleryAlbumDescription = TryGetStringField(imageFields, "galleryAlbumDescription"),
+                    ImageDataUri = TryGetStringField(imageFields, "imageDataUri"),
+                    AddedAt = TryGetTimestampField(imageFields, "addedAt")
+                });
+            }
+
+            return images;
+        }
+
+        private DateTime TryGetTimestampField(JsonElement fields, string fieldName)
+        {
+            if (fields.TryGetProperty(fieldName, out var field) &&
+                field.TryGetProperty("timestampValue", out var value) &&
+                DateTime.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed.ToLocalTime();
+            }
+
+            return DateTime.MinValue;
         }
     }
 
@@ -795,6 +872,20 @@ namespace MeuApp
         public string AvatarHat { get; set; } = string.Empty;
         public string AvatarAccessory { get; set; } = string.Empty;
         public string AvatarClothing { get; set; } = string.Empty;
+        public List<ProfileGalleryImage> GalleryImages { get; set; } = new List<ProfileGalleryImage>();
+        public List<string> FeaturedProjectIds { get; set; } = new List<string>();
+    }
+
+    public class ProfileGalleryImage
+    {
+        public string ImageId { get; set; } = Guid.NewGuid().ToString("N");
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string GalleryAlbumId { get; set; } = string.Empty;
+        public string GalleryAlbumTitle { get; set; } = string.Empty;
+        public string GalleryAlbumDescription { get; set; } = string.Empty;
+        public string ImageDataUri { get; set; } = string.Empty;
+        public DateTime AddedAt { get; set; } = DateTime.Now;
     }
 
     public class AuthResult

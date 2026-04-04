@@ -48,8 +48,11 @@ namespace MeuApp
     /// </summary>
     public class TeamAssetInfo
     {
+        public string AssetId { get; set; } = Guid.NewGuid().ToString();
         public string Category { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
+        public string PreviewImageDataUri { get; set; } = string.Empty;
+        public string AddedByUserId { get; set; } = string.Empty;
         public DateTime AddedAt { get; set; }
     }
 

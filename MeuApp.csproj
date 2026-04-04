@@ -6,12 +6,16 @@
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesPath>$(MSBuildThisFileDirectory).nuget\packages</RestorePackagesPath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="MahApps.Metro" Version="2.4.10" />
     <PackageReference Include="MahApps.Metro.IconPacks" Version="6.2.1" />
     <PackageReference Include="FluentWPF" Version="0.9.0" />
+    <PackageReference Include="WpfAnimatedGif" Version="2.0.2" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,11 +28,27 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="img\Archives\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="obj_codex\**\*.cs" />
+    <Compile Remove="obj_verify\**\*.cs" />
+    <Compile Remove="bin_verify\**\*.cs" />
     <EmbeddedResource Remove="obj_codex\**\*" />
+    <EmbeddedResource Remove="obj_verify\**\*" />
+    <EmbeddedResource Remove="bin_verify\**\*" />
     <Page Remove="obj_codex\**\*.xaml" />
+    <Page Remove="obj_verify\**\*.xaml" />
+    <Page Remove="bin_verify\**\*.xaml" />
     <ApplicationDefinition Remove="obj_codex\**\*.xaml" />
+    <ApplicationDefinition Remove="obj_verify\**\*.xaml" />
+    <ApplicationDefinition Remove="bin_verify\**\*.xaml" />
     <None Remove="obj_codex\**\*" />
+    <None Remove="obj_verify\**\*" />
+    <None Remove="bin_verify\**\*" />
   </ItemGroup>
 
 </Project>

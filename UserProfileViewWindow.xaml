@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
-        Title="Detalhes do aluno" Height="760" Width="760"
+        Title="Detalhes do aluno" Height="840" Width="820"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         Background="#FFF6F8FB">
@@ -52,6 +52,43 @@
                 </Border>
 
                 <Border Background="White" CornerRadius="20" Padding="22" BorderBrush="#FFE2E8F0" BorderThickness="1" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="Galeria do currículo" FontSize="18" FontWeight="Bold" Foreground="#FF0F172A"/>
+                        <TextBlock Text="Imagens e blocos de galeria publicados pelo aluno no perfil profissional." Margin="0,8,0,0" FontSize="12" Foreground="#FF64748B"/>
+
+                        <TextBlock Text="{Binding EmptyGalleryMessage}" Visibility="{Binding EmptyGalleryVisibility}" Margin="0,12,0,0" FontSize="12" Foreground="#FF64748B" TextWrapping="Wrap"/>
+
+                        <ItemsControl ItemsSource="{Binding GalleryImages}" Visibility="{Binding GalleryVisibility}" Margin="0,14,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Click="PreviewImage_Click" Tag="{Binding}" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,12,12" Cursor="Hand">
+                                        <Border Width="{Binding CardWidth}" Height="{Binding CardHeight}" CornerRadius="18" Background="#FFF8FAFC" BorderBrush="#FFE2E8F0" BorderThickness="1" ClipToBounds="True">
+                                            <Grid>
+                                                <Image Source="{Binding PreviewImage}" Stretch="UniformToFill"/>
+                                                <Border Background="#E60F172A" CornerRadius="999" Padding="10,5" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="10" Visibility="{Binding CountLabelVisibility}">
+                                                    <TextBlock Text="{Binding CountLabel}" FontWeight="SemiBold" FontSize="10" Foreground="White"/>
+                                                </Border>
+                                                <Border VerticalAlignment="Bottom" Background="#CC0F172A" Padding="12,8">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="12" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding CardText}" FontSize="10" Foreground="#FFE2E8F0" TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="White" CornerRadius="20" Padding="22" BorderBrush="#FFE2E8F0" BorderThickness="1" Margin="0,0,0,14">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -81,6 +118,85 @@
                         <TextBlock Text="Competências" FontSize="18" FontWeight="Bold" Foreground="#FF0F172A"/>
                         <TextBlock Text="Tecnologias e habilidades preenchidas pelo aluno." Margin="0,8,0,0" FontSize="12" Foreground="#FF64748B"/>
                         <TextBlock Text="{Binding SkillsValue}" Margin="0,12,0,0" FontSize="13" Foreground="#FF0F172A" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="White" CornerRadius="20" Padding="22" BorderBrush="#FFE2E8F0" BorderThickness="1" Margin="0,0,0,14">
+                    <StackPanel>
+                        <TextBlock Text="Projetos em destaque" FontSize="18" FontWeight="Bold" Foreground="#FF0F172A"/>
+                        <TextBlock Text="Projetos que o aluno escolheu exibir no perfil. Apenas itens acessíveis pelas suas permissões aparecem aqui." Margin="0,8,0,0" FontSize="12" Foreground="#FF64748B" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding RestrictedProjectsNote}" Visibility="{Binding RestrictedProjectsNoteVisibility}" Margin="0,10,0,0" FontSize="12" Foreground="#FFB45309" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding EmptyFeaturedProjectsMessage}" Visibility="{Binding EmptyFeaturedProjectsVisibility}" Margin="0,12,0,0" FontSize="12" Foreground="#FF64748B" TextWrapping="Wrap"/>
+
+                        <ItemsControl ItemsSource="{Binding FeaturedProjects}" Visibility="{Binding FeaturedProjectsVisibility}" Margin="0,14,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#FFF8FAFC" CornerRadius="18" Padding="16" BorderBrush="#FFE2E8F0" BorderThickness="1" Margin="0,0,0,12">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel Grid.Column="0" Margin="0,0,14,0">
+                                                    <TextBlock Text="{Binding DisplayName}" FontSize="16" FontWeight="Bold" Foreground="#FF0F172A" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding Subtitle}" Margin="0,6,0,0" FontSize="12" Foreground="#FF64748B" TextWrapping="Wrap"/>
+                                                </StackPanel>
+
+                                                <Border Grid.Column="1" Background="#FFEFF6FF" CornerRadius="999" Padding="10,5" VerticalAlignment="Top">
+                                                    <TextBlock Text="{Binding ProgressLabel}" Foreground="#FF1D4ED8" FontWeight="SemiBold" FontSize="11"/>
+                                                </Border>
+                                            </Grid>
+
+                                            <WrapPanel Margin="0,12,0,0">
+                                                <Border Background="#FFF1F5F9" CornerRadius="999" Padding="10,5" Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding StatusLabel}" Foreground="#FF334155" FontWeight="SemiBold" FontSize="11"/>
+                                                </Border>
+                                                <Border Background="#FFF8FAFC" CornerRadius="999" Padding="10,5" Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding MembersLabel}" Foreground="#FF475569" FontWeight="SemiBold" FontSize="11"/>
+                                                </Border>
+                                                <Border Background="#FFF0FDF4" CornerRadius="999" Padding="10,5" Margin="0,0,8,8">
+                                                    <TextBlock Text="{Binding DeadlineLabel}" Foreground="#FF166534" FontWeight="SemiBold" FontSize="11"/>
+                                                </Border>
+                                            </WrapPanel>
+
+                                            <TextBlock Text="{Binding Summary}" Margin="0,12,0,0" FontSize="12" Foreground="#FF334155" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding UpdatedAtLabel}" Margin="0,8,0,0" FontSize="11" Foreground="#FF64748B"/>
+                                            <TextBlock Text="{Binding EmptyPreviewMessage}" Visibility="{Binding EmptyPreviewVisibility}" Margin="0,12,0,0" FontSize="12" Foreground="#FF64748B" TextWrapping="Wrap"/>
+
+                                            <ItemsControl ItemsSource="{Binding PreviewImages}" Visibility="{Binding PreviewImagesVisibility}" Margin="0,14,0,0">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Button Click="PreviewImage_Click" Tag="{Binding}" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,10,10" Cursor="Hand">
+                                                            <Border Width="{Binding CardWidth}" Height="{Binding CardHeight}" CornerRadius="16" Background="#FFF1F5F9" BorderBrush="#FFE2E8F0" BorderThickness="1" ClipToBounds="True">
+                                                                <Grid>
+                                                                    <Image Source="{Binding PreviewImage}" Stretch="UniformToFill"/>
+                                                                    <Border Background="#E60F172A" CornerRadius="999" Padding="8,4" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Visibility="{Binding CountLabelVisibility}">
+                                                                        <TextBlock Text="{Binding CountLabel}" FontWeight="SemiBold" FontSize="9" Foreground="White"/>
+                                                                    </Border>
+                                                                    <Border VerticalAlignment="Bottom" Background="#CC0F172A" Padding="8,6">
+                                                                        <StackPanel>
+                                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="11" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                                                                            <TextBlock Text="{Binding CardText}" FontSize="9" Foreground="#FFE2E8F0" TextTrimming="CharacterEllipsis"/>
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </Grid>
+                                                            </Border>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </Border>
 
