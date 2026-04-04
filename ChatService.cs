@@ -71,8 +71,8 @@ namespace MeuApp
                         content = new { stringValue = content },
                         messageType = new { stringValue = string.IsNullOrWhiteSpace(messageType) ? "text" : messageType },
                         stickerAsset = new { stringValue = stickerAsset ?? string.Empty },
-                        isEdited = new { boolValue = false },
-                        isDeleted = new { boolValue = false },
+                        isEdited = new { booleanValue = false },
+                        isDeleted = new { booleanValue = false },
                         timestamp = new { timestampValue = timestampText },
                         createdAt = new { timestampValue = timestampText },
                         recipientId = new { stringValue = contactId }
@@ -139,7 +139,7 @@ namespace MeuApp
                     fields = new Dictionary<string, object>
                     {
                         ["content"] = new { stringValue = updatedContent },
-                        ["isEdited"] = new { boolValue = true },
+                        ["isEdited"] = new { booleanValue = true },
                         ["editedAt"] = new { timestampValue = editedAtText }
                     }
                 });
@@ -149,6 +149,7 @@ namespace MeuApp
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
 
+                LogMessageMutationContext("UpdateMessage", conversationId, documentId, message, patchBody);
                 LogRequest("UpdateMessage", request.Method.Method, url, patchBody);
 
                 var response = await httpClient.SendAsync(request);
@@ -158,7 +159,8 @@ namespace MeuApp
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ChatOperationResult.Fail(BuildDetailedErrorMessage(response, responseBody));
+                    DebugHelper.WriteLine($"[ChatService.UpdateMessage] Falha ao editar {documentId}: {DescribeMessageForLog(message)}");
+                    return ChatOperationResult.Fail(AttachLogPath(BuildDetailedErrorMessage(response, responseBody)));
                 }
 
                 await SyncConversationSummaryAsync(contactId);
@@ -167,7 +169,8 @@ namespace MeuApp
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[ChatService.UpdateMessage] ERRO: {ex.Message}");
-                return ChatOperationResult.Fail($"{ex.GetType().Name}: {ex.Message}");
+                DebugHelper.WriteLine($"[ChatService.UpdateMessage] Stack: {ex.StackTrace}");
+                return ChatOperationResult.Fail(AttachLogPath($"{ex.GetType().Name}: {ex.Message}"));
             }
         }
 
@@ -197,7 +200,7 @@ namespace MeuApp
                         ["content"] = new { stringValue = deletedContent },
                         ["messageType"] = new { stringValue = "deleted" },
                         ["stickerAsset"] = new { stringValue = string.Empty },
-                        ["isDeleted"] = new { boolValue = true },
+                        ["isDeleted"] = new { booleanValue = true },
                         ["deletedAt"] = new { timestampValue = deletedAtText }
                     }
                 });
@@ -207,6 +210,7 @@ namespace MeuApp
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
 
+                LogMessageMutationContext("DeleteMessage", conversationId, documentId, message, patchBody);
                 LogRequest("DeleteMessage", request.Method.Method, url, patchBody);
 
                 var response = await httpClient.SendAsync(request);
@@ -216,7 +220,8 @@ namespace MeuApp
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return ChatOperationResult.Fail(BuildDetailedErrorMessage(response, responseBody));
+                    DebugHelper.WriteLine($"[ChatService.DeleteMessage] Falha ao apagar {documentId}: {DescribeMessageForLog(message)}");
+                    return ChatOperationResult.Fail(AttachLogPath(BuildDetailedErrorMessage(response, responseBody)));
                 }
 
                 await SyncConversationSummaryAsync(contactId);
@@ -225,7 +230,8 @@ namespace MeuApp
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[ChatService.DeleteMessage] ERRO: {ex.Message}");
-                return ChatOperationResult.Fail($"{ex.GetType().Name}: {ex.Message}");
+                DebugHelper.WriteLine($"[ChatService.DeleteMessage] Stack: {ex.StackTrace}");
+                return ChatOperationResult.Fail(AttachLogPath($"{ex.GetType().Name}: {ex.Message}"));
             }
         }
 
@@ -809,7 +815,7 @@ namespace MeuApp
         private static bool GetBoolField(JsonElement fields, string fieldName)
         {
             if (fields.TryGetProperty(fieldName, out var field) &&
-                field.TryGetProperty("boolValue", out var value))
+                field.TryGetProperty("booleanValue", out var value))
             {
                 return value.GetBoolean();
             }
@@ -907,6 +913,38 @@ namespace MeuApp
         private static string BuildDeletedMessageText(string senderName)
         {
             return $"'{(string.IsNullOrWhiteSpace(senderName) ? "Usuário" : senderName)}' apagou essa mensagem (X)";
+        }
+
+        private static void LogMessageMutationContext(string operation, string conversationId, string documentId, ChatMessage message, string patchBody)
+        {
+            DebugHelper.WriteLine($"[ChatService.{operation}] ConversationId={conversationId} | DocumentId={documentId}");
+            DebugHelper.WriteLine($"[ChatService.{operation}] MessageSnapshot: {DescribeMessageForLog(message)}");
+            DebugHelper.WriteLine($"[ChatService.{operation}] PatchBody: {patchBody}");
+        }
+
+        private static string DescribeMessageForLog(ChatMessage? message)
+        {
+            if (message == null)
+            {
+                return "<null>";
+            }
+
+            return $"MessageId={message.MessageId}; DocumentId={message.DocumentId}; SenderId={message.SenderId}; SenderName={SanitizeForLog(message.SenderName)}; MessageType={message.MessageType}; IsEdited={message.IsEdited}; IsDeleted={message.IsDeleted}; Timestamp={message.Timestamp:O}; EditedAt={message.EditedAt:O}; DeletedAt={message.DeletedAt:O}; Content={SanitizeForLog(message.Content)}";
+        }
+
+        private static string SanitizeForLog(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "<empty>";
+            }
+
+            return value.Replace("\r", "\\r").Replace("\n", "\\n");
+        }
+
+        private static string AttachLogPath(string message)
+        {
+            return $"{message} | Log: {DebugHelper.GetLogFilePath()}";
         }
 
         private static string ResolveMessageDocumentId(ChatMessage message)

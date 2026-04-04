@@ -24,7 +24,7 @@
                     <SolidColorBrush Color="#FF1F1F1F"/>
                 </Setter.Value>
             </Setter>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Padding" Value="14,12"/>
             <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
@@ -55,7 +55,7 @@
                     <SolidColorBrush Color="#FF1F1F1F"/>
                 </Setter.Value>
             </Setter>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Padding" Value="14,12"/>
             <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
@@ -66,7 +66,7 @@
         <Style x:Key="PrimaryButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="#FF0078D4"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="16,12"/>
@@ -96,7 +96,7 @@
         <Style x:Key="SecondaryButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="White"/>
             <Setter Property="Foreground" Value="#FF0078D4"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="16,10"/>
@@ -125,7 +125,7 @@
         <Style x:Key="TabButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#FF717171"/>
-            <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppDisplayFontFamily}"/>
             <Setter Property="FontSize" Value="15"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="0,8,0,8"/>

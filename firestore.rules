@@ -21,6 +21,95 @@ service cloud.firestore {
       );
     }
 
+    function hasOptionalTimestamp(data, fieldName) {
+      return !(fieldName in data) || data[fieldName] is timestamp;
+    }
+
+    function hasOptionalString(data, fieldName) {
+      return !(fieldName in data) || data[fieldName] is string;
+    }
+
+    function hasOptionalBool(data, fieldName) {
+      return !(fieldName in data) || data[fieldName] is bool;
+    }
+
+    function messageTypeOf(data) {
+      return data.get('messageType', 'text');
+    }
+
+    function messageStickerAssetOf(data) {
+      return data.get('stickerAsset', '');
+    }
+
+    function messageIsEdited(data) {
+      return data.get('isEdited', false) == true;
+    }
+
+    function messageIsDeleted(data) {
+      return data.get('isDeleted', false) == true || messageTypeOf(data) == 'deleted';
+    }
+
+    function validConversationMessageCreate(data, messageId) {
+      return data.messageId is string
+        && data.messageId == messageId
+        && data.senderId is string
+        && data.senderId == request.auth.uid
+        && data.senderName is string
+        && data.recipientId is string
+        && data.content is string
+        && data.messageType is string
+        && data.stickerAsset is string
+        && data.isEdited is bool
+        && data.isEdited == false
+        && data.isDeleted is bool
+        && data.isDeleted == false
+        && data.timestamp is timestamp
+        && data.createdAt is timestamp
+        && hasOptionalTimestamp(data, 'editedAt')
+        && hasOptionalTimestamp(data, 'deletedAt');
+    }
+
+    function canMutateOwnMessage(oldData) {
+      return oldData.senderId is string
+        && oldData.senderId == request.auth.uid;
+    }
+
+    function validConversationMessageEdit(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+          'content',
+          'isEdited',
+          'editedAt'
+        ])
+        && messageTypeOf(oldData) == 'text'
+        && !messageIsDeleted(oldData)
+        && newData.content is string
+        && newData.content.size() > 0
+        && messageStickerAssetOf(newData) == messageStickerAssetOf(oldData)
+        && messageIsEdited(newData)
+        && newData.editedAt is timestamp
+        && !messageIsDeleted(newData)
+        && !('deletedAt' in newData);
+    }
+
+    function validConversationMessageSoftDelete(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+          'content',
+          'messageType',
+          'stickerAsset',
+          'isDeleted',
+          'deletedAt'
+        ])
+        && !messageIsDeleted(oldData)
+        && newData.content is string
+        && newData.messageType == 'deleted'
+        && newData.stickerAsset is string
+        && newData.stickerAsset == ''
+        && messageIsDeleted(newData)
+        && newData.deletedAt is timestamp
+        && messageIsEdited(newData) == messageIsEdited(oldData)
+        && newData.get('editedAt', null) == oldData.get('editedAt', null);
+    }
+
     function teamVisible(data) {
       return signedIn() && (
         data.createdBy == request.auth.uid ||
@@ -177,14 +266,16 @@ service cloud.firestore {
       allow read: if isParticipantById(conversationId);
 
       allow create: if isParticipantById(conversationId)
-        && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.content is string
+        && validConversationMessageCreate(request.resource.data, messageId);
+
+      allow update: if isParticipantById(conversationId)
+        && canMutateOwnMessage(resource.data)
         && (
-          request.resource.data.createdAt is timestamp ||
-          request.resource.data.timestamp is timestamp
+          validConversationMessageEdit(request.resource.data, resource.data) ||
+          validConversationMessageSoftDelete(request.resource.data, resource.data)
         );
 
-      allow update, delete: if false;
+      allow delete: if false;
     }
 
     match /teams/{teamId} {

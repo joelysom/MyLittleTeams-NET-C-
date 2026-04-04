@@ -239,3 +239,41 @@
 [2026-04-03 18:50:52.837] Startup completed successfully
 [2026-04-03 19:12:30.064] === App started at 2026-04-03 19:12:30.046 ===
 [2026-04-03 19:12:30.067] Startup completed successfully
+[2026-04-04 02:27:54.408] === App started at 2026-04-04 02:27:54.389 ===
+[2026-04-04 02:27:54.519] Startup completed successfully
+[2026-04-04 02:34:20.210] === App started at 2026-04-04 02:34:19.800 ===
+[2026-04-04 02:34:20.213] Startup completed successfully
+[2026-04-04 02:39:23.416] === App started at 2026-04-04 02:39:23.397 ===
+[2026-04-04 02:39:23.538] Startup completed successfully
+[2026-04-04 02:43:17.947] === App started at 2026-04-04 02:43:17.929 ===
+[2026-04-04 02:43:17.954] Startup completed successfully
+[2026-04-04 02:46:55.175] === App started at 2026-04-04 02:46:55.158 ===
+[2026-04-04 02:46:55.178] Startup completed successfully
+[2026-04-04 02:49:37.564] === App started at 2026-04-04 02:49:37.450 ===
+[2026-04-04 02:49:37.567] Startup completed successfully
+[2026-04-04 02:56:41.556] === App started at 2026-04-04 02:56:41.538 ===
+[2026-04-04 02:56:41.762] Startup completed successfully
+[2026-04-04 03:03:52.147] === App started at 2026-04-04 03:03:52.128 ===
+[2026-04-04 03:03:52.379] Startup completed successfully
+[2026-04-04 03:21:39.856] === App started at 2026-04-04 03:21:39.841 ===
+[2026-04-04 03:21:40.839] Startup completed successfully
+[2026-04-04 03:24:03.898] === App started at 2026-04-04 03:24:03.879 ===
+[2026-04-04 03:24:03.901] Startup completed successfully
+[2026-04-04 03:38:53.142] === App started at 2026-04-04 03:38:53.120 ===
+[2026-04-04 03:38:55.800] Startup completed successfully
+[2026-04-04 03:49:13.822] === App started at 2026-04-04 03:49:13.802 ===
+[2026-04-04 03:49:13.843] Startup completed successfully
+[2026-04-04 03:50:11.675] [UI_ERROR] 'O valor fornecido em 'System.Windows.Baml2006.TypeConverterMarkupExtension' iniciou uma exceção.' Número de linha '261' e posição de linha '30'.
+   at System.Windows.Markup.XamlReader.RewrapException(Exception e, IXamlLineInfo lineInfo, Uri baseUri)
+   at System.Windows.Markup.WpfXamlLoader.Load(XamlReader xamlReader, IXamlObjectWriterFactory writerFactory, Boolean skipJournaledProperties, Object rootObject, XamlObjectWriterSettings settings, Uri baseUri)
+   at System.Windows.Markup.XamlReader.LoadBaml(Stream stream, ParserContext parserContext, Object parent, Boolean closeStream)
+   at System.Windows.Application.LoadComponent(Object component, Uri resourceLocator)
+   at MeuApp.MainWindow.InitializeComponent() in D:\react-js\NETC#\MainWindow.xaml:line 1
+   at MeuApp.MainWindow..ctor() in D:\react-js\NETC#\MainWindow.xaml.cs:line 217
+   at MeuApp.MainWindow..ctor(UserProfile profile, String idToken) in D:\react-js\NETC#\MainWindow.xaml.cs:line 271
+   at MeuApp.LoginWindow.LoginButton_Click(Object sender, RoutedEventArgs e) in D:\react-js\NETC#\LoginWindow.xaml.cs:line 126
+   at System.Threading.Tasks.Task.<>c.<ThrowAsync>b__128_0(Object state)
+   at System.Windows.Threading.ExceptionWrapper.InternalRealCall(Delegate callback, Object args, Int32 numArgs)
+   at System.Windows.Threading.ExceptionWrapper.TryCatchWhen(Object source, Delegate callback, Object args, Int32 numArgs, Delegate catchHandler)
+[2026-04-04 04:20:58.659] === App started at 2026-04-04 04:20:58.643 ===
+[2026-04-04 04:20:59.089] Startup completed successfully

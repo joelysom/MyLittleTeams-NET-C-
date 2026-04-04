@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -15,7 +16,9 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using MahApps.Metro.Controls;
+using MahApps.Metro.IconPacks;
 using Microsoft.Win32;
 
 namespace MeuApp
@@ -198,12 +201,16 @@ namespace MeuApp
         private readonly HashSet<string> _connectedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<UserInfo?>> _userInfoCache = new ConcurrentDictionary<string, Task<UserInfo?>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<UserProfile?>> _userProfileCache = new ConcurrentDictionary<string, Task<UserProfile?>>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, ImageSource?> _avatarImageCache = new ConcurrentDictionary<string, ImageSource?>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, ImageSource?> _stickerImageCache = new ConcurrentDictionary<string, ImageSource?>(StringComparer.OrdinalIgnoreCase);
         private List<UserConnectionInfo> _connectionEntries = new List<UserConnectionInfo>();
         private List<UserInfo> _searchSlideResults = new List<UserInfo>();
         private string _searchSlideQuery = string.Empty;
         private int _searchSlideTypingVersion = 0;
         private int _searchSlideRequestVersion = 0;
         private int _teamSyncSequence = 0;
+        private int _chatRenderSequence = 0;
+        private int _teamWorkspaceRenderSequence = 0;
 
         public MainWindow()
         {
@@ -225,10 +232,11 @@ namespace MeuApp
                 _connectionService = new ConnectionService(_idToken, _currentProfile);
 
                 RenderChatsLoadingState();
-                await Task.WhenAll(
-                    LoadActiveConversationsAsync(),
-                    LoadTeamsFromDatabaseAsync(),
-                    RefreshConnectionsCacheAsync());
+                await Dispatcher.Yield(DispatcherPriority.Background);
+
+                await LoadActiveConversationsAsync();
+                _ = LoadTeamsFromDatabaseAsync();
+                _ = RefreshConnectionsCacheAsync();
             }
             else
             {
@@ -345,6 +353,7 @@ namespace MeuApp
             SidebarUserRole.Text = $"{profile.Course} | Matrícula: {profile.Registration}";
             PopulateProfessionalProfileFields(profile);
             RefreshAvatarUi(profile);
+            SyncCurrentUserAvatarAcrossTeams(profile);
             SyncTeamDefaultsWithProfile(profile);
         }
 
@@ -747,15 +756,68 @@ namespace MeuApp
         {
             if (_activeTeamWorkspace == null)
             {
+                _teamWorkspaceRenderSequence++;
                 TeamWorkspaceHost.Content = null;
                 UpdateTeamsViewState();
                 return;
             }
 
             EnsureTeamWorkspaceDefaults(_activeTeamWorkspace);
-            TeamWorkspaceHost.Content = CreateTeamWorkspaceContent(_activeTeamWorkspace);
-
             UpdateTeamsViewState();
+            QueueTeamWorkspaceRender();
+        }
+
+        private async void QueueTeamWorkspaceRender()
+        {
+            var team = _activeTeamWorkspace;
+            if (team == null)
+            {
+                return;
+            }
+
+            var renderSequence = ++_teamWorkspaceRenderSequence;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            if (renderSequence != _teamWorkspaceRenderSequence || !ReferenceEquals(team, _activeTeamWorkspace))
+            {
+                return;
+            }
+
+            TeamWorkspaceHost.Content = CreateTeamWorkspaceContent(team);
+        }
+
+        private UIElement CreateTeamWorkspaceLoadingState(TeamWorkspaceInfo team)
+        {
+            return new Border
+            {
+                Margin = new Thickness(22),
+                Padding = new Thickness(28),
+                CornerRadius = new CornerRadius(24),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = $"Abrindo {team.TeamName}",
+                            FontSize = 22,
+                            FontWeight = FontWeights.ExtraBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = "Montando cards, métricas e atividades da equipe em segundo plano.",
+                            Margin = new Thickness(0, 10, 0, 0),
+                            FontSize = 12,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    }
+                }
+            };
         }
 
         private UIElement CreateTeamWorkspaceContent(TeamWorkspaceInfo team)
@@ -817,6 +879,7 @@ namespace MeuApp
             titleStack.Children.Add(new TextBlock
             {
                 Text = team.TeamName,
+                FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 22,
                 FontWeight = FontWeights.ExtraBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
@@ -844,14 +907,14 @@ namespace MeuApp
                 VerticalAlignment = VerticalAlignment.Top
             };
 
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Copiar codigo", Color.FromRgb(14, 165, 233), CopyTeamCode_Click));
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Adicionar membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team)));
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team)));
+            actions.Children.Add(CreateTeamWorkspaceActionButton("Copiar codigo", Color.FromRgb(14, 165, 233), CopyTeamCode_Click, PackIconMaterialKind.ContentCopy));
+            actions.Children.Add(CreateTeamWorkspaceActionButton("Adicionar membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
+            actions.Children.Add(CreateTeamWorkspaceActionButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
             if (IsCurrentUserTeamCreator(team))
             {
-                actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace));
+                actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace, PackIconMaterialKind.DeleteOutline));
             }
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Fechar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click));
+            actions.Children.Add(CreateTeamWorkspaceActionButton("Fechar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click, PackIconMaterialKind.Close));
 
             Grid.SetColumn(actions, 1);
             grid.Children.Add(actions);
@@ -1017,12 +1080,15 @@ namespace MeuApp
             return border;
         }
 
-        private Button CreateTeamWorkspaceActionButton(string text, Color backgroundColor, RoutedEventHandler onClick)
+        private Button CreateTeamWorkspaceActionButton(string text, Color backgroundColor, RoutedEventHandler onClick, PackIconMaterialKind? iconKind = null)
         {
+            var backgroundBrush = new SolidColorBrush(backgroundColor);
             var button = new Button
             {
-                Content = text,
-                Background = new SolidColorBrush(backgroundColor),
+                Content = iconKind.HasValue
+                    ? CreateIconLabelContent(text, iconKind.Value, Brushes.White, Brushes.White, 14, 12, FontWeights.SemiBold)
+                    : text,
+                Background = backgroundBrush,
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(16, 10, 16, 10),
@@ -1910,7 +1976,7 @@ namespace MeuApp
                 TextWrapping = TextWrapping.Wrap
             });
 
-            content.Children.Add(CreateSidebarButton("Atualizar progresso e prazo", Color.FromRgb(14, 165, 233), (s, e) => OpenProjectManagementDialog(team)));
+            content.Children.Add(CreateSidebarButton("Atualizar progresso e prazo", Color.FromRgb(14, 165, 233), (s, e) => OpenProjectManagementDialog(team), PackIconMaterialKind.Refresh));
             return border;
         }
 
@@ -1967,7 +2033,7 @@ namespace MeuApp
                 }
             }
 
-            content.Children.Add(CreateSidebarButton("Abrir chat do projeto", Color.FromRgb(37, 99, 235), (s, e) => OpenProjectChatDialog(team)));
+            content.Children.Add(CreateSidebarButton("Abrir chat do projeto", Color.FromRgb(37, 99, 235), (s, e) => OpenProjectChatDialog(team), PackIconMaterialKind.MessageTextOutline));
             return border;
         }
 
@@ -1987,7 +2053,7 @@ namespace MeuApp
             overview.Children.Add(CreateSidebarMiniMetric("Concluidas", completedCount.ToString(), Color.FromRgb(16, 185, 129)));
             overview.Children.Add(CreateSidebarMiniMetric("Proxima", nextMilestone?.DueDate.HasValue == true ? FormatRelativeDate(nextMilestone.DueDate.Value) : "Sem prazo", Color.FromRgb(245, 158, 11)));
             content.Children.Add(overview);
-            content.Children.Add(CreateSidebarButton("Adicionar entrega", Color.FromRgb(124, 58, 237), (s, e) => OpenAddMilestoneDialog(team)));
+            content.Children.Add(CreateSidebarButton("Adicionar entrega", Color.FromRgb(124, 58, 237), (s, e) => OpenAddMilestoneDialog(team), PackIconMaterialKind.FlagCheckered));
 
             if (team.Milestones.Count == 0)
             {
@@ -2127,10 +2193,10 @@ namespace MeuApp
 
             content.Children.Add(membersWrap);
             var actions = new WrapPanel();
-            actions.Children.Add(CreateSidebarButton("Adicionar novo membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team)));
+            actions.Children.Add(CreateSidebarButton("Adicionar novo membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
             if (team.Members.Count > 1)
             {
-                actions.Children.Add(CreateSidebarButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team)));
+                actions.Children.Add(CreateSidebarButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
             }
 
             content.Children.Add(actions);
@@ -2153,9 +2219,9 @@ namespace MeuApp
             content.Children.Add(stats);
 
             var actions = new WrapPanel();
-            actions.Children.Add(CreateSidebarButton("Imagens", Color.FromRgb(14, 165, 233), (s, e) => AddTeamAsset("imagens")));
-            actions.Children.Add(CreateSidebarButton("Documentos", Color.FromRgb(37, 99, 235), (s, e) => AddTeamAsset("documentos")));
-            actions.Children.Add(CreateSidebarButton("Planos", Color.FromRgb(16, 185, 129), (s, e) => AddTeamAsset("planos")));
+            actions.Children.Add(CreateSidebarButton("Imagens", Color.FromRgb(14, 165, 233), (s, e) => AddTeamAsset("imagens"), PackIconMaterialKind.ImageOutline));
+            actions.Children.Add(CreateSidebarButton("Documentos", Color.FromRgb(37, 99, 235), (s, e) => AddTeamAsset("documentos"), PackIconMaterialKind.FileDocumentOutline));
+            actions.Children.Add(CreateSidebarButton("Planos", Color.FromRgb(16, 185, 129), (s, e) => AddTeamAsset("planos"), PackIconMaterialKind.ClipboardTextOutline));
             content.Children.Add(actions);
 
             if (team.Assets.Count == 0)
@@ -2323,8 +2389,9 @@ namespace MeuApp
             stack.Children.Add(new TextBlock
             {
                 Text = title,
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
             stack.Children.Add(new TextBlock
@@ -2339,12 +2406,15 @@ namespace MeuApp
             return border;
         }
 
-        private Button CreateSidebarButton(string text, Color color, RoutedEventHandler onClick)
+        private Button CreateSidebarButton(string text, Color color, RoutedEventHandler onClick, PackIconMaterialKind? iconKind = null)
         {
+            var backgroundBrush = new SolidColorBrush(color);
             var button = new Button
             {
-                Content = text,
-                Background = new SolidColorBrush(color),
+                Content = iconKind.HasValue
+                    ? CreateIconLabelContent(text, iconKind.Value, Brushes.White, Brushes.White, 14, 12, FontWeights.SemiBold)
+                    : text,
+                Background = backgroundBrush,
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(12, 8, 12, 8),
@@ -2387,6 +2457,7 @@ namespace MeuApp
             textStack.Children.Add(new TextBlock
             {
                 Text = team.TeamName,
+                FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 16,
                 FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
@@ -2628,13 +2699,38 @@ namespace MeuApp
             };
 
             var stack = new StackPanel();
-            stack.Children.Add(new TextBlock
+            var titleIconKind = mode switch
+            {
+                ConnectionSectionMode.IncomingRequests => PackIconMaterialKind.AccountPlusOutline,
+                ConnectionSectionMode.Notifications => PackIconMaterialKind.BellOutline,
+                ConnectionSectionMode.OutgoingRequests => PackIconMaterialKind.SendOutline,
+                _ => PackIconMaterialKind.AccountGroupOutline
+            };
+            var titleIconBrush = mode switch
+            {
+                ConnectionSectionMode.IncomingRequests => new SolidColorBrush(Color.FromRgb(14, 165, 233)),
+                ConnectionSectionMode.Notifications => new SolidColorBrush(Color.FromRgb(245, 158, 11)),
+                ConnectionSectionMode.OutgoingRequests => new SolidColorBrush(Color.FromRgb(124, 58, 237)),
+                _ => new SolidColorBrush(Color.FromRgb(16, 185, 129))
+            };
+
+            var titleRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var titleIcon = CreateMaterialIcon(titleIconKind, titleIconBrush, 18);
+            titleIcon.Margin = new Thickness(0, 0, 10, 0);
+            titleRow.Children.Add(titleIcon);
+            titleRow.Children.Add(new TextBlock
             {
                 Text = title,
+                FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 16,
-                FontWeight = FontWeights.SemiBold,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
+            stack.Children.Add(titleRow);
             stack.Children.Add(new TextBlock
             {
                 Text = subtitle,
@@ -3533,7 +3629,7 @@ namespace MeuApp
         {
             var pendingMembers = teams
                 .SelectMany(team => team.Members)
-                .Where(member => !HasCustomAvatar(member) && !string.IsNullOrWhiteSpace(member.UserId))
+                .Where(member => !string.IsNullOrWhiteSpace(member.UserId))
                 .ToList();
 
             if (pendingMembers.Count == 0)
@@ -3560,11 +3656,78 @@ namespace MeuApp
                     continue;
                 }
 
+                member.Name = string.IsNullOrWhiteSpace(user.Name) ? member.Name : user.Name;
+                member.Email = string.IsNullOrWhiteSpace(user.Email) ? member.Email : user.Email;
+                member.Registration = string.IsNullOrWhiteSpace(user.Registration) ? member.Registration : user.Registration;
+                member.Course = string.IsNullOrWhiteSpace(user.Course) ? member.Course : user.Course;
                 member.AvatarBody = user.AvatarBody;
                 member.AvatarHair = user.AvatarHair;
                 member.AvatarHat = user.AvatarHat;
                 member.AvatarAccessory = user.AvatarAccessory;
                 member.AvatarClothing = user.AvatarClothing;
+            }
+        }
+
+        private void SyncCurrentUserAvatarAcrossTeams(UserProfile profile)
+        {
+            if (string.IsNullOrWhiteSpace(profile.UserId))
+            {
+                return;
+            }
+
+            var updatedAny = false;
+
+            foreach (var team in _teamWorkspaces)
+            {
+                foreach (var member in team.Members)
+                {
+                    if (!string.Equals(member.UserId, profile.UserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    member.Name = string.IsNullOrWhiteSpace(profile.Name) ? member.Name : profile.Name;
+                    member.Email = string.IsNullOrWhiteSpace(profile.Email) ? member.Email : profile.Email;
+                    member.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? member.Registration : profile.Registration;
+                    member.Course = string.IsNullOrWhiteSpace(profile.Course) ? member.Course : profile.Course;
+                    member.AvatarBody = profile.AvatarBody;
+                    member.AvatarHair = profile.AvatarHair;
+                    member.AvatarHat = profile.AvatarHat;
+                    member.AvatarAccessory = profile.AvatarAccessory;
+                    member.AvatarClothing = profile.AvatarClothing;
+                    updatedAny = true;
+                }
+            }
+
+            foreach (var member in _draftTeamMembers)
+            {
+                if (!string.Equals(member.UserId, profile.UserId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                member.Name = string.IsNullOrWhiteSpace(profile.Name) ? member.Name : profile.Name;
+                member.Email = string.IsNullOrWhiteSpace(profile.Email) ? member.Email : profile.Email;
+                member.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? member.Registration : profile.Registration;
+                member.Course = string.IsNullOrWhiteSpace(profile.Course) ? member.Course : profile.Course;
+                member.AvatarBody = profile.AvatarBody;
+                member.AvatarHair = profile.AvatarHair;
+                member.AvatarHat = profile.AvatarHat;
+                member.AvatarAccessory = profile.AvatarAccessory;
+                member.AvatarClothing = profile.AvatarClothing;
+                updatedAny = true;
+            }
+
+            if (!updatedAny)
+            {
+                return;
+            }
+
+            RenderTeamMembersDraft();
+            RenderTeamsList();
+            if (_activeTeamWorkspace != null)
+            {
+                RenderTeamWorkspace();
             }
         }
 
@@ -3785,15 +3948,35 @@ namespace MeuApp
 
         private ImageSource? TryCreateAvatarImageSource(string folder, string option)
         {
-            try
+            if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(option))
             {
-                return new BitmapImage(new Uri($"pack://application:,,,/img/avatar/{folder}/{option}.png", UriKind.Absolute));
-            }
-            catch (Exception ex)
-            {
-                DebugHelper.WriteLine($"[Avatar] Falha ao carregar recurso {folder}/{option}.png: {ex.Message}");
                 return null;
             }
+
+            var cacheKey = $"{folder}/{option}";
+            return _avatarImageCache.GetOrAdd(cacheKey, _ =>
+            {
+                try
+                {
+                    return CreateFrozenBitmapImage(new Uri($"pack://application:,,,/img/avatar/{folder}/{option}.png", UriKind.Absolute));
+                }
+                catch (Exception ex)
+                {
+                    DebugHelper.WriteLine($"[Avatar] Falha ao carregar recurso {folder}/{option}.png: {ex.Message}");
+                    return null;
+                }
+            });
+        }
+
+        private static BitmapImage CreateFrozenBitmapImage(Uri uri)
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = uri;
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
         }
 
         private UIElement CreateAvatarOptionPreview(string body, string hair, string hat, string accessory, string clothing, string? overlayLabel = null)
@@ -4121,6 +4304,7 @@ namespace MeuApp
             var selectedClothing = NormalizeAvatarOption(_currentProfile.AvatarClothing, AvatarClothingOptions, AvatarClothingOptions.First());
             var selectedHairPresentationFilter = "Todos";
             var selectedHairLengthFilter = "Todos";
+            const string avatarEditorReadyHint = "Ao aplicar, o personagem é atualizado na tela e salvo no Firebase imediatamente.";
 
             var dialog = new MetroWindow
             {
@@ -4207,7 +4391,8 @@ namespace MeuApp
                 Margin = new Thickness(0, 16, 0, 0),
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
-                TextWrapping = TextWrapping.Wrap
+                TextWrapping = TextWrapping.Wrap,
+                Text = "Preparando prévia do personagem..."
             };
 
             previewStack.Children.Add(previewHost);
@@ -4415,9 +4600,6 @@ namespace MeuApp
                 }
             }
 
-            RenderEditorOptions();
-            RenderEditorPreview();
-
             Grid.SetRow(contentGrid, 1);
             root.Children.Add(contentGrid);
 
@@ -4431,7 +4613,7 @@ namespace MeuApp
 
             var footerHint = new TextBlock
             {
-                Text = "Ao aplicar, o personagem é atualizado na tela e salvo no Firebase imediatamente.",
+                Text = "Preparando opções do personagem...",
                 VerticalAlignment = VerticalAlignment.Center,
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -4534,6 +4716,14 @@ namespace MeuApp
 
             Grid.SetRow(footer, 2);
             root.Children.Add(footer);
+
+            dialog.Loaded += async (_, __) =>
+            {
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                RenderEditorOptions();
+                RenderEditorPreview();
+                footerHint.Text = avatarEditorReadyHint;
+            };
 
             dialog.Content = root;
             dialog.ShowDialog();
@@ -5061,6 +5251,7 @@ namespace MeuApp
 
             _activeTeamWorkspace = team;
             _activeTeamBoardView = TeamBoardView.Trello;
+            TeamWorkspaceHost.Content = CreateTeamWorkspaceLoadingState(team);
             RenderTeamWorkspace();
         }
 
@@ -5200,17 +5391,7 @@ namespace MeuApp
 
         private (TeamTaskCardInfo Card, string TargetColumnId)? CreateTaskDialog(TeamWorkspaceInfo team, TeamTaskColumnInfo? currentColumn, TeamTaskCardInfo? existingCard)
         {
-            var dialog = new Window
-            {
-                Title = existingCard == null ? "Nova tarefa" : "Editar tarefa",
-                Width = 560,
-                Height = 720,
-                MinHeight = 680,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("SurfaceBrush")
-            };
+            var dialog = CreateStyledDialogWindow(existingCard == null ? "Nova tarefa" : "Editar tarefa", 560, 720, 680);
 
             var root = new Grid { Margin = new Thickness(20) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -5349,29 +5530,12 @@ namespace MeuApp
             root.Children.Add(footer);
 
             var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                Width = 110,
-                Height = 40,
-                Margin = new Thickness(0, 0, 10, 0),
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush")
-            };
-            var saveButton = new Button
-            {
-                Content = existingCard == null ? "Confirmar adicao" : "Confirmar alteracao",
-                Width = 160,
-                Height = 40,
-                Background = GetThemeBrush("AccentBrush"),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton(existingCard == null ? "Confirmar adição" : "Confirmar alteração", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 170);
             footerButtons.Children.Add(cancelButton);
             footerButtons.Children.Add(saveButton);
             footer.Child = footerButtons;
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             TeamTaskCardInfo? resultCard = null;
             string? resultColumnId = null;
@@ -5381,7 +5545,7 @@ namespace MeuApp
             {
                 if (string.IsNullOrWhiteSpace(titleBox.Text) || columnBox.SelectedItem is not TeamTaskColumnInfo selectedColumn)
                 {
-                    MessageBox.Show("Preencha ao menos o titulo e a coluna da tarefa.", "Tarefa", MessageBoxButton.OK, MessageBoxImage.Information);
+                    ShowStyledAlertDialog("TAREFA", "Campos obrigatórios", "Preencha ao menos o título e a coluna da tarefa antes de confirmar.", "Continuar", GetThemeBrush("AccentBrush"));
                     return;
                 }
 
@@ -5417,16 +5581,7 @@ namespace MeuApp
 
         private void OpenAddCsdNoteDialog(TeamWorkspaceInfo team)
         {
-            var dialog = new Window
-            {
-                Title = "Nova nota CSD",
-                Width = 500,
-                Height = 420,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("SurfaceBrush")
-            };
+            var dialog = CreateStyledDialogWindow("Nova nota CSD", 500, 420);
 
             var root = new Grid { Margin = new Thickness(20) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -5492,30 +5647,13 @@ namespace MeuApp
             };
             Grid.SetRow(footer, 2);
             var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                Width = 110,
-                Height = 40,
-                Margin = new Thickness(0, 0, 10, 0),
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush")
-            };
-            var addButton = new Button
-            {
-                Content = "Confirmar adicao",
-                Width = 160,
-                Height = 40,
-                Background = GetThemeBrush("AccentBrush"),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var addButton = CreateDialogActionButton("Confirmar adição", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 160);
             footerButtons.Children.Add(cancelButton);
             footerButtons.Children.Add(addButton);
             footer.Child = footerButtons;
             root.Children.Add(footer);
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             cancelButton.Click += (s, e) => dialog.Close();
 
@@ -5524,7 +5662,7 @@ namespace MeuApp
                 var note = noteBox.Text.Trim();
                 if (string.IsNullOrWhiteSpace(note))
                 {
-                    MessageBox.Show("Digite a nota antes de confirmar.", "CSD", MessageBoxButton.OK, MessageBoxImage.Information);
+                    ShowStyledAlertDialog("CSD", "Nota vazia", "Digite a nota antes de confirmar a inclusão no quadro CSD.", "Continuar", GetThemeBrush("AccentBrush"));
                     return;
                 }
 
@@ -5601,16 +5739,7 @@ namespace MeuApp
 
         private void OpenAddTeamMemberDialog(TeamWorkspaceInfo team)
         {
-            var dialog = new Window
-            {
-                Title = "Adicionar membro",
-                Width = 620,
-                Height = 580,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("CardBackgroundBrush")
-            };
+            var dialog = CreateStyledDialogWindow("Adicionar membro", 620, 580);
 
             var root = new Grid { Margin = new Thickness(20) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -5645,6 +5774,7 @@ namespace MeuApp
                 Height = 42,
                 Margin = new Thickness(0, 16, 0, 12)
             };
+            ApplyDialogInputStyle(queryBox);
             root.Children.Add(queryBox);
             Grid.SetRow(queryBox, 2);
 
@@ -5652,6 +5782,7 @@ namespace MeuApp
             {
                 Height = 300
             };
+            ApplyDialogInputStyle(resultsList);
             resultsList.ItemTemplate = new DataTemplate(typeof(UserInfo))
             {
                 VisualTree = CreateTeamMemberSearchItemTemplate()
@@ -5669,27 +5800,13 @@ namespace MeuApp
             Grid.SetRow(statusText, 4);
 
             var footer = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 8, 0, 0) };
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                Width = 110,
-                Height = 40,
-                Margin = new Thickness(0, 0, 10, 0)
-            };
-            var addButton = new Button
-            {
-                Content = "Adicionar",
-                Width = 120,
-                Height = 40,
-                Background = GetThemeBrush("AccentBrush"),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var addButton = CreateDialogActionButton("Adicionar", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 120);
             DockPanel.SetDock(cancelButton, Dock.Right);
             DockPanel.SetDock(addButton, Dock.Right);
             footer.Children.Add(addButton);
             footer.Children.Add(cancelButton);
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             var localSearchVersion = 0;
             async Task RefreshSearchResultsAsync()
@@ -5770,20 +5887,11 @@ namespace MeuApp
             var removableMembers = team.Members.Where(member => !string.Equals(member.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase)).ToList();
             if (removableMembers.Count == 0)
             {
-                MessageBox.Show("Nao ha membros disponiveis para remocao.", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+                ShowStyledAlertDialog("EQUIPE", "Nada para remover", "Não há membros disponíveis para remoção nesta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
                 return;
             }
 
-            var dialog = new Window
-            {
-                Title = "Remover membro",
-                Width = 560,
-                Height = 500,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("CardBackgroundBrush")
-            };
+            var dialog = CreateStyledDialogWindow("Remover membro", 560, 500);
 
             var root = new Grid { Margin = new Thickness(20) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -5806,6 +5914,7 @@ namespace MeuApp
                 Height = 40,
                 Margin = new Thickness(0, 0, 0, 12)
             };
+            ApplyDialogInputStyle(filterBox);
             root.Children.Add(filterBox);
             Grid.SetRow(filterBox, 1);
 
@@ -5815,31 +5924,18 @@ namespace MeuApp
                 ItemsSource = removableMembers,
                 DisplayMemberPath = "DisplayLabel"
             };
+            ApplyDialogInputStyle(list);
             root.Children.Add(list);
             Grid.SetRow(list, 2);
 
             var footer = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 14, 0, 0) };
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                Width = 110,
-                Height = 40,
-                Margin = new Thickness(0, 0, 10, 0)
-            };
-            var removeButton = new Button
-            {
-                Content = "Remover selecionado",
-                Width = 170,
-                Height = 40,
-                Background = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var removeButton = CreateDialogActionButton("Remover selecionado", new SolidColorBrush(Color.FromRgb(220, 38, 38)), Brushes.White, Brushes.Transparent, 170);
             DockPanel.SetDock(cancelButton, Dock.Right);
             DockPanel.SetDock(removeButton, Dock.Right);
             footer.Children.Add(removeButton);
             footer.Children.Add(cancelButton);
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             filterBox.TextChanged += (s, e) =>
             {
@@ -5886,7 +5982,7 @@ namespace MeuApp
                 return;
             }
 
-            if (MessageBox.Show($"Remover {member.Name} da equipe?", "Remover membro", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            if (!ShowStyledConfirmationDialog("EQUIPE", "Remover integrante", $"{member.Name} será removido da equipe e também das atribuições das tarefas atuais.", "Remover", new SolidColorBrush(Color.FromRgb(220, 38, 38))))
             {
                 return;
             }
@@ -5914,11 +6010,11 @@ namespace MeuApp
 
             if (!IsCurrentUserTeamCreator(_activeTeamWorkspace))
             {
-                MessageBox.Show("Apenas quem criou a equipe pode apagá-la.", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Apenas quem criou a equipe pode apagá-la.", "Entendi", GetThemeBrush("AccentBrush"));
                 return;
             }
 
-            if (MessageBox.Show($"Deseja apagar a equipe {_activeTeamWorkspace.TeamName}?", "Apagar equipe", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            if (!ShowStyledConfirmationDialog("EQUIPE", "Apagar equipe", $"A equipe {_activeTeamWorkspace.TeamName} será removida do seu painel e do Firebase.", "Apagar equipe", new SolidColorBrush(Color.FromRgb(220, 38, 38))))
             {
                 return;
             }
@@ -5928,7 +6024,7 @@ namespace MeuApp
                 var deleteResult = await _teamService.DeleteTeamAsync(_activeTeamWorkspace);
                 if (!deleteResult.Success)
                 {
-                    MessageBox.Show($"Nao foi possivel apagar a equipe.\n\n{deleteResult.ErrorMessage}", "Equipe", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    ShowStyledAlertDialog("EQUIPE", "Falha ao apagar equipe", $"Não foi possível apagar a equipe.\n\n{deleteResult.ErrorMessage}", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
                     return;
                 }
             }
@@ -5988,21 +6084,12 @@ namespace MeuApp
             }
 
             Clipboard.SetText(team.TeamId);
-            MessageBox.Show($"Codigo da equipe copiado: {team.TeamId}", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+            ShowStyledAlertDialog("EQUIPE", "Código copiado", $"Código da equipe copiado com sucesso: {team.TeamId}", "Fechar", GetThemeBrush("AccentBrush"));
         }
 
         private void OpenAddMilestoneDialog(TeamWorkspaceInfo team)
         {
-            var dialog = new Window
-            {
-                Title = "Nova entrega",
-                Width = 500,
-                Height = 420,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("CardBackgroundBrush")
-            };
+            var dialog = CreateStyledDialogWindow("Nova entrega", 500, 420);
 
             var root = new StackPanel { Margin = new Thickness(20) };
             var titleBox = new TextBox { Height = 40, Margin = new Thickness(0, 6, 0, 14) };
@@ -6021,38 +6108,34 @@ namespace MeuApp
                 Margin = new Thickness(0, 6, 0, 14)
             };
             var dueDatePicker = new DatePicker { Height = 40, Margin = new Thickness(0, 6, 0, 14) };
+            ApplyDialogInputStyle(titleBox);
+            ApplyDialogInputStyle(notesBox);
+            ApplyDialogInputStyle(statusBox);
+            ApplyDialogInputStyle(dueDatePicker);
 
-            root.Children.Add(new TextBlock { Text = "Titulo da entrega", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(CreateDialogFieldLabel("Título da entrega"));
             root.Children.Add(titleBox);
-            root.Children.Add(new TextBlock { Text = "Notas", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(CreateDialogFieldLabel("Notas"));
             root.Children.Add(notesBox);
-            root.Children.Add(new TextBlock { Text = "Status", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(CreateDialogFieldLabel("Status"));
             root.Children.Add(statusBox);
-            root.Children.Add(new TextBlock { Text = "Prazo", FontWeight = FontWeights.SemiBold });
+            root.Children.Add(CreateDialogFieldLabel("Prazo"));
             root.Children.Add(dueDatePicker);
 
             var footer = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            var cancelButton = new Button { Content = "Cancelar", Width = 110, Height = 40, Margin = new Thickness(0, 0, 10, 0) };
-            var saveButton = new Button
-            {
-                Content = "Salvar entrega",
-                Width = 130,
-                Height = 40,
-                Background = GetThemeBrush("AccentBrush"),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Salvar entrega", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 140);
             footer.Children.Add(cancelButton);
             footer.Children.Add(saveButton);
             root.Children.Add(footer);
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             cancelButton.Click += (s, e) => dialog.Close();
             saveButton.Click += (s, e) =>
             {
                 if (string.IsNullOrWhiteSpace(titleBox.Text))
                 {
-                    MessageBox.Show("Informe um titulo para a entrega.", "Equipe", MessageBoxButton.OK, MessageBoxImage.Information);
+                    ShowStyledAlertDialog("EQUIPE", "Título obrigatório", "Informe um título para a entrega antes de continuar.", "Continuar", GetThemeBrush("AccentBrush"));
                     return;
                 }
 
@@ -6116,16 +6199,7 @@ namespace MeuApp
 
         private void OpenProjectManagementDialog(TeamWorkspaceInfo team)
         {
-            var dialog = new Window
-            {
-                Title = "Gestao do projeto",
-                Width = 520,
-                Height = 430,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize,
-                Background = GetThemeBrush("SurfaceBrush")
-            };
+            var dialog = CreateStyledDialogWindow("Gestão do projeto", 520, 430);
 
             var root = new Grid { Margin = new Thickness(20) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -6210,30 +6284,13 @@ namespace MeuApp
             };
             Grid.SetRow(footer, 2);
             var footerButtons = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                Width = 110,
-                Height = 40,
-                Margin = new Thickness(0, 0, 10, 0),
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush")
-            };
-            var saveButton = new Button
-            {
-                Content = "Salvar gestao",
-                Width = 150,
-                Height = 40,
-                Background = GetThemeBrush("AccentBrush"),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0)
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Salvar gestão", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 150);
             footerButtons.Children.Add(cancelButton);
             footerButtons.Children.Add(saveButton);
             footer.Child = footerButtons;
             root.Children.Add(footer);
-            dialog.Content = root;
+            dialog.Content = CreateStyledDialogShell(root);
 
             cancelButton.Click += (s, e) => dialog.Close();
             saveButton.Click += (s, e) =>
@@ -7500,7 +7557,7 @@ namespace MeuApp
                     // Se esta é a conversa que está sendo exibida, atualizar a UI
                     if (_selectedConversation?.ContactId == conversation.ContactId)
                     {
-                        RefreshChatsUI();
+                        QueueChatsUiRefresh();
                     }
                 }
                 else
@@ -7542,6 +7599,19 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[RefreshChatsUI ERROR] {ex.Message}");
             }
+        }
+
+        private async void QueueChatsUiRefresh()
+        {
+            var renderSequence = ++_chatRenderSequence;
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            if (renderSequence != _chatRenderSequence)
+            {
+                return;
+            }
+
+            RefreshChatsUI();
         }
 
         private IEnumerable<Conversation> GetVisibleConversations()
@@ -8149,11 +8219,11 @@ namespace MeuApp
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            actionPanel.Children.Add(CreateHeaderIconButton("📞", "Iniciar audio"));
-            actionPanel.Children.Add(CreateHeaderIconButton("🎥", "Iniciar video"));
-            actionPanel.Children.Add(CreateHeaderIconButton("🔎", "Buscar na conversa"));
+            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.PhoneOutline, "Iniciar audio", new SolidColorBrush(Color.FromRgb(14, 165, 233))));
+            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.VideoOutline, "Iniciar video", new SolidColorBrush(Color.FromRgb(236, 72, 153))));
+            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.Magnify, "Buscar na conversa", new SolidColorBrush(Color.FromRgb(99, 102, 241))));
 
-            var menuButton = CreateHeaderIconButton("⋯", "Mais acoes");
+            var menuButton = CreateHeaderIconButton(PackIconMaterialKind.DotsHorizontal, "Mais acoes");
             var actionsPopup = CreateChatActionsPopup(menuButton, conv);
             menuButton.Click += (s, e) => actionsPopup.IsOpen = !actionsPopup.IsOpen;
             actionPanel.Children.Add(menuButton);
@@ -8176,7 +8246,7 @@ namespace MeuApp
             };
 
             var quickTools = new WrapPanel();
-            var filesButton = CreateComposerChipButton("Arquivos");
+            var filesButton = CreateComposerChipButton("Arquivos", PackIconMaterialKind.FolderOutline, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
             filesButton.Click += (s, e) => MessageBox.Show(
                 $"A central de arquivos da conversa com {conv.ContactName} sera conectada aqui.",
                 "Arquivos da conversa",
@@ -8184,7 +8254,7 @@ namespace MeuApp
                 MessageBoxImage.Information);
             quickTools.Children.Add(filesButton);
 
-            var mediaButton = CreateComposerChipButton("Midia");
+            var mediaButton = CreateComposerChipButton("Midia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
             mediaButton.Click += (s, e) => MessageBox.Show(
                 $"O historico de midia compartilhada com {conv.ContactName} aparecera aqui.",
                 "Midia compartilhada",
@@ -8192,7 +8262,7 @@ namespace MeuApp
                 MessageBoxImage.Information);
             quickTools.Children.Add(mediaButton);
 
-            var mentionButton = CreateComposerChipButton("@Professor");
+            var mentionButton = CreateComposerChipButton("@Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
             mentionButton.Click += (s, e) => MessageBox.Show(
                 $"Voce podera chamar o professor orientador direto desta conversa com {conv.ContactName}.",
                 "Contato academico",
@@ -8200,7 +8270,7 @@ namespace MeuApp
                 MessageBoxImage.Information);
             quickTools.Children.Add(mentionButton);
 
-            var exportButton = CreateComposerChipButton("Exportar");
+            var exportButton = CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
             exportButton.Click += (s, e) => MessageBox.Show(
                 $"A exportacao do historico com {conv.ContactName} sera iniciada nesta area.",
                 "Exportar conversa",
@@ -8281,11 +8351,11 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 0, 0, 12)
             };
-            quickActionPanel.Children.Add(CreateComposerChipButton("✨ Ações rápidas"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("🖼️ Midia"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("📎 Arquivo"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("🎓 Professor"));
-            quickActionPanel.Children.Add(CreateComposerChipButton("📤 Exportar"));
+            quickActionPanel.Children.Add(CreateComposerChipButton("Ações rápidas", PackIconMaterialKind.AutoFix, new SolidColorBrush(Color.FromRgb(245, 158, 11))));
+            quickActionPanel.Children.Add(CreateComposerChipButton("Midia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233))));
+            quickActionPanel.Children.Add(CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246))));
+            quickActionPanel.Children.Add(CreateComposerChipButton("Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237))));
+            quickActionPanel.Children.Add(CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129))));
             composerStack.Children.Add(quickActionPanel);
 
             var inputGrid = new Grid();
@@ -8295,8 +8365,8 @@ namespace MeuApp
             inputGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             inputGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var emojiButton = CreateHeaderIconButton("😊", "Emoji");
-            var attachmentButton = CreateHeaderIconButton("＋", "Enviar figurinha");
+            var emojiButton = CreateHeaderIconButton(PackIconMaterialKind.EmoticonHappyOutline, "Emoji", new SolidColorBrush(Color.FromRgb(245, 158, 11)));
+            var attachmentButton = CreateHeaderIconButton(PackIconMaterialKind.StickerOutline, "Enviar figurinha", new SolidColorBrush(Color.FromRgb(236, 72, 153)));
             attachmentButton.Background = new SolidColorBrush(Color.FromRgb(0, 168, 132));
             attachmentButton.Foreground = Brushes.White;
             attachmentButton.MinWidth = 40;
@@ -8340,7 +8410,7 @@ namespace MeuApp
             Grid.SetColumn(inputBox, 2);
             inputGrid.Children.Add(inputBox);
 
-            var micButton = CreateHeaderIconButton("🎙", "Gravar audio");
+            var micButton = CreateHeaderIconButton(PackIconMaterialKind.MicrophoneOutline, "Gravar audio", new SolidColorBrush(Color.FromRgb(20, 184, 166)));
             Grid.SetColumn(micButton, 3);
             inputGrid.Children.Add(micButton);
 
@@ -8655,6 +8725,11 @@ namespace MeuApp
                 return null;
             }
 
+            if (_stickerImageCache.TryGetValue(assetFileName, out var cachedSource))
+            {
+                return cachedSource;
+            }
+
             static string? ResolveStickerPath(string fileName)
             {
                 var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -8691,7 +8766,9 @@ namespace MeuApp
 
             try
             {
-                return new BitmapImage(new Uri($"pack://application:,,,/img/emojiobsseract/{assetFileName}", UriKind.Absolute));
+                var source = CreateFrozenBitmapImage(new Uri($"pack://application:,,,/img/emojiobsseract/{assetFileName}", UriKind.Absolute));
+                _stickerImageCache[assetFileName] = source;
+                return source;
             }
             catch
             {
@@ -8704,7 +8781,9 @@ namespace MeuApp
                         return null;
                     }
 
-                    return new BitmapImage(new Uri(stickerPath, UriKind.Absolute));
+                    var source = CreateFrozenBitmapImage(new Uri(stickerPath, UriKind.Absolute));
+                    _stickerImageCache[assetFileName] = source;
+                    return source;
                 }
                 catch (Exception fallbackEx)
                 {
@@ -8752,7 +8831,7 @@ namespace MeuApp
                 }
 
                 UpdateChatsBadge();
-                RefreshChatsUI();
+                QueueChatsUiRefresh();
                 DebugHelper.WriteLine($"[LoadActiveConversations] {conversations.Count} conversas carregadas");
             }
             catch (Exception ex)
@@ -8883,40 +8962,183 @@ namespace MeuApp
             }
         }
 
-        private Button CreateHeaderIconButton(string content, string tooltip)
+        private FontFamily GetAppTextFontFamily()
         {
+            return TryFindResource("AppTextFontFamily") as FontFamily ?? new FontFamily("Segoe UI");
+        }
+
+        private FontFamily GetAppDisplayFontFamily()
+        {
+            return TryFindResource("AppDisplayFontFamily") as FontFamily ?? new FontFamily("Segoe UI Semibold");
+        }
+
+        private FontFamily GetAppEmojiFontFamily()
+        {
+            return TryFindResource("AppEmojiFontFamily") as FontFamily ?? new FontFamily("Segoe UI Emoji");
+        }
+
+        private static bool ContainsEmojiLikeGlyph(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && value.EnumerateRunes().Any(rune =>
+            {
+                var category = Rune.GetUnicodeCategory(rune);
+                return category == UnicodeCategory.OtherSymbol || category == UnicodeCategory.ModifierSymbol;
+            });
+        }
+
+        private static bool IsGlyphOnlyContent(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            var visibleRunes = value.Trim().EnumerateRunes().Where(rune => !Rune.IsWhiteSpace(rune)).ToList();
+            if (visibleRunes.Count == 0)
+            {
+                return false;
+            }
+
+            return visibleRunes.All(rune =>
+            {
+                var category = Rune.GetUnicodeCategory(rune);
+                return category == UnicodeCategory.OtherSymbol
+                    || category == UnicodeCategory.ModifierSymbol
+                    || category == UnicodeCategory.MathSymbol
+                    || category == UnicodeCategory.OtherPunctuation
+                    || category == UnicodeCategory.DashPunctuation
+                    || category == UnicodeCategory.OpenPunctuation
+                    || category == UnicodeCategory.ClosePunctuation
+                    || category == UnicodeCategory.ConnectorPunctuation
+                    || category == UnicodeCategory.InitialQuotePunctuation
+                    || category == UnicodeCategory.FinalQuotePunctuation
+                    || category == UnicodeCategory.NonSpacingMark;
+            });
+        }
+
+        private object CreateButtonLabelContent(string content, double fontSize, Brush foreground, FontWeight fontWeight, bool preferDisplayForGlyphOnly = false)
+        {
+            var trimmedContent = content?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(trimmedContent))
+            {
+                return string.Empty;
+            }
+
+            var label = new TextBlock
+            {
+                FontSize = fontSize,
+                FontWeight = fontWeight,
+                Foreground = foreground,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.NoWrap,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+
+            var parts = trimmedContent.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && (ContainsEmojiLikeGlyph(parts[0]) || IsGlyphOnlyContent(parts[0])))
+            {
+                label.Inlines.Add(new Run(parts[0])
+                {
+                    FontFamily = ContainsEmojiLikeGlyph(parts[0]) ? GetAppEmojiFontFamily() : GetAppDisplayFontFamily()
+                });
+                label.Inlines.Add(new Run(" " + parts[1])
+                {
+                    FontFamily = GetAppTextFontFamily()
+                });
+                return label;
+            }
+
+            label.Text = trimmedContent;
+            label.FontFamily = ContainsEmojiLikeGlyph(trimmedContent)
+                ? GetAppEmojiFontFamily()
+                : preferDisplayForGlyphOnly && IsGlyphOnlyContent(trimmedContent)
+                    ? GetAppDisplayFontFamily()
+                    : GetAppTextFontFamily();
+
+            return label;
+        }
+
+        private PackIconMaterial CreateMaterialIcon(PackIconMaterialKind iconKind, Brush foreground, double size)
+        {
+            return new PackIconMaterial
+            {
+                Kind = iconKind,
+                Width = size,
+                Height = size,
+                Foreground = foreground,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+        }
+
+        private object CreateIconLabelContent(string text, PackIconMaterialKind iconKind, Brush iconBrush, Brush textBrush, double iconSize, double fontSize, FontWeight fontWeight)
+        {
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var icon = CreateMaterialIcon(iconKind, iconBrush, iconSize);
+            icon.Margin = new Thickness(0, 0, 8, 0);
+            stack.Children.Add(icon);
+            stack.Children.Add(new TextBlock
+            {
+                Text = text,
+                FontFamily = GetAppTextFontFamily(),
+                FontSize = fontSize,
+                FontWeight = fontWeight,
+                Foreground = textBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            return stack;
+        }
+
+        private Button CreateHeaderIconButton(PackIconMaterialKind iconKind, string tooltip, Brush? iconBrush = null)
+        {
+            var foreground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(134, 150, 160))
+                : new SolidColorBrush(Color.FromRgb(71, 85, 105));
+            var effectiveBrush = iconBrush ?? foreground;
+
             return new Button
             {
-                Content = content,
+                Content = CreateMaterialIcon(iconKind, effectiveBrush, 18),
                 ToolTip = tooltip,
                 Background = new SolidColorBrush(Colors.Transparent),
-                Foreground = _appDarkModeEnabled
-                    ? new SolidColorBrush(Color.FromRgb(134, 150, 160))
-                    : new SolidColorBrush(Color.FromRgb(71, 85, 105)),
+                Foreground = foreground,
                 BorderThickness = new Thickness(0),
                 MinWidth = 34,
                 Height = 34,
                 Padding = new Thickness(10, 0, 10, 0),
                 Margin = new Thickness(4, 0, 0, 0),
                 Cursor = Cursors.Hand,
-                FontSize = 12,
+                FontSize = 14,
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center
             };
         }
 
-        private Button CreateComposerChipButton(string content)
+        private Button CreateComposerChipButton(string content, PackIconMaterialKind? iconKind = null, Brush? iconBrush = null)
         {
+            var foreground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(233, 237, 239))
+                : new SolidColorBrush(Color.FromRgb(30, 41, 59));
+            var contentElement = iconKind.HasValue
+                ? CreateIconLabelContent(content, iconKind.Value, iconBrush ?? foreground, foreground, 14, 11, FontWeights.SemiBold)
+                : CreateButtonLabelContent(content, 11, foreground, FontWeights.SemiBold);
+
             return new Button
             {
-                Content = content,
+                Content = contentElement,
                 Background = _appDarkModeEnabled
                     ? new SolidColorBrush(Color.FromRgb(32, 44, 51))
                     : new SolidColorBrush(Color.FromRgb(241, 245, 249)),
-                Foreground = _appDarkModeEnabled
-                    ? new SolidColorBrush(Color.FromRgb(233, 237, 239))
-                    : new SolidColorBrush(Color.FromRgb(30, 41, 59)),
+                Foreground = foreground,
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
                 Padding = new Thickness(12, 6, 12, 6),
@@ -9123,7 +9345,7 @@ namespace MeuApp
             {
                 var emojiButton = new Button
                 {
-                    Content = emoji,
+                    Content = CreateButtonLabelContent(emoji, 22, titleBrush, FontWeights.Normal),
                     Width = 46,
                     Height = 46,
                     FontSize = 22,
@@ -9236,7 +9458,22 @@ namespace MeuApp
 
         private ContextMenu CreateMessageActionsContextMenu(Conversation conv, ChatMessage msg)
         {
-            var menu = new ContextMenu();
+            var menu = new ContextMenu
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(8)
+            };
+
+            var itemStyle = new Style(typeof(MenuItem));
+            itemStyle.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
+            itemStyle.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+            itemStyle.Setters.Add(new Setter(Control.ForegroundProperty, GetThemeBrush("PrimaryTextBrush")));
+            itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 10, 12, 10)));
+            itemStyle.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+            itemStyle.Setters.Add(new Setter(Control.CursorProperty, Cursors.Hand));
+            menu.Resources[typeof(MenuItem)] = itemStyle;
 
             if (msg.IsText && !msg.IsDeleted)
             {
@@ -9269,12 +9506,12 @@ namespace MeuApp
                 var result = await chatService.UpdateMessageAsync(conv.ContactId, msg, updatedText.Trim());
                 if (!result.Success)
                 {
-                    MessageBox.Show(
-                        $"Erro ao editar mensagem.\n\n{result.ErrorMessage}",
-                        "Chat",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning
-                    );
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Não foi possível editar",
+                        $"O Firestore recusou a atualização desta mensagem.\n\n{result.ErrorMessage}",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(234, 88, 12)));
                     return;
                 }
             }
@@ -9288,11 +9525,12 @@ namespace MeuApp
 
         private async Task DeleteConversationMessageAsync(Conversation conv, ChatMessage msg)
         {
-            if (MessageBox.Show(
-                "Deseja apagar esta mensagem?",
+            if (!ShowStyledConfirmationDialog(
+                "CHAT",
                 "Apagar mensagem",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                "A mensagem será substituída por um aviso de exclusão no histórico da conversa.",
+                "Apagar agora",
+                new SolidColorBrush(Color.FromRgb(220, 38, 38))))
             {
                 return;
             }
@@ -9303,12 +9541,12 @@ namespace MeuApp
                 var result = await chatService.DeleteMessageAsync(conv.ContactId, msg);
                 if (!result.Success)
                 {
-                    MessageBox.Show(
-                        $"Erro ao apagar mensagem.\n\n{result.ErrorMessage}",
-                        "Chat",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning
-                    );
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Não foi possível apagar",
+                        $"A exclusão lógica da mensagem foi bloqueada.\n\n{result.ErrorMessage}",
+                        "Entendi",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
                     return;
                 }
             }
@@ -9338,34 +9576,237 @@ namespace MeuApp
             conv.LastSenderId = lastMessage.SenderId;
         }
 
-        private string? ShowEditMessageDialog(string initialText)
+        private Window CreateStyledDialogWindow(string title, double width, double height, double? minHeight = null, bool canResize = false)
         {
-            var background = _appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
-                : new SolidColorBrush(Colors.White);
-            var borderBrush = _appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
-                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
-            var primaryText = _appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
-                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
-            var secondaryText = _appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
-                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
-
-            var dialog = new MetroWindow
+            return new Window
             {
-                Title = "Editar mensagem",
-                Width = 520,
-                Height = 340,
+                Title = title,
+                Width = width,
+                Height = height,
+                MinHeight = minHeight ?? height,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
-                ResizeMode = ResizeMode.NoResize,
+                ResizeMode = canResize ? ResizeMode.CanResize : ResizeMode.NoResize,
                 ShowInTaskbar = false,
-                Background = background,
-                BorderBrush = borderBrush,
-                BorderThickness = new Thickness(1)
+                AllowsTransparency = true,
+                WindowStyle = WindowStyle.None,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                BorderBrush = Brushes.Transparent
             };
+        }
+
+        private Border CreateStyledDialogShell(UIElement content, Thickness? padding = null)
+        {
+            var shell = new Border
+            {
+                Margin = new Thickness(14),
+                CornerRadius = new CornerRadius(28),
+                Background = GetThemeBrush("SurfaceBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = padding ?? new Thickness(24),
+                SnapsToDevicePixels = true,
+                Child = content,
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 34,
+                    ShadowDepth = 12,
+                    Opacity = 0.18,
+                    Color = Color.FromRgb(15, 23, 42)
+                }
+            };
+
+            shell.Loaded += (_, __) =>
+            {
+                shell.Opacity = 0;
+                var transform = new TranslateTransform(0, 20);
+                shell.RenderTransform = transform;
+
+                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                shell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(20, 0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
+            };
+
+            return shell;
+        }
+
+        private StackPanel CreateDialogHeader(string eyebrow, string title, string description, Brush accentBrush)
+        {
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 18) };
+            header.Children.Add(new Border
+            {
+                Background = accentBrush,
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(12, 5, 12, 5),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = new TextBlock
+                {
+                    Text = eyebrow,
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White,
+                    TextAlignment = TextAlignment.Center
+                }
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = title,
+                Margin = new Thickness(0, 14, 0, 0),
+                FontSize = 24,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            header.Children.Add(new TextBlock
+            {
+                Text = description,
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 13,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 21
+            });
+
+            return header;
+        }
+
+        private Button CreateDialogActionButton(string label, Brush background, Brush foreground, Brush borderBrush, double minWidth = 126)
+        {
+            return new Button
+            {
+                Content = label,
+                MinWidth = minWidth,
+                Height = 42,
+                Margin = new Thickness(12, 0, 0, 0),
+                Padding = new Thickness(18, 0, 18, 0),
+                Background = background,
+                Foreground = foreground,
+                BorderBrush = borderBrush,
+                BorderThickness = borderBrush == Brushes.Transparent ? new Thickness(0) : new Thickness(1),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+        }
+
+        private void ApplyDialogInputStyle(Control control)
+        {
+            control.Background = GetThemeBrush("SearchBackgroundBrush");
+            control.BorderBrush = GetThemeBrush("SearchBorderBrush");
+            control.Foreground = GetThemeBrush("PrimaryTextBrush");
+            control.BorderThickness = new Thickness(1);
+
+            if (control.Padding == default)
+            {
+                control.Padding = new Thickness(12, 10, 12, 10);
+            }
+        }
+
+        private void ShowStyledAlertDialog(string eyebrow, string title, string message, string buttonLabel, Brush accentBrush)
+        {
+            var dialog = CreateStyledDialogWindow(title, 520, 320);
+            var actionButton = CreateDialogActionButton(buttonLabel, accentBrush, Brushes.White, Brushes.Transparent);
+            actionButton.Click += (_, __) => dialog.Close();
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            layout.Children.Add(CreateDialogHeader(eyebrow, title, message, accentBrush));
+
+            var helperCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Child = new TextBlock
+                {
+                    Text = "Esse aviso segue o novo padrão visual do projeto para reduzir caixas nativas sem identidade visual.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                }
+            };
+            Grid.SetRow(helperCard, 1);
+            layout.Children.Add(helperCard);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            Grid.SetRow(actions, 2);
+            actions.Children.Add(actionButton);
+            layout.Children.Add(actions);
+
+            dialog.Content = CreateStyledDialogShell(layout);
+            dialog.ShowDialog();
+        }
+
+        private bool ShowStyledConfirmationDialog(string eyebrow, string title, string message, string confirmLabel, Brush confirmBrush, string cancelLabel = "Cancelar")
+        {
+            var dialog = CreateStyledDialogWindow(title, 560, 340);
+            var result = false;
+
+            var cancelButton = CreateDialogActionButton(cancelLabel, Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"));
+            cancelButton.Click += (_, __) => dialog.Close();
+
+            var confirmButton = CreateDialogActionButton(confirmLabel, confirmBrush, Brushes.White, Brushes.Transparent);
+            confirmButton.Click += (_, __) =>
+            {
+                result = true;
+                dialog.Close();
+            };
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            layout.Children.Add(CreateDialogHeader(eyebrow, title, message, confirmBrush));
+
+            var cautionCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Child = new TextBlock
+                {
+                    Text = "A ação será aplicada imediatamente após a confirmação.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+            Grid.SetRow(cautionCard, 1);
+            layout.Children.Add(cautionCard);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            Grid.SetRow(actions, 2);
+            actions.Children.Add(cancelButton);
+            actions.Children.Add(confirmButton);
+            layout.Children.Add(actions);
+
+            dialog.Content = CreateStyledDialogShell(layout);
+            dialog.ShowDialog();
+            return result;
+        }
+
+        private string? ShowEditMessageDialog(string initialText)
+        {
+            var dialog = CreateStyledDialogWindow("Editar mensagem", 580, 420);
 
             var contentBox = new TextBox
             {
@@ -9373,30 +9814,29 @@ namespace MeuApp
                 AcceptsReturn = true,
                 TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Height = 140,
-                FontSize = 13,
+                Height = 170,
+                FontSize = 14,
                 Padding = new Thickness(12),
-                Background = _appDarkModeEnabled
-                    ? new SolidColorBrush(Color.FromRgb(30, 41, 59))
-                    : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
-                Foreground = primaryText,
-                BorderBrush = borderBrush,
-                BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 10, 0, 0)
             };
+            ApplyDialogInputStyle(contentBox);
+
+            var counterText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                FontSize = 11,
+                Foreground = GetThemeBrush("TertiaryTextBrush")
+            };
+            void RefreshCounter()
+            {
+                counterText.Text = $"{(contentBox.Text ?? string.Empty).Length} caractere(s)";
+            }
+            contentBox.TextChanged += (_, __) => RefreshCounter();
+            RefreshCounter();
 
             string? result = null;
-            var saveButton = new Button
-            {
-                Content = "Salvar",
-                MinWidth = 100,
-                Height = 38,
-                Margin = new Thickness(0, 0, 10, 0),
-                Background = new SolidColorBrush(Color.FromRgb(0, 168, 132)),
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand
-            };
+            var saveButton = CreateDialogActionButton("Salvar ajuste", new SolidColorBrush(Color.FromRgb(14, 165, 233)), Brushes.White, Brushes.Transparent, 148);
             saveButton.Click += (_, __) =>
             {
                 result = contentBox.Text;
@@ -9404,45 +9844,54 @@ namespace MeuApp
                 dialog.Close();
             };
 
-            var cancelButton = new Button
-            {
-                Content = "Cancelar",
-                MinWidth = 100,
-                Height = 38,
-                Background = Brushes.Transparent,
-                Foreground = primaryText,
-                BorderBrush = borderBrush,
-                BorderThickness = new Thickness(1),
-                Cursor = Cursors.Hand
-            };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"));
             cancelButton.Click += (_, __) => dialog.Close();
 
-            dialog.Content = new Border
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            layout.Children.Add(CreateDialogHeader("CHAT", "Editar mensagem", "Refine o texto sem perder o histórico visual da conversa. Apenas mensagens de texto podem ser alteradas.", GetThemeBrush("AccentBrush")));
+
+            var editorCard = new Border
             {
-                Background = background,
-                Padding = new Thickness(22),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(16),
                 Child = new StackPanel
                 {
                     Children =
                     {
                         new TextBlock
                         {
-                            Text = "Ajuste apenas mensagens de texto já enviadas.",
-                            FontSize = 13,
-                            Foreground = secondaryText,
-                            TextWrapping = TextWrapping.Wrap
+                            Text = "Prévia do conteúdo",
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
                         },
                         contentBox,
-                        new StackPanel
-                        {
-                            Orientation = Orientation.Horizontal,
-                            HorizontalAlignment = HorizontalAlignment.Right,
-                            Margin = new Thickness(0, 18, 0, 0),
-                            Children = { saveButton, cancelButton }
-                        }
+                        counterText
                     }
                 }
             };
+            Grid.SetRow(editorCard, 1);
+            layout.Children.Add(editorCard);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            Grid.SetRow(actions, 2);
+            actions.Children.Add(cancelButton);
+            actions.Children.Add(saveButton);
+            layout.Children.Add(actions);
+
+            dialog.Content = CreateStyledDialogShell(layout);
 
             contentBox.Loaded += (_, __) =>
             {

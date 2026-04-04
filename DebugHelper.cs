@@ -26,39 +26,7 @@ namespace MeuApp
         /// </summary>
         public static void Initialize()
         {
-            if (_initialized) return;
-
-            try
-            {
-                Directory.CreateDirectory(LogDirectoryPath);
-                ResetLogFileIfTooLarge();
-
-                _logWriter = new StreamWriter(LogFilePath, false)
-                {
-                    AutoFlush = true
-                };
-
-                WriteLine($"========== LOG INICIADO EM {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==========");
-                WriteLine($"Caminho do arquivo: {LogFilePath}");
-                WriteLine("");
-
-                // Adicionar trace listener
-                _traceListener = new TextWriterTraceListener(_logWriter);
-                Trace.Listeners.Add(_traceListener);
-                
-                _initialized = true;
-
-                MessageBox.Show(
-                    $"Modo de diagnóstico ativado!\n\nOs logs serão salvos em:\n{LogFilePath}",
-                    "Debug Ativado",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erro ao inicializar logging: {ex.Message}");
-            }
+            InitializeCore(showMessage: true);
         }
 
         /// <summary>
@@ -66,7 +34,7 @@ namespace MeuApp
         /// </summary>
         public static void InitializeSilent()
         {
-            Debug.WriteLine("[DebugHelper] Modo silencioso ativo sem gravação em disco.");
+            InitializeCore(showMessage: false);
         }
 
         /// <summary>
@@ -145,6 +113,50 @@ namespace MeuApp
         /// Verifica se o logging está inicializado
         /// </summary>
         public static bool IsInitialized => _initialized;
+
+        private static void InitializeCore(bool showMessage)
+        {
+            if (_initialized) return;
+
+            try
+            {
+                Directory.CreateDirectory(LogDirectoryPath);
+                ResetLogFileIfTooLarge();
+
+                _logWriter = new StreamWriter(LogFilePath, false)
+                {
+                    AutoFlush = true
+                };
+
+                _traceListener = new TextWriterTraceListener(_logWriter);
+                Trace.Listeners.Add(_traceListener);
+
+                _initialized = true;
+
+                WriteLine($"========== LOG INICIADO EM {DateTime.Now:yyyy-MM-dd HH:mm:ss} ==========");
+                WriteLine($"Caminho do arquivo: {LogFilePath}");
+                WriteLine("");
+
+                if (showMessage)
+                {
+                    MessageBox.Show(
+                        $"Modo de diagnóstico ativado!\n\nOs logs serão salvos em:\n{LogFilePath}",
+                        "Debug Ativado",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DebugHelper] Falha ao inicializar logging: {ex.Message}");
+
+                if (showMessage)
+                {
+                    MessageBox.Show($"Erro ao inicializar logging: {ex.Message}");
+                }
+            }
+        }
 
         private static void ResetLogFileIfTooLarge()
         {

@@ -1,0 +1,718 @@
+[04:21:59.467] ========== LOG INICIADO EM 2026-04-04 04:21:59 ==========
+========== LOG INICIADO EM 2026-04-04 04:21:59 ==========
+[04:21:59.468] Caminho do arquivo: D:\react-js\NETC#\bin\Debug\net8.0-windows\logs\AppDebug.log
+Caminho do arquivo: D:\react-js\NETC#\bin\Debug\net8.0-windows\logs\AppDebug.log
+[04:21:59.468] 
+
+[04:22:00.047] [LoadActiveConversations] Carregando conversas ativas do Firebase
+[LoadActiveConversations] Carregando conversas ativas do Firebase
+[04:22:00.065] [HTTP LoadConversations-userAId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[HTTP LoadConversations-userAId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[04:22:00.066] [HTTP LoadConversations-userBId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[HTTP LoadConversations-userBId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[04:22:00.686] [HTTP LoadConversations-userAId] Status: 200 OK
+[HTTP LoadConversations-userAId] Status: 200 OK
+[04:22:00.686] [HTTP LoadConversations-userAId] PayloadLength: 1103
+[HTTP LoadConversations-userAId] PayloadLength: 1103
+[04:22:01.937] [HTTP LoadConversations-userBId] Status: 200 OK
+[HTTP LoadConversations-userBId] Status: 200 OK
+[04:22:01.937] [HTTP LoadConversations-userBId] PayloadLength: 50
+[HTTP LoadConversations-userBId] PayloadLength: 50
+[04:22:03.006] [LoadActiveConversations] 1 conversas carregadas
+[LoadActiveConversations] 1 conversas carregadas
+[04:22:04.174] [LoadTeamsFromDatabase] Carregando equipes do Firebase
+[LoadTeamsFromDatabase] Carregando equipes do Firebase
+[04:22:04.186] 
+[TeamService.LoadTeams] ===== INICIANDO CARREGAMENTO =====
+
+[TeamService.LoadTeams] ===== INICIANDO CARREGAMENTO =====
+[04:22:04.186] [TeamService.LoadTeams] Usuário: 'NvtFyiDEfXM5fOygQiLuFf4M1W03'
+[TeamService.LoadTeams] Usuário: 'NvtFyiDEfXM5fOygQiLuFf4M1W03'
+[04:22:04.188] [TeamService.GetUserTeamIds] Buscando equipes para 'NvtFyiDEfXM5fOygQiLuFf4M1W03'...
+[TeamService.GetUserTeamIds] Buscando equipes para 'NvtFyiDEfXM5fOygQiLuFf4M1W03'...
+[04:22:05.303] [TeamService.GetUserTeamIds] TeamId: 'turma-pi-001_accenture_projeto'
+[TeamService.GetUserTeamIds] TeamId: 'turma-pi-001_accenture_projeto'
+[04:22:05.303] [TeamService.GetUserTeamIds] Total: 1
+[TeamService.GetUserTeamIds] Total: 1
+[04:22:05.304] [TeamService.LoadTeams] Equipes encontradas: 1
+[TeamService.LoadTeams] Equipes encontradas: 1
+[04:22:05.306] [TeamService.LoadTeamById] Carregando 'turma-pi-001_accenture_projeto'...
+[TeamService.LoadTeamById] Carregando 'turma-pi-001_accenture_projeto'...
+[04:22:05.776] [TeamService.LoadTeams] ✅ Carregada: 'Accenture Projeto'
+[TeamService.LoadTeams] ✅ Carregada: 'Accenture Projeto'
+[04:22:05.776] [TeamService.LoadTeams] ===== CONCLUÍDO (1 equipes) =====
+
+[TeamService.LoadTeams] ===== CONCLUÍDO (1 equipes) =====
+
+[04:22:06.745] [LoadTeamsFromDatabase] 1 equipes carregadas do banco de dados
+[LoadTeamsFromDatabase] 1 equipes carregadas do banco de dados
+[04:22:26.781] [LoadActiveConversations] Carregando conversas ativas do Firebase
+[LoadActiveConversations] Carregando conversas ativas do Firebase
+[04:22:26.782] [HTTP LoadConversations-userAId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[HTTP LoadConversations-userAId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[04:22:26.782] [HTTP LoadConversations-userBId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[HTTP LoadConversations-userBId] POST https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents:runQuery
+[04:22:27.002] [HTTP LoadConversations-userAId] Status: 200 OK
+[HTTP LoadConversations-userAId] Status: 200 OK
+[04:22:27.002] [HTTP LoadConversations-userAId] PayloadLength: 1103
+[HTTP LoadConversations-userAId] PayloadLength: 1103
+[04:22:27.021] [HTTP LoadConversations-userBId] Status: 200 OK
+[HTTP LoadConversations-userBId] Status: 200 OK
+[04:22:27.021] [HTTP LoadConversations-userBId] PayloadLength: 50
+[HTTP LoadConversations-userBId] PayloadLength: 50
+[04:22:27.021] [LoadActiveConversations] 1 conversas carregadas
+[LoadActiveConversations] 1 conversas carregadas
+[04:22:28.396] [LoadConversationMessages] Carregando mensagens para Pedro Lucas de Souza Pessoa
+[LoadConversationMessages] Carregando mensagens para Pedro Lucas de Souza Pessoa
+[04:22:28.399] [ChatService.LoadMessages] Carregando mensagens de wVjYTM18zoSkKNezg7c2RjCqQMg2
+[ChatService.LoadMessages] Carregando mensagens de wVjYTM18zoSkKNezg7c2RjCqQMg2
+[04:22:28.400] [HTTP LoadMessages] GET https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages
+[HTTP LoadMessages] GET https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages
+[04:22:29.157] [HTTP LoadMessages] Status: 200 OK
+[HTTP LoadMessages] Status: 200 OK
+[04:22:29.157] [HTTP LoadMessages] PayloadLength: 9869
+[HTTP LoadMessages] PayloadLength: 9869
+[04:22:29.157] [ChatService.LoadMessages] Resposta: {
+  "documents": [
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/54693af0-41d7-4a4b-92ab-4d0f84242908",
+      "fields": {
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "isDeleted": {
+          "booleanValue": false
+        },
+        "messageType": {
+          "stringValue": "text"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "content": {
+          "stringValue": "eae2"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-04T05:47:22.812Z"
+        },
+        "messageId": {
+          "stringValue": "54693af0-41d7-4a4b-92ab-4d0f84242908"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-04T05:47:22.812Z"
+        },
+        "isEdited": {
+          "booleanValue": true
+        },
+        "editedAt": {
+          "timestampValue": "2026-04-04T05:50:04.556Z"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        }
+      },
+      "createTime": "2026-04-04T05:47:23.888798Z",
+      "updateTime": "2026-04-04T05:50:05.073307Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/5QOhRBoFdGdcGR8kNf4g",
+      "fields": {
+        "content": {
+          "stringValue": "oi, pedro"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "timestamp": {
+          "timestampValue": "2026-03-30T13:17:51.202Z"
+        },
+        "messageId": {
+          "stringValue": "6aceb9ce-26f0-4bb0-9bb4-9ee87866e537"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        }
+      },
+      "createTime": "2026-03-30T13:17:51.681716Z",
+      "updateTime": "2026-03-30T13:17:51.681716Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/Mg49enMIFmcXONj4Jr8r",
+      "fields": {
+        "messageId": {
+          "stringValue": "aa7c22de-8954-4163-bdac-e1cede5faeae"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:06:45.801Z"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:06:45.801Z"
+        },
+        "content": {
+          "stringValue": "Figurinha • Tchau divertido"
+        },
+        "stickerAsset": {
+          "stringValue": "Chao_0.png"
+        }
+      },
+      "createTime": "2026-04-03T01:06:50.199195Z",
+      "updateTime": "2026-04-03T01:06:50.199195Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/W9wsQoNbeuQDS6kerf7A",
+      "fields": {
+        "messageId": {
+          "stringValue": "a9e372b3-8c40-47e6-b679-774f9637b837"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:45:49.063Z"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:45:49.063Z"
+        },
+        "content": {
+          "stringValue": "Figurinha • Feliz"
+        },
+        "stickerAsset": {
+          "stringValue": "Chao_0.png"
+        }
+      },
+      "createTime": "2026-04-03T01:45:55.322Z",
+      "updateTime": "2026-04-03T01:45:55.322Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/apME3DaCO5rayIhaettY",
+      "fields": {
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:46:20.954Z"
+        },
+        "content": {
+          "stringValue": "oi"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "text"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:46:20.954Z"
+        },
+        "messageId": {
+          "stringValue": "8a3858a3-fa5f-4ded-aedc-fe43efaf4041"
+        }
+      },
+      "createTime": "2026-04-03T01:46:23.743418Z",
+      "updateTime": "2026-04-03T01:46:23.743418Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/bIHu8mBR2NaMrI3MClHz",
+      "fields": {
+        "timestamp": {
+          "timestampValue": "2026-03-31T19:16:52.073Z"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "isDeleted": {
+          "booleanValue": true
+        },
+        "editedAt": {
+          "timestampValue": "2026-04-04T05:50:12.913Z"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "content": {
+          "stringValue": "'joelyson alcantara da silva' apagou essa mensagem (X)"
+        },
+        "deletedAt": {
+          "timestampValue": "2026-04-04T05:50:20.235Z"
+        },
+        "messageType": {
+          "stringValue": "deleted"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "isEdited": {
+          "booleanValue": true
+        },
+        "messageId": {
+          "stringValue": "37c17369-b676-47d4-8afc-f534fc398e64"
+        },
+        "createdAt": {
+          "timestampValue": "2026-03-31T19:16:52.073Z"
+        }
+      },
+      "createTime": "2026-03-31T19:16:52.732864Z",
+      "updateTime": "2026-04-04T05:50:20.608487Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/kJ1PL5nTibFUAxum7F2s",
+      "fields": {
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "messageId": {
+          "stringValue": "bbe10c3a-ce78-407c-96d1-2741db4f9cda"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T21:51:30.837Z"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T21:51:30.837Z"
+        },
+        "stickerAsset": {
+          "stringValue": "chao_6.png"
+        },
+        "content": {
+          "stringValue": "Figurinha • Close-up Face"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        }
+      },
+      "createTime": "2026-04-03T21:51:31.839686Z",
+      "updateTime": "2026-04-03T21:51:31.839686Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/pLBWKKTQpOxNPUSKFUUm",
+      "fields": {
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "createdAt": {
+          "timestampValue": "2026-03-30T13:31:43.417Z"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageId": {
+          "stringValue": "d8661ea2-816c-4abf-a42e-a5c290725e3c"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "timestamp": {
+          "timestampValue": "2026-03-30T13:31:43.417Z"
+        },
+        "content": {
+          "stringValue": "opa"
+        }
+      },
+      "createTime": "2026-03-30T13:31:44.566730Z",
+      "updateTime": "2026-03-30T13:31:44.566730Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/uryEP1yhjr2pMSaUwoVN",
+      "fields": {
+        "messageId": {
+          "stringValue": "ac800779-d820-4af8-8dd8-3a91b7d76724"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:46:11.195Z"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:46:11.195Z"
+        },
+        "stickerAsset": {
+          "stringValue": "chao_2.png"
+        },
+        "content": {
+          "stringValue": "Figurinha • Irritado"
+        }
+      },
+      "createTime": "2026-04-03T01:46:13.603224Z",
+      "updateTime": "2026-04-03T01:46:13.603224Z"
+    }
+  ]
+}
+
+[ChatService.LoadMessages] Resposta: {
+  "documents": [
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/54693af0-41d7-4a4b-92ab-4d0f84242908",
+      "fields": {
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "isDeleted": {
+          "booleanValue": false
+        },
+        "messageType": {
+          "stringValue": "text"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "content": {
+          "stringValue": "eae2"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-04T05:47:22.812Z"
+        },
+        "messageId": {
+          "stringValue": "54693af0-41d7-4a4b-92ab-4d0f84242908"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-04T05:47:22.812Z"
+        },
+        "isEdited": {
+          "booleanValue": true
+        },
+        "editedAt": {
+          "timestampValue": "2026-04-04T05:50:04.556Z"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        }
+      },
+      "createTime": "2026-04-04T05:47:23.888798Z",
+      "updateTime": "2026-04-04T05:50:05.073307Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/5QOhRBoFdGdcGR8kNf4g",
+      "fields": {
+        "content": {
+          "stringValue": "oi, pedro"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "timestamp": {
+          "timestampValue": "2026-03-30T13:17:51.202Z"
+        },
+        "messageId": {
+          "stringValue": "6aceb9ce-26f0-4bb0-9bb4-9ee87866e537"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        }
+      },
+      "createTime": "2026-03-30T13:17:51.681716Z",
+      "updateTime": "2026-03-30T13:17:51.681716Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/Mg49enMIFmcXONj4Jr8r",
+      "fields": {
+        "messageId": {
+          "stringValue": "aa7c22de-8954-4163-bdac-e1cede5faeae"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:06:45.801Z"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:06:45.801Z"
+        },
+        "content": {
+          "stringValue": "Figurinha • Tchau divertido"
+        },
+        "stickerAsset": {
+          "stringValue": "Chao_0.png"
+        }
+      },
+      "createTime": "2026-04-03T01:06:50.199195Z",
+      "updateTime": "2026-04-03T01:06:50.199195Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/W9wsQoNbeuQDS6kerf7A",
+      "fields": {
+        "messageId": {
+          "stringValue": "a9e372b3-8c40-47e6-b679-774f9637b837"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:45:49.063Z"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:45:49.063Z"
+        },
+        "content": {
+          "stringValue": "Figurinha • Feliz"
+        },
+        "stickerAsset": {
+          "stringValue": "Chao_0.png"
+        }
+      },
+      "createTime": "2026-04-03T01:45:55.322Z",
+      "updateTime": "2026-04-03T01:45:55.322Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/apME3DaCO5rayIhaettY",
+      "fields": {
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:46:20.954Z"
+        },
+        "content": {
+          "stringValue": "oi"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "text"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:46:20.954Z"
+        },
+        "messageId": {
+          "stringValue": "8a3858a3-fa5f-4ded-aedc-fe43efaf4041"
+        }
+      },
+      "createTime": "2026-04-03T01:46:23.743418Z",
+      "updateTime": "2026-04-03T01:46:23.743418Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/bIHu8mBR2NaMrI3MClHz",
+      "fields": {
+        "timestamp": {
+          "timestampValue": "2026-03-31T19:16:52.073Z"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "isDeleted": {
+          "booleanValue": true
+        },
+        "editedAt": {
+          "timestampValue": "2026-04-04T05:50:12.913Z"
+        },
+        "stickerAsset": {
+          "stringValue": ""
+        },
+        "content": {
+          "stringValue": "'joelyson alcantara da silva' apagou essa mensagem (X)"
+        },
+        "deletedAt": {
+          "timestampValue": "2026-04-04T05:50:20.235Z"
+        },
+        "messageType": {
+          "stringValue": "deleted"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "isEdited": {
+          "booleanValue": true
+        },
+        "messageId": {
+          "stringValue": "37c17369-b676-47d4-8afc-f534fc398e64"
+        },
+        "createdAt": {
+          "timestampValue": "2026-03-31T19:16:52.073Z"
+        }
+      },
+      "createTime": "2026-03-31T19:16:52.732864Z",
+      "updateTime": "2026-04-04T05:50:20.608487Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/kJ1PL5nTibFUAxum7F2s",
+      "fields": {
+        "senderName": {
+          "stringValue": "joelyson alcantara da silva"
+        },
+        "messageId": {
+          "stringValue": "bbe10c3a-ce78-407c-96d1-2741db4f9cda"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T21:51:30.837Z"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T21:51:30.837Z"
+        },
+        "stickerAsset": {
+          "stringValue": "chao_6.png"
+        },
+        "content": {
+          "stringValue": "Figurinha • Close-up Face"
+        },
+        "senderId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "recipientId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        }
+      },
+      "createTime": "2026-04-03T21:51:31.839686Z",
+      "updateTime": "2026-04-03T21:51:31.839686Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/pLBWKKTQpOxNPUSKFUUm",
+      "fields": {
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "createdAt": {
+          "timestampValue": "2026-03-30T13:31:43.417Z"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "messageId": {
+          "stringValue": "d8661ea2-816c-4abf-a42e-a5c290725e3c"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "timestamp": {
+          "timestampValue": "2026-03-30T13:31:43.417Z"
+        },
+        "content": {
+          "stringValue": "opa"
+        }
+      },
+      "createTime": "2026-03-30T13:31:44.566730Z",
+      "updateTime": "2026-03-30T13:31:44.566730Z"
+    },
+    {
+      "name": "projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2/messages/uryEP1yhjr2pMSaUwoVN",
+      "fields": {
+        "messageId": {
+          "stringValue": "ac800779-d820-4af8-8dd8-3a91b7d76724"
+        },
+        "createdAt": {
+          "timestampValue": "2026-04-03T01:46:11.195Z"
+        },
+        "senderName": {
+          "stringValue": "Pedro Lucas de Souza Pessoa"
+        },
+        "senderId": {
+          "stringValue": "wVjYTM18zoSkKNezg7c2RjCqQMg2"
+        },
+        "messageType": {
+          "stringValue": "sticker"
+        },
+        "recipientId": {
+          "stringValue": "NvtFyiDEfXM5fOygQiLuFf4M1W03"
+        },
+        "timestamp": {
+          "timestampValue": "2026-04-03T01:46:11.195Z"
+        },
+        "stickerAsset": {
+          "stringValue": "chao_2.png"
+        },
+        "content": {
+          "stringValue": "Figurinha • Irritado"
+        }
+      },
+      "createTime": "2026-04-03T01:46:13.603224Z",
+      "updateTime": "2026-04-03T01:46:13.603224Z"
+    }
+  ]
+}
+
+[04:22:29.160] [ChatService.LoadMessages] Carregadas 9 mensagens
+[ChatService.LoadMessages] Carregadas 9 mensagens
+[04:22:29.160] [LoadConversationMessages] Carregadas 9 mensagens do Firebase
+[LoadConversationMessages] Carregadas 9 mensagens do Firebase
+[04:22:29.167] [HTTP MarkConversationRead] PATCH https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2?updateMask.fieldPaths=lastReadAtUserA
+[HTTP MarkConversationRead] PATCH https://firestore.googleapis.com/v1/projects/obsseractpi/databases/(default)/documents/conversations/NvtFyiDEfXM5fOygQiLuFf4M1W03-wVjYTM18zoSkKNezg7c2RjCqQMg2?updateMask.fieldPaths=lastReadAtUserA
+[04:22:29.433] [HTTP MarkConversationRead] Status: 200 OK
+[HTTP MarkConversationRead] Status: 200 OK
+[04:22:32.165] [HTTP MarkConversationRead] PayloadLength: 1226
+[HTTP MarkConversationRead] PayloadLength: 1226
