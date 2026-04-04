@@ -1,0 +1,18 @@
+# Build outputs
+bin/
+obj/
+obj_codex/
+
+# Logs
+*.log
+logs/
+
+# Local IDE and user state
+.vs/
+*.user
+*.rsuser
+*.suo
+
+# Temporary validation outputs
+out_probe/
+obj_probe/
