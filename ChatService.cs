@@ -14,7 +14,6 @@ namespace MeuApp
     /// </summary>
     public class ChatService
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
         private readonly string _idToken;
         private readonly string _currentUserId;
@@ -80,7 +79,7 @@ namespace MeuApp
                 };
 
                 // URL para salvar no Firestore
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{messageId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages/{messageId}");
 
                 var requestBody = JsonSerializer.Serialize(messageData);
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
@@ -144,7 +143,7 @@ namespace MeuApp
                     }
                 });
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{documentId}?updateMask.fieldPaths=content&updateMask.fieldPaths=isEdited&updateMask.fieldPaths=editedAt";
+                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages/{documentId}")}?updateMask.fieldPaths=content&updateMask.fieldPaths=isEdited&updateMask.fieldPaths=editedAt";
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
@@ -205,7 +204,7 @@ namespace MeuApp
                     }
                 });
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages/{documentId}?updateMask.fieldPaths=content&updateMask.fieldPaths=messageType&updateMask.fieldPaths=stickerAsset&updateMask.fieldPaths=isDeleted&updateMask.fieldPaths=deletedAt";
+                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages/{documentId}")}?updateMask.fieldPaths=content&updateMask.fieldPaths=messageType&updateMask.fieldPaths=stickerAsset&updateMask.fieldPaths=isDeleted&updateMask.fieldPaths=deletedAt";
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
@@ -248,7 +247,7 @@ namespace MeuApp
                 var messages = new List<ChatMessage>();
 
                 // URL para obter documentos da conversa
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}/messages";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages");
 
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
@@ -354,7 +353,7 @@ namespace MeuApp
                     }
                 });
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}?updateMask.fieldPaths={fieldName}";
+                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}")}?updateMask.fieldPaths={fieldName}";
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
@@ -706,7 +705,7 @@ namespace MeuApp
                 };
 
                 var requestBody = JsonSerializer.Serialize(new { fields });
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}");
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
@@ -841,7 +840,7 @@ namespace MeuApp
         private async Task<List<Conversation>> LoadConversationsByParticipantFieldAsync(string fieldName)
         {
             var conversations = new List<Conversation>();
-            var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
+            var url = AppConfig.BuildFirestoreRunQueryUrl();
             var requestBody = JsonSerializer.Serialize(new
             {
                 structuredQuery = new
@@ -978,7 +977,7 @@ namespace MeuApp
                     }
                 });
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/conversations/{conversationId}?updateMask.fieldPaths=lastMessage&updateMask.fieldPaths=lastMessageTime&updateMask.fieldPaths=lastSenderId";
+                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}")}?updateMask.fieldPaths=lastMessage&updateMask.fieldPaths=lastMessageTime&updateMask.fieldPaths=lastSenderId";
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");

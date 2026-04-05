@@ -10,7 +10,6 @@ namespace MeuApp
 {
     public class ConnectionService
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
         private readonly string _idToken;
         private readonly UserProfile _currentProfile;
@@ -33,7 +32,7 @@ namespace MeuApp
                     return connections;
                 }
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
+                var url = AppConfig.BuildFirestoreRunQueryUrl();
                 var requestBody = JsonSerializer.Serialize(new
                 {
                     structuredQuery = new
@@ -407,7 +406,7 @@ namespace MeuApp
 
         private async Task<ConnectionOperationResult> PatchDocumentAsync(string relativePath, object payload)
         {
-            var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/{relativePath}";
+            var url = AppConfig.BuildFirestoreDocumentUrl(relativePath);
             var request = new HttpRequestMessage(HttpMethod.Patch, url)
             {
                 Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
@@ -427,7 +426,7 @@ namespace MeuApp
 
         private async Task<ConnectionOperationResult> DeleteDocumentAsync(string relativePath)
         {
-            var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/{relativePath}";
+            var url = AppConfig.BuildFirestoreDocumentUrl(relativePath);
             var request = new HttpRequestMessage(HttpMethod.Delete, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 

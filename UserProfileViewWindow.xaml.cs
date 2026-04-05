@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -13,14 +14,38 @@ namespace MeuApp
 {
     public partial class UserProfileViewWindow : MetroWindow
     {
-        private readonly UserProfileViewModel _viewModel;
+        private readonly UserProfile _profile;
+        private readonly UserProfile? _viewerProfile;
+        private readonly Action<TeamWorkspaceInfo>? _openTeamAction;
+        private readonly Func<TeamWorkspaceInfo, Task<TeamWorkspaceInfo?>>? _claimProfessorAction;
+        private readonly List<TeamWorkspaceInfo> _featuredProjects;
+        private readonly List<TeamWorkspaceInfo> _portfolioTeams;
+        private UserProfileViewModel _viewModel = null!;
 
-        public UserProfileViewWindow(UserProfile profile, UIElement avatarVisual, IReadOnlyList<TeamWorkspaceInfo>? featuredProjects = null)
+        public UserProfileViewWindow(
+            UserProfile profile,
+            UIElement avatarVisual,
+            IReadOnlyList<TeamWorkspaceInfo>? featuredProjects = null,
+            IReadOnlyList<TeamWorkspaceInfo>? portfolioTeams = null,
+            UserProfile? viewerProfile = null,
+            Action<TeamWorkspaceInfo>? openTeamAction = null,
+            Func<TeamWorkspaceInfo, Task<TeamWorkspaceInfo?>>? claimProfessorAction = null)
         {
             InitializeComponent();
-            _viewModel = new UserProfileViewModel(profile, featuredProjects ?? Array.Empty<TeamWorkspaceInfo>());
-            DataContext = _viewModel;
+            _profile = profile;
+            _viewerProfile = viewerProfile;
+            _openTeamAction = openTeamAction;
+            _claimProfessorAction = claimProfessorAction;
+            _featuredProjects = (featuredProjects ?? Array.Empty<TeamWorkspaceInfo>()).ToList();
+            _portfolioTeams = (portfolioTeams ?? Array.Empty<TeamWorkspaceInfo>()).ToList();
             AvatarHost.Content = avatarVisual;
+            RefreshViewModel();
+        }
+
+        private void RefreshViewModel()
+        {
+            _viewModel = new UserProfileViewModel(_profile, _featuredProjects, _portfolioTeams, _viewerProfile);
+            DataContext = _viewModel;
             OpenPortfolioButton.IsEnabled = _viewModel.HasPortfolio;
             OpenLinkedInButton.IsEnabled = _viewModel.HasLinkedIn;
         }
@@ -101,6 +126,61 @@ namespace MeuApp
             Close();
         }
 
+        private void OpenPortfolioTeam_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not FeaturedProjectViewModel project)
+            {
+                return;
+            }
+
+            _openTeamAction?.Invoke(project.Team);
+            Close();
+        }
+
+        private async void ClaimProfessorFocus_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not FeaturedProjectViewModel project || _claimProfessorAction == null)
+            {
+                return;
+            }
+
+            if (sender is Button button)
+            {
+                button.IsEnabled = false;
+            }
+
+            try
+            {
+                var updatedTeam = await _claimProfessorAction(project.Team);
+                if (updatedTeam == null)
+                {
+                    return;
+                }
+
+                ReplaceTeam(updatedTeam, _featuredProjects);
+                ReplaceTeam(updatedTeam, _portfolioTeams);
+                RefreshViewModel();
+            }
+            finally
+            {
+                if (sender is Button actionButton)
+                {
+                    actionButton.IsEnabled = true;
+                }
+            }
+        }
+
+        private static void ReplaceTeam(TeamWorkspaceInfo updatedTeam, IList<TeamWorkspaceInfo> teams)
+        {
+            for (var index = 0; index < teams.Count; index++)
+            {
+                if (string.Equals(teams[index].TeamId, updatedTeam.TeamId, StringComparison.OrdinalIgnoreCase))
+                {
+                    teams[index] = updatedTeam;
+                }
+            }
+        }
+
         private void OpenExternalLink(string? url)
         {
             if (string.IsNullOrWhiteSpace(url))
@@ -129,7 +209,11 @@ namespace MeuApp
 
     public sealed class UserProfileViewModel
     {
-        public UserProfileViewModel(UserProfile profile, IReadOnlyCollection<TeamWorkspaceInfo> featuredProjects)
+        public UserProfileViewModel(
+            UserProfile profile,
+            IReadOnlyCollection<TeamWorkspaceInfo> featuredProjects,
+            IReadOnlyCollection<TeamWorkspaceInfo> portfolioTeams,
+            UserProfile? viewerProfile)
         {
             DisplayName = string.IsNullOrWhiteSpace(profile.Name) ? "Aluno sem identificação" : profile.Name;
             Headline = BuildHeadline(profile);
@@ -149,18 +233,27 @@ namespace MeuApp
             RegistrationBadge = string.IsNullOrWhiteSpace(profile.Registration) ? "Matrícula indisponível" : $"Matrícula: {profile.Registration}";
             LanguagesBadge = string.IsNullOrWhiteSpace(profile.ProgrammingLanguages) ? "Sem stack cadastrada" : profile.ProgrammingLanguages;
             GalleryImages = BuildGalleryImages(profile.GalleryImages);
-            FeaturedProjects = BuildFeaturedProjects(featuredProjects);
+            FeaturedProjects = BuildFeaturedProjects(featuredProjects, viewerProfile);
+            PortfolioTeams = BuildFeaturedProjects(portfolioTeams, viewerProfile);
 
             var hiddenProjectsCount = Math.Max(0, (profile.FeaturedProjectIds?.Count ?? 0) - FeaturedProjects.Count);
             GalleryVisibility = GalleryImages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyGalleryVisibility = GalleryImages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             FeaturedProjectsVisibility = FeaturedProjects.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyFeaturedProjectsVisibility = FeaturedProjects.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            PortfolioTeamsVisibility = PortfolioTeams.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            EmptyPortfolioTeamsVisibility = PortfolioTeams.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             RestrictedProjectsNoteVisibility = hiddenProjectsCount > 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyGalleryMessage = "Este aluno ainda não publicou imagens ou blocos de galeria no currículo.";
             EmptyFeaturedProjectsMessage = hiddenProjectsCount > 0
                 ? "Este aluno destacou projetos, mas eles não estão disponíveis para o seu acesso."
                 : "Este aluno ainda não destacou projetos no perfil.";
+            PortfolioSectionDescription = TeamPermissionService.CanUseProfessorDashboard(viewerProfile)
+                ? "Como docente, você pode abrir o workspace, acompanhar o andamento real e assumir a supervisão focal da equipe diretamente daqui."
+                : "Equipes e projetos vinculados a este perfil conforme as permissões disponíveis para sua conta.";
+            EmptyPortfolioTeamsMessage = TeamPermissionService.CanUseProfessorDashboard(viewerProfile)
+                ? "Nenhuma equipe vinculada deste aluno está visível para supervisão neste momento."
+                : "Nenhuma equipe vinculada visível para sua conta neste momento.";
             RestrictedProjectsNote = hiddenProjectsCount == 1
                 ? "1 projeto destacado foi ocultado por restrição de acesso."
                 : $"{hiddenProjectsCount} projetos destacados foram ocultados por restrição de acesso.";
@@ -181,15 +274,20 @@ namespace MeuApp
         public string LanguagesBadge { get; }
         public string EmptyGalleryMessage { get; }
         public string EmptyFeaturedProjectsMessage { get; }
+        public string EmptyPortfolioTeamsMessage { get; }
+        public string PortfolioSectionDescription { get; }
         public string RestrictedProjectsNote { get; }
         public string? PortfolioUrl { get; }
         public string? LinkedInUrl { get; }
         public IReadOnlyList<ImagePreviewCardViewModel> GalleryImages { get; }
         public IReadOnlyList<FeaturedProjectViewModel> FeaturedProjects { get; }
+        public IReadOnlyList<FeaturedProjectViewModel> PortfolioTeams { get; }
         public Visibility GalleryVisibility { get; }
         public Visibility EmptyGalleryVisibility { get; }
         public Visibility FeaturedProjectsVisibility { get; }
         public Visibility EmptyFeaturedProjectsVisibility { get; }
+        public Visibility PortfolioTeamsVisibility { get; }
+        public Visibility EmptyPortfolioTeamsVisibility { get; }
         public Visibility RestrictedProjectsNoteVisibility { get; }
         public bool HasPortfolio => !string.IsNullOrWhiteSpace(PortfolioUrl);
         public bool HasLinkedIn => !string.IsNullOrWhiteSpace(LinkedInUrl);
@@ -271,10 +369,13 @@ namespace MeuApp
             return entries;
         }
 
-        private static IReadOnlyList<FeaturedProjectViewModel> BuildFeaturedProjects(IEnumerable<TeamWorkspaceInfo>? teams)
+        private static IReadOnlyList<FeaturedProjectViewModel> BuildFeaturedProjects(IEnumerable<TeamWorkspaceInfo>? teams, UserProfile? viewerProfile)
         {
             return (teams ?? Enumerable.Empty<TeamWorkspaceInfo>())
-                .Select(team => new FeaturedProjectViewModel(team))
+            .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new FeaturedProjectViewModel(group.First(), viewerProfile))
+            .OrderByDescending(team => team.Team.UpdatedAt)
+            .ThenBy(team => team.DisplayName)
                 .ToList();
         }
 
@@ -506,8 +607,9 @@ namespace MeuApp
 
     public sealed class FeaturedProjectViewModel
     {
-        public FeaturedProjectViewModel(TeamWorkspaceInfo team)
+        public FeaturedProjectViewModel(TeamWorkspaceInfo team, UserProfile? viewerProfile = null)
         {
+            Team = team;
             DisplayName = string.IsNullOrWhiteSpace(team.TeamName) ? "Projeto sem nome" : team.TeamName;
             Subtitle = BuildSubtitle(team);
             StatusLabel = string.IsNullOrWhiteSpace(team.ProjectStatus) ? "Projeto em andamento" : team.ProjectStatus;
@@ -531,8 +633,17 @@ namespace MeuApp
             PreviewImagesVisibility = PreviewImages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyPreviewVisibility = PreviewImages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyPreviewMessage = "Nenhuma imagem do projeto foi publicada até o momento.";
+            ProfessorFocusLabel = BuildProfessorFocusLabel(team);
+            SupervisorLabel = BuildSupervisorLabel(team, viewerProfile);
+            SupervisorLabelVisibility = string.IsNullOrWhiteSpace(SupervisorLabel) ? Visibility.Collapsed : Visibility.Visible;
+            OpenTeamActionVisibility = Visibility.Visible;
+            IsViewerFocalProfessor = viewerProfile != null && string.Equals(team.FocalProfessorUserId, viewerProfile.UserId, StringComparison.OrdinalIgnoreCase);
+            CanClaimProfessorFocus = TeamPermissionService.CanClaimFocalProfessorRole(viewerProfile) && !IsViewerFocalProfessor;
+            ClaimProfessorActionVisibility = TeamPermissionService.CanClaimFocalProfessorRole(viewerProfile) ? Visibility.Visible : Visibility.Collapsed;
+            ClaimProfessorActionLabel = IsViewerFocalProfessor ? "Você já é focal" : "Assumir como professor focal";
         }
 
+        public TeamWorkspaceInfo Team { get; }
         public string DisplayName { get; }
         public string Subtitle { get; }
         public string StatusLabel { get; }
@@ -542,9 +653,17 @@ namespace MeuApp
         public string UpdatedAtLabel { get; }
         public string Summary { get; }
         public string EmptyPreviewMessage { get; }
+        public string ProfessorFocusLabel { get; }
+        public string SupervisorLabel { get; }
+        public string ClaimProfessorActionLabel { get; }
         public IReadOnlyList<ProjectImagePreviewViewModel> PreviewImages { get; }
         public Visibility PreviewImagesVisibility { get; }
         public Visibility EmptyPreviewVisibility { get; }
+        public Visibility SupervisorLabelVisibility { get; }
+        public Visibility OpenTeamActionVisibility { get; }
+        public Visibility ClaimProfessorActionVisibility { get; }
+        public bool CanClaimProfessorFocus { get; }
+        public bool IsViewerFocalProfessor { get; }
 
         private static string BuildSubtitle(TeamWorkspaceInfo team)
         {
@@ -588,6 +707,50 @@ namespace MeuApp
             }
 
             return string.Join(" • ", parts);
+        }
+
+        private static string BuildProfessorFocusLabel(TeamWorkspaceInfo team)
+        {
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorName))
+            {
+                return $"Professor focal: {team.FocalProfessorName}";
+            }
+
+            return "Professor focal ainda não definido";
+        }
+
+        private static string BuildSupervisorLabel(TeamWorkspaceInfo team, UserProfile? viewerProfile)
+        {
+            var supervisors = (team.ProfessorSupervisorNames ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var viewerIsSupervisor = viewerProfile != null && (
+                string.Equals(team.FocalProfessorUserId, viewerProfile.UserId, StringComparison.OrdinalIgnoreCase)
+                || (team.ProfessorSupervisorUserIds ?? new List<string>()).Contains(viewerProfile.UserId, StringComparer.OrdinalIgnoreCase));
+
+            if (viewerIsSupervisor && !string.IsNullOrWhiteSpace(team.FocalProfessorUserId) &&
+                !string.Equals(team.FocalProfessorUserId, viewerProfile?.UserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return "Você já acompanha a equipe e pode assumir o foco docente quando quiser.";
+            }
+
+            if (viewerIsSupervisor)
+            {
+                return "Você já acompanha esta equipe no fluxo docente.";
+            }
+
+            if (supervisors.Count == 0)
+            {
+                return TeamPermissionService.CanUseProfessorDashboard(viewerProfile)
+                    ? "Nenhum docente vinculado ainda."
+                    : string.Empty;
+            }
+
+            return supervisors.Count == 1
+                ? $"Docente vinculado: {supervisors[0]}"
+                : $"Docentes vinculados: {string.Join(", ", supervisors.Take(2))}";
         }
     }
 }

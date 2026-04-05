@@ -31,13 +31,12 @@ namespace MeuApp
             Info
         }
 
-        private const string FirebaseApiKey = "AIzaSyA2V4MEzgOoKEEZAAXH49DXbzxUo0_CuWU";
-        private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
 
         public LoginWindow()
         {
             InitializeComponent();
+            UpdateProfessorSignupFieldsVisibility();
         }
 
         private void SwitchTab_Click(object sender, RoutedEventArgs e)
@@ -164,8 +163,41 @@ namespace MeuApp
                 Email = loginResult.Email ?? email,
                 Phone = string.Empty,
                 Course = string.Empty,
-                Registration = string.Empty
+                Registration = string.Empty,
+                Role = "student"
             };
+        }
+
+        private void SignupRoleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateProfessorSignupFieldsVisibility();
+        }
+
+        private void UpdateProfessorSignupFieldsVisibility()
+        {
+            if (ProfessorSignupFieldsPanel is null || SignupRoleComboBox is null)
+            {
+                return;
+            }
+
+            var selectedRole = GetSelectedSignupRole();
+            ProfessorSignupFieldsPanel.Visibility = TeamPermissionService.IsProfessorLike(selectedRole)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        private string GetSelectedSignupRole()
+        {
+            return SignupRoleComboBox?.SelectedItem is ComboBoxItem selectedRole
+                ? TeamPermissionService.NormalizeRole(selectedRole.Tag?.ToString())
+                : "student";
+        }
+
+        private string BuildDefaultProfessionalTitle(string role)
+        {
+            return TeamPermissionService.IsProfessorLike(role)
+                ? "Professor orientador"
+                : "Aluno";
         }
 
         private async Task HydrateProfileAfterLoginAsync(MainWindow mainWindow, string localId, string idToken, UserProfile fallbackProfile)
@@ -189,6 +221,10 @@ namespace MeuApp
             string phone = SignupPhone.Text;
             string course = SignupCourse.Text;
             string registration = SignupRegistration.Text;
+            string role = GetSelectedSignupRole();
+            string academicDepartment = SignupAcademicDepartment.Text;
+            string academicFocus = SignupAcademicFocus.Text;
+            string officeHours = SignupOfficeHours.Text;
             string password = SignupPassword.Password;
             string passwordConfirm = SignupPasswordConfirm.Password;
 
@@ -229,17 +265,28 @@ namespace MeuApp
                     return;
                 }
 
-                var saveResult = await SaveUserProfileAsync(signupResult.LocalId!, signupResult.IdToken!, name, email, phone, course, registration);
+                var profile = new UserProfile
+                {
+                    UserId = signupResult.LocalId!,
+                    Name = name,
+                    Email = email,
+                    Phone = phone,
+                    Course = course,
+                    Registration = registration,
+                    Role = role,
+                    AcademicDepartment = academicDepartment,
+                    AcademicFocus = academicFocus,
+                    OfficeHours = officeHours,
+                    ProfessorAccessLevel = TeamPermissionService.IsProfessorLike(role) ? "faculty-dashboard" : "student-workspace",
+                    ProfessionalTitle = BuildDefaultProfessionalTitle(role)
+                };
+
+                var saveResult = await SaveUserProfileAsync(signupResult.LocalId!, signupResult.IdToken!, profile);
                 if (!saveResult.Success)
                 {
                     MessageBox.Show($"Não foi possível salvar o perfil: {saveResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-
-                var profile = new UserProfile
-                {
-                    UserId = signupResult.LocalId!, Name = name, Email = email, Phone = phone, Course = course, Registration = registration
-                };
 
                 var mainWindow = new MainWindow(profile, signupResult.IdToken ?? string.Empty);
                 mainWindow.Show();
@@ -256,7 +303,7 @@ namespace MeuApp
         {
             try
             {
-                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FirebaseApiKey}";
+                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={AppConfig.FirebaseApiKey}";
                 var body = new
                 {
                     email,
@@ -308,7 +355,7 @@ namespace MeuApp
         {
             try
             {
-                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FirebaseApiKey}";
+                var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={AppConfig.FirebaseApiKey}";
                 var body = new
                 {
                     requestType = "PASSWORD_RESET",
@@ -641,7 +688,7 @@ namespace MeuApp
 
         private async Task<AuthResult> FirebaseSignUpAsync(string email, string password)
         {
-            var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={FirebaseApiKey}";
+            var endpoint = $"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={AppConfig.FirebaseApiKey}";
             var body = new
             {
                 email,
@@ -680,30 +727,37 @@ namespace MeuApp
             }
         }
 
-        private async Task<(bool Success, string? ErrorMessage)> SaveUserProfileAsync(string localId, string idToken, string name, string email, string phone, string course, string registration)
+        private async Task<(bool Success, string? ErrorMessage)> SaveUserProfileAsync(string localId, string idToken, UserProfile profile)
         {
-            var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users?documentId={localId}";
+            profile.Role = TeamPermissionService.NormalizeRole(profile.Role);
+
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users?documentId={localId}");
             var body = new
             {
                 fields = new
                 {
-                    name = new { stringValue = name },
-                    email = new { stringValue = email },
-                    phone = new { stringValue = phone },
-                    course = new { stringValue = course },
-                    registration = new { stringValue = registration },
-                    nickname = new { stringValue = string.Empty },
-                    professionalTitle = new { stringValue = string.Empty },
-                    bio = new { stringValue = string.Empty },
-                    skills = new { stringValue = string.Empty },
-                    programmingLanguages = new { stringValue = string.Empty },
-                    portfolioLink = new { stringValue = string.Empty },
-                    linkedInLink = new { stringValue = string.Empty },
-                    avatarBody = new { stringValue = string.Empty },
-                    avatarHair = new { stringValue = string.Empty },
-                    avatarHat = new { stringValue = string.Empty },
-                    avatarAccessory = new { stringValue = string.Empty },
-                    avatarClothing = new { stringValue = string.Empty },
+                    name = new { stringValue = profile.Name },
+                    email = new { stringValue = profile.Email },
+                    phone = new { stringValue = profile.Phone },
+                    course = new { stringValue = profile.Course },
+                    registration = new { stringValue = profile.Registration },
+                    role = new { stringValue = profile.Role },
+                    academicDepartment = new { stringValue = profile.AcademicDepartment ?? string.Empty },
+                    academicFocus = new { stringValue = profile.AcademicFocus ?? string.Empty },
+                    officeHours = new { stringValue = profile.OfficeHours ?? string.Empty },
+                    professorAccessLevel = new { stringValue = profile.ProfessorAccessLevel ?? string.Empty },
+                    nickname = new { stringValue = profile.Nickname ?? string.Empty },
+                    professionalTitle = new { stringValue = profile.ProfessionalTitle ?? string.Empty },
+                    bio = new { stringValue = profile.Bio ?? string.Empty },
+                    skills = new { stringValue = profile.Skills ?? string.Empty },
+                    programmingLanguages = new { stringValue = profile.ProgrammingLanguages ?? string.Empty },
+                    portfolioLink = new { stringValue = profile.PortfolioLink ?? string.Empty },
+                    linkedInLink = new { stringValue = profile.LinkedInLink ?? string.Empty },
+                    avatarBody = new { stringValue = profile.AvatarBody ?? string.Empty },
+                    avatarHair = new { stringValue = profile.AvatarHair ?? string.Empty },
+                    avatarHat = new { stringValue = profile.AvatarHat ?? string.Empty },
+                    avatarAccessory = new { stringValue = profile.AvatarAccessory ?? string.Empty },
+                    avatarClothing = new { stringValue = profile.AvatarClothing ?? string.Empty },
                     galleryImages = new { arrayValue = new { } },
                     featuredProjectIds = new { arrayValue = new { } },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
@@ -728,7 +782,7 @@ namespace MeuApp
 
         private async Task<UserProfile?> GetUserProfileAsync(string localId, string idToken)
         {
-            var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{localId}";
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{localId}");
             var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", idToken);
 
@@ -751,6 +805,11 @@ namespace MeuApp
                 Phone = TryGetStringField(fields, "phone"),
                 Course = TryGetStringField(fields, "course"),
                 Registration = TryGetStringField(fields, "registration"),
+                Role = TeamPermissionService.NormalizeRole(TryGetStringField(fields, "role")),
+                AcademicDepartment = TryGetStringField(fields, "academicDepartment"),
+                AcademicFocus = TryGetStringField(fields, "academicFocus"),
+                OfficeHours = TryGetStringField(fields, "officeHours"),
+                ProfessorAccessLevel = TryGetStringField(fields, "professorAccessLevel"),
                 Nickname = TryGetStringField(fields, "nickname"),
                 ProfessionalTitle = TryGetStringField(fields, "professionalTitle"),
                 Bio = TryGetStringField(fields, "bio"),
@@ -860,6 +919,11 @@ namespace MeuApp
         public string Phone { get; set; } = string.Empty;
         public string Course { get; set; } = string.Empty;
         public string Registration { get; set; } = string.Empty;
+        public string Role { get; set; } = "student";
+        public string AcademicDepartment { get; set; } = string.Empty;
+        public string AcademicFocus { get; set; } = string.Empty;
+        public string OfficeHours { get; set; } = string.Empty;
+        public string ProfessorAccessLevel { get; set; } = string.Empty;
         public string Nickname { get; set; } = string.Empty;
         public string ProfessionalTitle { get; set; } = string.Empty;
         public string Bio { get; set; } = string.Empty;

@@ -34,11 +34,11 @@ namespace MeuApp
 {
     public partial class MainWindow : MetroWindow
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private const int MaxProfileGalleryImages = 6;
         private const int ProfileGalleryImageMaxSide = 720;
         private const int TeamLogoOutputSize = 420;
         private const int TeamLogoJpegQuality = 86;
+        private const int MaxRemoteTeamAssetBytes = 524288;
         private static readonly HttpClient httpClient = new HttpClient();
         private static readonly string[] KnownProgrammingLanguages =
         {
@@ -201,7 +201,9 @@ namespace MeuApp
         private TeamAssetInfo? _draftTeamLogoAsset = null;
         private readonly List<UserInfo> _teamMemberSearchResults = new List<UserInfo>();
         private readonly List<TeamWorkspaceInfo> _teamWorkspaces = new List<TeamWorkspaceInfo>();
+        private List<TeamWorkspaceInfo> _teamListSearchResults = new List<TeamWorkspaceInfo>();
         private int _teamMemberSearchVersion = 0;
+        private int _teamListSearchVersion = 0;
         private bool _suppressTeamMemberSearch = false;
         private TeamBoardView _activeTeamBoardView = TeamBoardView.Trello;
         private TeamTaskCardInfo? _draggedTeamTaskCard = null;
@@ -221,16 +223,26 @@ namespace MeuApp
         private readonly HashSet<string> _connectedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<UserInfo?>> _userInfoCache = new ConcurrentDictionary<string, Task<UserInfo?>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<UserProfile?>> _userProfileCache = new ConcurrentDictionary<string, Task<UserProfile?>>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<List<TeamWorkspaceInfo>>> _userAcademicPortfolioCache = new ConcurrentDictionary<string, Task<List<TeamWorkspaceInfo>>>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, ImageSource?> _avatarImageCache = new ConcurrentDictionary<string, ImageSource?>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, ImageSource?> _stickerImageCache = new ConcurrentDictionary<string, ImageSource?>(StringComparer.OrdinalIgnoreCase);
         private List<UserConnectionInfo> _connectionEntries = new List<UserConnectionInfo>();
         private List<UserInfo> _searchSlideResults = new List<UserInfo>();
+        private List<TeamWorkspaceInfo> _searchSlideTeamResults = new List<TeamWorkspaceInfo>();
+        private readonly DispatcherTimer _realtimeSyncTimer = new DispatcherTimer();
+        private List<CalendarAgendaItem> _lastCalendarAgendaItems = new List<CalendarAgendaItem>();
+        private List<TeamWorkspaceInfo> _lastCalendarAgendaTeams = new List<TeamWorkspaceInfo>();
         private string _searchSlideQuery = string.Empty;
         private int _searchSlideTypingVersion = 0;
         private int _searchSlideRequestVersion = 0;
         private int _teamSyncSequence = 0;
         private int _chatRenderSequence = 0;
         private int _teamWorkspaceRenderSequence = 0;
+        private bool _realtimeSyncInFlight = false;
+        private string _calendarFilterTeamId = string.Empty;
+        private string _calendarFilterKind = "Todos";
+        private string _calendarFilterStatus = "Todos";
+        private int _calendarFilterWindowDays = 14;
         private FilesHubState _filesHubState = new FilesHubState();
         private bool _filesHubStateLoaded = false;
         private bool _showChoasIntroBubble = false;
@@ -278,12 +290,33 @@ namespace MeuApp
             public DateTime AddedAt { get; set; } = DateTime.Now;
             public long FileSizeBytes { get; set; }
             public string FileExtension { get; set; } = string.Empty;
+            public string RemoteTeamId { get; set; } = string.Empty;
+            public string RemoteTeamName { get; set; } = string.Empty;
+            public string RemoteAssetId { get; set; } = string.Empty;
+            public string RemotePermissionScope { get; set; } = "team";
+            public string RemoteStorageReference { get; set; } = string.Empty;
+            public int RemoteVersion { get; set; }
+            public DateTime? RemoteLastSyncedAt { get; set; }
         }
 
         private sealed class FilesHubAssociationSelection
         {
             public string AssociationType { get; init; } = "Projeto";
             public string AssociationLabel { get; init; } = string.Empty;
+        }
+
+        private sealed class FilesHubSyncSelection
+        {
+            public TeamWorkspaceInfo Team { get; init; } = new TeamWorkspaceInfo();
+            public string PermissionScope { get; init; } = "team";
+            public string ChangeSummary { get; init; } = string.Empty;
+        }
+
+        private sealed class PendingAttachmentFile
+        {
+            public string FilePath { get; init; } = string.Empty;
+            public string FileName { get; init; } = string.Empty;
+            public string PreviewImageDataUri { get; init; } = string.Empty;
         }
 
         private sealed class CalendarAgendaItem
@@ -309,6 +342,7 @@ namespace MeuApp
             InitializeComponent();
             ProgrammingLanguageInput.ItemsSource = KnownProgrammingLanguages.OrderBy(language => language).ToList();
             InitializeTeamsUi();
+            InitializeRealtimeSync();
             ApplyAppTheme();
             this.KeyDown += MainWindow_KeyDown;
             this.Loaded += MainWindow_Loaded;
@@ -329,11 +363,43 @@ namespace MeuApp
                 await LoadActiveConversationsAsync();
                 _ = LoadTeamsFromDatabaseAsync();
                 _ = RefreshConnectionsCacheAsync();
+                _realtimeSyncTimer.Start();
             }
             else
             {
                 RefreshChatsUI();
                 UpdateConnectionsBadge();
+                _realtimeSyncTimer.Stop();
+            }
+        }
+
+        private void InitializeRealtimeSync()
+        {
+            _realtimeSyncTimer.Interval = TimeSpan.FromSeconds(45);
+            _realtimeSyncTimer.Tick += RealtimeSyncTimer_Tick;
+        }
+
+        private async void RealtimeSyncTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_realtimeSyncInFlight || string.IsNullOrWhiteSpace(_idToken) || _currentProfile == null)
+            {
+                return;
+            }
+
+            _realtimeSyncInFlight = true;
+            try
+            {
+                await LoadActiveConversationsAsync();
+                await LoadTeamsFromDatabaseAsync();
+                await RefreshConnectionsCacheAsync();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[RealtimeSync] Falha durante sincronizacao: {ex.Message}");
+            }
+            finally
+            {
+                _realtimeSyncInFlight = false;
             }
         }
 
@@ -426,6 +492,10 @@ namespace MeuApp
                     Registration = profile.Registration,
                     Course = profile.Course,
                     Phone = profile.Phone,
+                    Role = profile.Role,
+                    AcademicDepartment = profile.AcademicDepartment,
+                    AcademicFocus = profile.AcademicFocus,
+                    OfficeHours = profile.OfficeHours,
                     Nickname = profile.Nickname,
                     ProfessionalTitle = profile.ProfessionalTitle,
                     Bio = profile.Bio,
@@ -444,15 +514,67 @@ namespace MeuApp
             WelcomeText.Text = $"Bem-vindo, {profile.Name}";
             SidebarUserName.Text = profile.Name;
             SidebarUserEmail.Text = profile.Email;
-            SidebarUserRole.Text = $"{profile.Course} | Matrícula: {profile.Registration}";
+            UpdateRoleAwareShellState(profile);
             PopulateProfessionalProfileFields(profile);
             RefreshAvatarUi(profile);
             SyncCurrentUserAvatarAcrossTeams(profile);
             SyncTeamDefaultsWithProfile(profile);
+            RenderProfessorDashboard();
 
             if (FilesContent.Visibility == Visibility.Visible)
             {
                 RenderFilesHub();
+            }
+        }
+
+        private void UpdateRoleAwareShellState(UserProfile? profile)
+        {
+            var normalizedRole = TeamPermissionService.NormalizeRole(profile?.Role);
+            var roleLabel = TeamPermissionService.GetRoleLabel(normalizedRole);
+            var subtitleParts = new List<string> { roleLabel };
+
+            if (TeamPermissionService.IsProfessorLike(normalizedRole))
+            {
+                if (!string.IsNullOrWhiteSpace(profile?.AcademicDepartment))
+                {
+                    subtitleParts.Add(profile.AcademicDepartment.Trim());
+                }
+                if (!string.IsNullOrWhiteSpace(profile?.AcademicFocus))
+                {
+                    subtitleParts.Add(profile.AcademicFocus.Trim());
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(profile?.Course))
+                {
+                    subtitleParts.Add(profile.Course.Trim());
+                }
+                if (!string.IsNullOrWhiteSpace(profile?.Registration))
+                {
+                    subtitleParts.Add($"Matrícula {profile.Registration.Trim()}");
+                }
+            }
+
+            SidebarUserRole.Text = string.Join(" • ", subtitleParts.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+            if (AccountRoleText != null)
+            {
+                AccountRoleText.Text = roleLabel;
+            }
+
+            if (ProfessorAccessText != null)
+            {
+                ProfessorAccessText.Text = string.IsNullOrWhiteSpace(profile?.ProfessorAccessLevel)
+                    ? (TeamPermissionService.IsProfessorLike(normalizedRole) ? "professor-advisory" : "student-workspace")
+                    : profile!.ProfessorAccessLevel;
+            }
+
+            if (ProfessorNavButton != null)
+            {
+                ProfessorNavButton.Visibility = TeamPermissionService.CanUseProfessorDashboard(profile)
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
             }
         }
 
@@ -800,14 +922,8 @@ namespace MeuApp
 
         private FilesHubItem ArchiveFilesHubItem(string filePath, FilesHubAssociationSelection associationSelection)
         {
-            var archiveDirectory = GetFilesHubArchiveDirectory();
-            Directory.CreateDirectory(archiveDirectory);
-
             var extension = IOPath.GetExtension(filePath);
-            var safeName = SanitizeFileNameSegment(IOPath.GetFileNameWithoutExtension(filePath));
-            var shortGuid = Guid.NewGuid().ToString("N").Substring(0, 8);
-            var archivedFileName = $"{DateTime.Now:yyyyMMddHHmmss}-{shortGuid}-{safeName}{extension}";
-            var destinationPath = IOPath.Combine(archiveDirectory, archivedFileName);
+            var destinationPath = CreateFilesHubArchiveFilePath(filePath);
             File.Copy(filePath, destinationPath, false);
 
             var fileInfo = new FileInfo(destinationPath);
@@ -822,6 +938,784 @@ namespace MeuApp
                 FileSizeBytes = fileInfo.Exists ? fileInfo.Length : 0,
                 FileExtension = string.IsNullOrWhiteSpace(extension) ? "ARQ" : extension.TrimStart('.').ToUpperInvariant()
             };
+        }
+
+        private string CreateFilesHubArchiveFilePath(string originalFilePathOrName)
+        {
+            var archiveDirectory = GetFilesHubArchiveDirectory();
+            Directory.CreateDirectory(archiveDirectory);
+
+            var originalName = IOPath.GetFileName(originalFilePathOrName);
+            var extension = IOPath.GetExtension(originalName);
+            var safeName = SanitizeFileNameSegment(IOPath.GetFileNameWithoutExtension(originalName));
+            var shortGuid = Guid.NewGuid().ToString("N").Substring(0, 8);
+            var archivedFileName = $"{DateTime.Now:yyyyMMddHHmmss}-{shortGuid}-{safeName}{extension}";
+            return IOPath.Combine(archiveDirectory, archivedFileName);
+        }
+
+        private string ArchiveBytesIntoFilesHub(string originalFileName, byte[] fileBytes)
+        {
+            var destinationPath = CreateFilesHubArchiveFilePath(originalFileName);
+            File.WriteAllBytes(destinationPath, fileBytes);
+            return destinationPath;
+        }
+
+        private bool IsFilesHubItemSynced(FilesHubItem item)
+        {
+            return item != null
+                && !string.IsNullOrWhiteSpace(item.RemoteTeamId)
+                && !string.IsNullOrWhiteSpace(item.RemoteAssetId)
+                && !string.IsNullOrWhiteSpace(item.RemoteStorageReference);
+        }
+
+        private TeamWorkspaceInfo? FindTeamById(string? teamId)
+        {
+            if (string.IsNullOrWhiteSpace(teamId))
+            {
+                return null;
+            }
+
+            return _teamWorkspaces.FirstOrDefault(team =>
+                string.Equals(team.TeamId, teamId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private FilesHubSyncSelection? ShowFilesHubSyncDialog(FilesHubItem item, TeamWorkspaceInfo? preferredTeam = null, string? preferredScope = null, string? preferredSummary = null)
+        {
+            var eligibleTeams = _teamWorkspaces
+                .Where(CanCurrentUserUploadFiles)
+                .OrderBy(team => team.TeamName)
+                .ToList();
+
+            if (eligibleTeams.Count == 0)
+            {
+                ShowStyledAlertDialog(
+                    "ARQUIVOS",
+                    "Sem equipe elegível",
+                    "Nenhuma equipe disponível aceita sincronização remota com o seu papel atual. Entre em uma equipe com permissão de upload para publicar esse material.",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+                return null;
+            }
+
+            var accentBrush = GetThemeBrush("AccentBrush");
+            var dialog = CreateStyledDialogWindow("Sincronizar no Firebase", 680, 620, 580);
+
+            var teamBox = new ComboBox
+            {
+                ItemsSource = eligibleTeams,
+                SelectedItem = preferredTeam != null && eligibleTeams.Any(team => string.Equals(team.TeamId, preferredTeam.TeamId, StringComparison.OrdinalIgnoreCase))
+                    ? eligibleTeams.First(team => string.Equals(team.TeamId, preferredTeam.TeamId, StringComparison.OrdinalIgnoreCase))
+                    : eligibleTeams.FirstOrDefault(),
+                DisplayMemberPath = "TeamName",
+                Height = 46,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var permissionScopeBox = new ComboBox
+            {
+                Height = 46,
+                Margin = new Thickness(0, 8, 0, 0),
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Equipe", Value = "team" },
+                    new { Label = "Curso", Value = "course" },
+                    new { Label = "Liderança", Value = "leadership" },
+                    new { Label = "Privado", Value = "private" }
+                },
+                SelectedValue = TeamPermissionService.NormalizePermissionScope(preferredScope)
+            };
+            var summaryBox = new TextBox
+            {
+                Text = preferredSummary ?? (IsFilesHubItemSynced(item) ? "Nova versão publicada a partir do hub local." : "Versão inicial publicada a partir do hub local."),
+                Height = 96,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+
+            ApplyDialogInputStyle(teamBox);
+            ApplyDialogInputStyle(permissionScopeBox);
+            ApplyDialogInputStyle(summaryBox);
+
+            FilesHubSyncSelection? result = null;
+
+            var form = new StackPanel();
+            form.Children.Add(CreateDialogSectionCard(
+                "Arquivo local",
+                "Você está publicando ou versionando um item que já vive no hub local do perfil.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = item.FileName,
+                            FontSize = 14,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = $"{item.FileExtension} • {FormatFilesHubSize(item.FileSizeBytes)}" + (string.IsNullOrWhiteSpace(item.AssociationLabel) ? string.Empty : $" • {item.AssociationLabel}"),
+                            Margin = new Thickness(0, 6, 0, 0),
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    }
+                }));
+
+            var destinationContent = new StackPanel();
+            destinationContent.Children.Add(CreateDialogFieldLabel("Equipe destino"));
+            destinationContent.Children.Add(teamBox);
+            destinationContent.Children.Add(CreateDialogFieldLabel("Escopo do arquivo"));
+            destinationContent.Children.Add(permissionScopeBox);
+            form.Children.Add(CreateDialogSectionCard(
+                "Destino remoto",
+                "Escolha a equipe que receberá o arquivo e defina quem deve conseguir abrir o conteúdo remoto.",
+                accentBrush,
+                destinationContent));
+
+            var summaryContent = new StackPanel();
+            summaryContent.Children.Add(CreateDialogFieldLabel("Resumo da mudança"));
+            summaryContent.Children.Add(summaryBox);
+            summaryContent.Children.Add(CreateDialogHintCard(
+                "Esse resumo vira trilha do versionamento dentro do material remoto da equipe.",
+                accentBrush));
+            form.Children.Add(CreateDialogSectionCard(
+                "Histórico",
+                "Registre em uma frase curta o que esta versão adiciona, substitui ou corrige.",
+                accentBrush,
+                summaryContent,
+                new Thickness(0, 0, 0, 0)));
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            root.Children.Add(CreateDialogHeader(
+                "ARQUIVOS",
+                IsFilesHubItemSynced(item) ? "Publicar nova versão" : "Sincronizar no Firebase",
+                "O conteúdo continua no seu hub local, mas passa a ter uma cópia remota versionada dentro da equipe selecionada.",
+                accentBrush));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            cancelButton.Click += (_, __) => dialog.Close();
+            var saveButton = CreateDialogActionButton("Sincronizar", accentBrush, Brushes.White, Brushes.Transparent, 132);
+            saveButton.Click += (_, __) =>
+            {
+                if (teamBox.SelectedItem is not TeamWorkspaceInfo selectedTeam)
+                {
+                    ShowStyledAlertDialog("ARQUIVOS", "Equipe obrigatória", "Escolha a equipe que receberá a sincronização remota antes de continuar.", "Continuar", accentBrush);
+                    return;
+                }
+
+                result = new FilesHubSyncSelection
+                {
+                    Team = selectedTeam,
+                    PermissionScope = permissionScopeBox.SelectedValue?.ToString() ?? selectedTeam.DefaultFilePermissionScope,
+                    ChangeSummary = string.IsNullOrWhiteSpace(summaryBox.Text)
+                        ? "Atualização enviada pelo hub de arquivos."
+                        : summaryBox.Text.Trim()
+                };
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0),
+                Children = { cancelButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            return dialog.ShowDialog() == true ? result : null;
+        }
+
+        private async Task<(bool Success, TeamAssetInfo? Asset, string? ErrorMessage)> CreateOrUpdateTeamAssetAsync(
+            TeamWorkspaceInfo team,
+            string filePath,
+            string category,
+            string permissionScope,
+            string changeSummary,
+            TeamAssetInfo? existingAsset = null,
+            string? description = null)
+        {
+            if (_teamService == null)
+            {
+                return (false, null, "Serviço de equipes não inicializado.");
+            }
+
+            if (!File.Exists(filePath))
+            {
+                return (false, null, "Arquivo local não encontrado para sincronização.");
+            }
+
+            var fileInfo = new FileInfo(filePath);
+            if (!fileInfo.Exists)
+            {
+                return (false, null, "Arquivo local não está mais disponível.");
+            }
+
+            if (fileInfo.Length > MaxRemoteTeamAssetBytes)
+            {
+                return (false, null, $"{IOPath.GetFileName(filePath)} excede o limite de {FormatFilesHubSize(MaxRemoteTeamAssetBytes)} para sincronização remota via Firestore.");
+            }
+
+            var normalizedScope = TeamPermissionService.NormalizePermissionScope(permissionScope);
+            var fileName = IOPath.GetFileName(filePath);
+            var mimeType = GetMimeTypeFromFileName(fileName);
+            var versionNumber = existingAsset == null ? 1 : Math.Max(1, existingAsset.Version + 1);
+            var changedAt = DateTime.Now;
+            var asset = existingAsset ?? new TeamAssetInfo
+            {
+                AssetId = Guid.NewGuid().ToString("N"),
+                AddedByUserId = GetCurrentUserId(),
+                AddedAt = changedAt,
+                VersionHistory = new List<TeamAssetVersionInfo>()
+            };
+
+            var versionEntry = new TeamAssetVersionInfo
+            {
+                VersionNumber = versionNumber,
+                ChangedByUserId = GetCurrentUserId(),
+                ChangeSummary = string.IsNullOrWhiteSpace(changeSummary) ? "Atualização de arquivo" : changeSummary.Trim(),
+                FileName = fileName,
+                MimeType = mimeType,
+                PermissionScope = normalizedScope,
+                StorageKind = "firestore-document",
+                SizeBytes = fileInfo.Length,
+                ChangedAt = changedAt
+            };
+
+            var fileBytes = await File.ReadAllBytesAsync(filePath);
+            var storageResult = await _teamService.SaveTeamAssetContentAsync(team.TeamId, asset.AssetId, versionEntry, fileBytes);
+            if (!storageResult.Success)
+            {
+                return (false, null, storageResult.ErrorMessage ?? "Falha desconhecida ao salvar conteúdo remoto do arquivo.");
+            }
+
+            versionEntry.StorageReference = storageResult.StorageReference;
+            asset.Category = string.IsNullOrWhiteSpace(category) ? ResolveAssetCategoryForFile(filePath) : category;
+            asset.FileName = fileName;
+            asset.PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                ? TryCreateCompressedImageDataUri(filePath, 420, 74) ?? string.Empty
+                : string.Empty;
+            asset.Description = string.IsNullOrWhiteSpace(description) ? asset.Description : description.Trim();
+            asset.MimeType = mimeType;
+            asset.PermissionScope = normalizedScope;
+            asset.StorageKind = "firestore-document";
+            asset.StorageReference = storageResult.StorageReference;
+            asset.SizeBytes = fileInfo.Length;
+            asset.Version = versionNumber;
+            asset.LastSyncedAt = changedAt;
+            asset.AddedByUserId = string.IsNullOrWhiteSpace(asset.AddedByUserId) ? GetCurrentUserId() : asset.AddedByUserId;
+            asset.VersionHistory ??= new List<TeamAssetVersionInfo>();
+            asset.VersionHistory.RemoveAll(version => version.VersionNumber == versionNumber);
+            asset.VersionHistory.Add(versionEntry);
+            asset.VersionHistory = asset.VersionHistory
+                .OrderByDescending(version => version.VersionNumber)
+                .ToList();
+
+            return (true, asset, null);
+        }
+
+        private async Task<(bool Success, string LocalPath, string? ErrorMessage)> EnsureTeamAssetLocalCopyAsync(TeamWorkspaceInfo team, TeamAssetInfo asset, TeamAssetVersionInfo? version = null)
+        {
+            if (_teamService == null)
+            {
+                return (false, string.Empty, "Serviço de equipes não inicializado.");
+            }
+
+            var targetReference = version?.StorageReference ?? asset.StorageReference;
+            if (string.IsNullOrWhiteSpace(targetReference))
+            {
+                return (false, string.Empty, "Esse material não possui conteúdo remoto disponível para download.");
+            }
+
+            var downloadResult = await _teamService.LoadTeamAssetContentAsync(targetReference);
+            if (!downloadResult.Success || downloadResult.Payload == null)
+            {
+                return (false, string.Empty, downloadResult.ErrorMessage ?? "Não foi possível baixar a versão remota do arquivo.");
+            }
+
+            var payload = downloadResult.Payload;
+            var cacheDirectory = BuildTeamAssetCacheDirectory(team, asset.AssetId);
+            Directory.CreateDirectory(cacheDirectory);
+
+            var resolvedFileName = string.IsNullOrWhiteSpace(payload.FileName)
+                ? (string.IsNullOrWhiteSpace(asset.FileName) ? $"asset-{asset.AssetId}" : asset.FileName)
+                : payload.FileName;
+            var localPath = IOPath.Combine(
+                cacheDirectory,
+                $"v{payload.VersionNumber:D3}-{SanitizeFileNameSegment(IOPath.GetFileNameWithoutExtension(resolvedFileName))}{IOPath.GetExtension(resolvedFileName)}");
+
+            await File.WriteAllBytesAsync(localPath, payload.Bytes);
+            return (true, localPath, null);
+        }
+
+        private async Task<bool> RestoreFilesHubItemFromRemoteAsync(FilesHubItem item)
+        {
+            if (!IsFilesHubItemSynced(item) || _teamService == null)
+            {
+                return false;
+            }
+
+            var team = FindTeamById(item.RemoteTeamId);
+            if (team == null)
+            {
+                team = await _teamService.GetTeamByIdAsync(item.RemoteTeamId);
+                if (team == null)
+                {
+                    return false;
+                }
+            }
+
+            var asset = team.Assets.FirstOrDefault(candidate =>
+                string.Equals(candidate.AssetId, item.RemoteAssetId, StringComparison.OrdinalIgnoreCase));
+            if (asset == null)
+            {
+                return false;
+            }
+
+            var localCopyResult = await EnsureTeamAssetLocalCopyAsync(team, asset);
+            if (!localCopyResult.Success || string.IsNullOrWhiteSpace(localCopyResult.LocalPath))
+            {
+                return false;
+            }
+
+            item.StoredFilePath = ArchiveBytesIntoFilesHub(asset.FileName, await File.ReadAllBytesAsync(localCopyResult.LocalPath));
+            item.FileName = asset.FileName;
+            item.FileExtension = string.IsNullOrWhiteSpace(IOPath.GetExtension(asset.FileName))
+                ? item.FileExtension
+                : IOPath.GetExtension(asset.FileName).TrimStart('.').ToUpperInvariant();
+            item.FileSizeBytes = new FileInfo(item.StoredFilePath).Length;
+            item.RemoteLastSyncedAt = asset.LastSyncedAt;
+            TrySaveFilesHubState(true);
+            return true;
+        }
+
+        private async Task<bool> SynchronizeFilesHubItemAsync(FilesHubItem item, FilesHubSyncSelection syncSelection)
+        {
+            var team = syncSelection.Team;
+            var existingAsset = string.IsNullOrWhiteSpace(item.RemoteAssetId)
+                ? null
+                : team.Assets.FirstOrDefault(asset => string.Equals(asset.AssetId, item.RemoteAssetId, StringComparison.OrdinalIgnoreCase));
+
+            var syncResult = await CreateOrUpdateTeamAssetAsync(
+                team,
+                item.StoredFilePath,
+                ResolveAssetCategoryForFile(item.StoredFilePath),
+                syncSelection.PermissionScope,
+                syncSelection.ChangeSummary,
+                existingAsset,
+                string.IsNullOrWhiteSpace(item.AssociationLabel)
+                    ? $"Arquivo sincronizado a partir do hub ({item.AssociationType})."
+                    : item.AssociationLabel);
+
+            if (!syncResult.Success || syncResult.Asset == null)
+            {
+                ShowStyledAlertDialog(
+                    "ARQUIVOS",
+                    "Falha na sincronização",
+                    syncResult.ErrorMessage ?? "Não foi possível publicar o arquivo remoto desta vez.",
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return false;
+            }
+
+            if (existingAsset == null)
+            {
+                team.Assets.Add(syncResult.Asset);
+            }
+
+            item.RemoteTeamId = team.TeamId;
+            item.RemoteTeamName = team.TeamName;
+            item.RemoteAssetId = syncResult.Asset.AssetId;
+            item.RemotePermissionScope = syncResult.Asset.PermissionScope;
+            item.RemoteStorageReference = syncResult.Asset.StorageReference;
+            item.RemoteVersion = syncResult.Asset.Version;
+            item.RemoteLastSyncedAt = syncResult.Asset.LastSyncedAt;
+
+            _filesHubStatusMessage = existingAsset == null
+                ? $"{item.FileName} foi sincronizado com {team.TeamName}."
+                : $"Nova versão de {item.FileName} publicada em {team.TeamName}.";
+
+            AddTeamNotification(
+                team,
+                existingAsset == null
+                    ? $"Arquivo sincronizado do hub local: {item.FileName}."
+                    : $"Nova versão do arquivo {item.FileName} publicada a partir do hub local.");
+            SaveTeamWorkspace(team);
+            TrySaveFilesHubState(true);
+            RenderFilesHub();
+            return true;
+        }
+
+        private (bool Confirmed, string PermissionScope, string ChangeSummary) ShowTeamAssetSyncOptionsDialog(
+            TeamWorkspaceInfo team,
+            string dialogTitle,
+            string eyebrow,
+            string description,
+            string initialScope,
+            string initialSummary)
+        {
+            var accentBrush = GetThemeBrush("AccentBrush");
+            var dialog = CreateStyledDialogWindow(dialogTitle, 620, 520, 500);
+
+            var permissionScopeBox = new ComboBox
+            {
+                Height = 46,
+                Margin = new Thickness(0, 8, 0, 0),
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Equipe", Value = "team" },
+                    new { Label = "Curso", Value = "course" },
+                    new { Label = "Liderança", Value = "leadership" },
+                    new { Label = "Privado", Value = "private" }
+                },
+                SelectedValue = TeamPermissionService.NormalizePermissionScope(initialScope)
+            };
+            var summaryBox = new TextBox
+            {
+                Text = initialSummary,
+                Height = 100,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            ApplyDialogInputStyle(permissionScopeBox);
+            ApplyDialogInputStyle(summaryBox);
+
+            var form = new StackPanel();
+            form.Children.Add(CreateDialogSectionCard(
+                "Equipe alvo",
+                $"Toda a sincronização vai para {team.TeamName}. Aqui você só ajusta o alcance do arquivo e o texto que ficará no histórico.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = team.TeamName,
+                            FontSize = 14,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = string.IsNullOrWhiteSpace(team.TemplateName)
+                                ? $"{team.Course} • {team.ClassName}"
+                                : $"{team.TemplateName} • {team.Course}",
+                            Margin = new Thickness(0, 6, 0, 0),
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    }
+                }));
+
+            var permissionContent = new StackPanel();
+            permissionContent.Children.Add(CreateDialogFieldLabel("Escopo do arquivo"));
+            permissionContent.Children.Add(permissionScopeBox);
+            permissionContent.Children.Add(CreateDialogHintCard(
+                "Escopos restritos controlam quem consegue abrir o conteúdo remoto do material versionado.",
+                accentBrush));
+            form.Children.Add(CreateDialogSectionCard(
+                "Permissões",
+                "Defina se o conteúdo deve ser aberto por toda a equipe, apenas liderança ou ficar privado para o autor e gestores.",
+                accentBrush,
+                permissionContent));
+
+            var summaryContent = new StackPanel();
+            summaryContent.Children.Add(CreateDialogFieldLabel("Resumo da alteração"));
+            summaryContent.Children.Add(summaryBox);
+            form.Children.Add(CreateDialogSectionCard(
+                "Histórico da versão",
+                "Esse resumo aparece no trilho de versões do asset para deixar claro o que mudou entre uploads.",
+                accentBrush,
+                summaryContent,
+                new Thickness(0, 0, 0, 0)));
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(eyebrow, dialogTitle, description, accentBrush));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Confirmar", accentBrush, Brushes.White, Brushes.Transparent, 118);
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0),
+                Children = { cancelButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+
+            var confirmed = false;
+            cancelButton.Click += (_, __) => dialog.Close();
+            saveButton.Click += (_, __) =>
+            {
+                confirmed = true;
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            dialog.ShowDialog();
+            return (
+                confirmed,
+                permissionScopeBox.SelectedValue?.ToString() ?? team.DefaultFilePermissionScope,
+                string.IsNullOrWhiteSpace(summaryBox.Text) ? initialSummary : summaryBox.Text.Trim());
+        }
+
+        private FilesHubItem CreateTransientFilesHubItemForAsset(TeamWorkspaceInfo team, TeamAssetInfo asset, string localPath, TeamAssetVersionInfo? version = null)
+        {
+            var fileName = version?.FileName ?? asset.FileName;
+            return new FilesHubItem
+            {
+                ItemId = Guid.NewGuid().ToString("N"),
+                FileName = fileName,
+                StoredFilePath = localPath,
+                AssociationType = "Projeto",
+                AssociationLabel = team.TeamName,
+                AddedAt = version?.ChangedAt ?? asset.AddedAt,
+                FileSizeBytes = new FileInfo(localPath).Length,
+                FileExtension = IOPath.GetExtension(fileName).TrimStart('.').ToUpperInvariant(),
+                RemoteTeamId = team.TeamId,
+                RemoteTeamName = team.TeamName,
+                RemoteAssetId = asset.AssetId,
+                RemotePermissionScope = version?.PermissionScope ?? asset.PermissionScope,
+                RemoteStorageReference = version?.StorageReference ?? asset.StorageReference,
+                RemoteVersion = version?.VersionNumber ?? asset.Version,
+                RemoteLastSyncedAt = asset.LastSyncedAt
+            };
+        }
+
+        private async Task OpenTeamAssetPreviewAsync(TeamWorkspaceInfo team, TeamAssetInfo asset, TeamAssetVersionInfo? version = null)
+        {
+            if (!CanCurrentUserViewAsset(team, asset))
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Acesso restrito", "O escopo deste arquivo não permite abrir o conteúdo remoto com o seu papel atual.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var localCopyResult = await EnsureTeamAssetLocalCopyAsync(team, asset, version);
+            if (!localCopyResult.Success)
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Falha ao abrir material", localCopyResult.ErrorMessage ?? "Não foi possível recuperar a versão remota do arquivo.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return;
+            }
+
+            ShowFilesHubItemPreviewDialog(CreateTransientFilesHubItemForAsset(team, asset, localCopyResult.LocalPath, version));
+        }
+
+        private async void OpenTeamAssetPreview_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamAssetInfo> payload)
+            {
+                return;
+            }
+
+            await OpenTeamAssetPreviewAsync(payload.Item1, payload.Item2);
+        }
+
+        private void OpenTeamAssetHistory_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamAssetInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var asset = payload.Item2;
+            var versions = (asset.VersionHistory ?? new List<TeamAssetVersionInfo>())
+                .Where(version => !string.IsNullOrWhiteSpace(version.StorageReference))
+                .OrderByDescending(version => version.VersionNumber)
+                .ToList();
+
+            if (versions.Count == 0)
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Sem histórico", "Este material ainda não possui versões remotas suficientes para navegação do histórico.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var accentBrush = GetThemeBrush("AccentBrush");
+            var dialog = CreateStyledDialogWindow($"Histórico • {asset.FileName}", 760, 680, 640, true);
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(
+                "ARQUIVOS",
+                $"Histórico de {asset.FileName}",
+                "Abra versões anteriores do material remoto e acompanhe quem publicou cada mudança.",
+                accentBrush));
+
+            var versionsHost = new StackPanel();
+            foreach (var version in versions)
+            {
+                var card = new Border
+                {
+                    Margin = new Thickness(0, 0, 0, 12),
+                    Padding = new Thickness(16),
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(18)
+                };
+
+                var layout = new Grid();
+                layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var info = new StackPanel();
+                info.Children.Add(new TextBlock
+                {
+                    Text = $"Versão {version.VersionNumber}",
+                    FontSize = 13,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+                info.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(version.ChangeSummary) ? "Sem resumo registrado." : version.ChangeSummary,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+                var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+                chips.Children.Add(CreateStaticTeamChip(version.FileName, accentBrush, Brushes.White));
+                chips.Children.Add(CreateStaticTeamChip(GetPermissionScopeLabel(version.PermissionScope), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateStaticTeamChip(FormatFilesHubSize(version.SizeBytes), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateStaticTeamChip(version.ChangedAt == default ? "Sem data" : version.ChangedAt.ToString("dd/MM HH:mm"), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                info.Children.Add(chips);
+                layout.Children.Add(info);
+
+                var openButton = CreateDialogActionButton("Abrir", accentBrush, Brushes.White, Brushes.Transparent, 96);
+                openButton.Margin = new Thickness(12, 0, 0, 0);
+                openButton.Click += async (_, __) => await OpenTeamAssetPreviewAsync(team, asset, version);
+                Grid.SetColumn(openButton, 1);
+                layout.Children.Add(openButton);
+
+                card.Child = layout;
+                versionsHost.Children.Add(card);
+            }
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = versionsHost
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", accentBrush, Brushes.White, Brushes.Transparent, 104);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+        private async void UpdateTeamAssetVersion_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamAssetInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var asset = payload.Item2;
+            if (!CanCurrentUserUploadFiles(team))
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Permissão insuficiente", "Seu papel atual não permite publicar nova versão deste material.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var dialog = new OpenFileDialog
+            {
+                Multiselect = false,
+                Title = "Selecionar nova versão do arquivo",
+                Filter = "Todos os arquivos|*.*"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            var options = ShowTeamAssetSyncOptionsDialog(
+                team,
+                "Publicar nova versão",
+                "ARQUIVOS",
+                "Atualize o escopo se necessário e registre o que mudou nesta nova versão do material.",
+                asset.PermissionScope,
+                $"Versão {asset.Version + 1} de {asset.FileName}.");
+            if (!options.Confirmed)
+            {
+                return;
+            }
+
+            var updateResult = await CreateOrUpdateTeamAssetAsync(
+                team,
+                dialog.FileName,
+                asset.Category,
+                options.PermissionScope,
+                options.ChangeSummary,
+                asset,
+                asset.Description);
+            if (!updateResult.Success)
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Falha ao versionar", updateResult.ErrorMessage ?? "Não foi possível publicar a nova versão deste arquivo.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return;
+            }
+
+            AddTeamNotification(team, $"Nova versão publicada para {asset.FileName}.");
+            SaveTeamWorkspace(team);
+            RenderTeamWorkspace();
         }
 
         private void UpdateFilesHubBottomSpacing()
@@ -943,7 +1837,9 @@ namespace MeuApp
                 Text = "Mochila do projeto",
                 FontSize = 22,
                 FontWeight = FontWeights.ExtraBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush")
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 440
             });
             textStack.Children.Add(new TextBlock
             {
@@ -951,9 +1847,9 @@ namespace MeuApp
                     ? "Arraste o primeiro pacote para dentro da jornada e ja marque o tipo certo para nao virar um deposito generico."
                     : "Cada arquivo fica guardado com memoria de contexto, pronto para reaparecer no momento certo do fluxo.",
                 Margin = new Thickness(0, 10, 0, 0),
-                FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 440,
                 LineHeight = 21
             });
             textStack.Children.Add(new Border
@@ -1122,6 +2018,7 @@ namespace MeuApp
             var accentColor = GetFilesHubAssociationAccentColor(item.AssociationType);
             var accentBrush = new SolidColorBrush(accentColor);
             var fileExists = File.Exists(item.StoredFilePath);
+            var isSynced = IsFilesHubItemSynced(item);
 
             var layout = new Grid();
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1154,9 +2051,21 @@ namespace MeuApp
             metaWrap.Children.Add(CreateStaticTeamChip(item.FileExtension, accentBrush, Brushes.White));
             metaWrap.Children.Add(CreateStaticTeamChip(FormatFilesHubSize(item.FileSizeBytes), GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             metaWrap.Children.Add(CreateStaticTeamChip($"Guardado {FormatRelativeDate(item.AddedAt)}", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            if (isSynced)
+            {
+                metaWrap.Children.Add(CreateStaticTeamChip($"Sync v{Math.Max(1, item.RemoteVersion)}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+                if (!string.IsNullOrWhiteSpace(item.RemoteTeamName))
+                {
+                    metaWrap.Children.Add(CreateStaticTeamChip(item.RemoteTeamName, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                }
+                metaWrap.Children.Add(CreateStaticTeamChip(GetPermissionScopeLabel(item.RemotePermissionScope), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
             if (!fileExists)
             {
-                metaWrap.Children.Add(CreateStaticTeamChip("Arquivo local indisponivel", new SolidColorBrush(Color.FromRgb(220, 38, 38)), Brushes.White));
+                metaWrap.Children.Add(CreateStaticTeamChip(
+                    isSynced ? "Cache local ausente • restaurável" : "Arquivo local indisponível",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                    Brushes.White));
             }
             leftStack.Children.Add(metaWrap);
             layout.Children.Add(leftStack);
@@ -1169,9 +2078,12 @@ namespace MeuApp
             };
 
             var openButton = CreateFilesHubActionButton(fileExists ? "Visualizar" : "Indisponivel", accentBrush, Brushes.White, Brushes.Transparent, OpenFilesHubItem_Click, item, 112);
-            openButton.IsEnabled = fileExists;
+            openButton.Content = fileExists || isSynced ? "Visualizar" : "Indisponível";
+            openButton.IsEnabled = fileExists || isSynced;
+            var syncButton = CreateFilesHubActionButton(isSynced ? "Nova versão" : "Sincronizar", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("AccentBrush"), GetThemeBrush("AccentBrush"), SyncFilesHubItem_Click, item, 122);
             var removeButton = CreateFilesHubActionButton("Remover", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), RemoveFilesHubItem_Click, item, 104);
             actions.Children.Add(openButton);
+            actions.Children.Add(syncButton);
             actions.Children.Add(removeButton);
 
             Grid.SetColumn(actions, 1);
@@ -1210,7 +2122,7 @@ namespace MeuApp
             return button;
         }
 
-        private void OpenFilesHubItem_Click(object sender, RoutedEventArgs e)
+        private async void OpenFilesHubItem_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button button || button.Tag is not FilesHubItem item)
             {
@@ -1219,13 +2131,23 @@ namespace MeuApp
 
             if (!File.Exists(item.StoredFilePath))
             {
-                ShowStyledAlertDialog(
-                    "ARQUIVOS",
-                    "Arquivo indisponivel",
-                    "O item continua listado, mas o arquivo local nao foi encontrado. Remova-o ou adicione novamente se precisar restaurar esse slot.",
-                    "Fechar",
-                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
-                return;
+                if (await RestoreFilesHubItemFromRemoteAsync(item) && File.Exists(item.StoredFilePath))
+                {
+                    _filesHubStatusMessage = $"{item.FileName} foi restaurado do Firebase para o hub local.";
+                    RenderFilesHub();
+                }
+                if (!File.Exists(item.StoredFilePath))
+                {
+                    ShowStyledAlertDialog(
+                        "ARQUIVOS",
+                        "Arquivo indisponivel",
+                        IsFilesHubItemSynced(item)
+                            ? "O cache local não foi encontrado e a restauração remota falhou. Verifique a conectividade com o Firebase ou publique uma nova versão do arquivo."
+                            : "O item continua listado, mas o arquivo local nao foi encontrado. Remova-o ou adicione novamente se precisar restaurar esse slot.",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
             }
 
             try
@@ -1242,6 +2164,106 @@ namespace MeuApp
                     "Fechar",
                     new SolidColorBrush(Color.FromRgb(234, 88, 12)));
             }
+        }
+
+        private async void SyncFilesHubItem_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not FilesHubItem item)
+            {
+                return;
+            }
+
+            if (IsFilesHubItemSynced(item))
+            {
+                var existingTeam = FindTeamById(item.RemoteTeamId);
+                if (existingTeam == null)
+                {
+                    ShowStyledAlertDialog(
+                        "ARQUIVOS",
+                        "Equipe não carregada",
+                        "A equipe remota vinculada a este arquivo não está disponível no momento. Recarregue suas equipes antes de publicar uma nova versão.",
+                        "Fechar",
+                        GetThemeBrush("AccentBrush"));
+                    return;
+                }
+
+                if (!CanCurrentUserUploadFiles(existingTeam))
+                {
+                    ShowStyledAlertDialog(
+                        "ARQUIVOS",
+                        "Permissão insuficiente",
+                        "Seu papel atual nessa equipe não permite publicar novas versões de arquivo.",
+                        "Fechar",
+                        GetThemeBrush("AccentBrush"));
+                    return;
+                }
+
+                var replacementDialog = new OpenFileDialog
+                {
+                    Multiselect = false,
+                    Title = "Escolher nova versão do arquivo",
+                    Filter = "Todos os arquivos|*.*"
+                };
+
+                if (replacementDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                var replacementItem = ArchiveFilesHubItem(replacementDialog.FileName, new FilesHubAssociationSelection
+                {
+                    AssociationType = item.AssociationType,
+                    AssociationLabel = item.AssociationLabel
+                });
+
+                try
+                {
+                    if (File.Exists(item.StoredFilePath))
+                    {
+                        File.Delete(item.StoredFilePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugHelper.WriteLine($"Falha ao substituir arquivo local no hub: {ex.Message}");
+                }
+
+                item.FileName = replacementItem.FileName;
+                item.StoredFilePath = replacementItem.StoredFilePath;
+                item.FileSizeBytes = replacementItem.FileSizeBytes;
+                item.FileExtension = replacementItem.FileExtension;
+                item.AddedAt = DateTime.Now;
+
+                var syncSelection = ShowFilesHubSyncDialog(item, existingTeam, item.RemotePermissionScope, $"Versão {Math.Max(1, item.RemoteVersion) + 1} enviada pelo hub local.");
+                if (syncSelection == null)
+                {
+                    TrySaveFilesHubState(true);
+                    RenderFilesHub();
+                    return;
+                }
+
+                await SynchronizeFilesHubItemAsync(item, syncSelection);
+                return;
+            }
+
+            if (!File.Exists(item.StoredFilePath))
+            {
+                ShowStyledAlertDialog(
+                    "ARQUIVOS",
+                    "Arquivo local ausente",
+                    "O arquivo precisa existir no hub local antes da primeira sincronização remota.",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var selection = ShowFilesHubSyncDialog(item);
+            if (selection == null)
+            {
+                return;
+            }
+
+            await SynchronizeFilesHubItemAsync(item, selection);
         }
 
         private void ShowFilesHubItemPreviewDialog(FilesHubItem item)
@@ -1775,7 +2797,9 @@ namespace MeuApp
             if (!ShowStyledConfirmationDialog(
                 "ARQUIVOS",
                 "Remover arquivo",
-                $"{item.FileName} saira da mochila local e o arquivo arquivado tambem sera removido do armazenamento local.",
+                IsFilesHubItemSynced(item)
+                    ? $"{item.FileName} sairá da mochila local e o cache arquivado será removido deste perfil. A cópia remota da equipe permanecerá ativa no Firebase."
+                    : $"{item.FileName} saira da mochila local e o arquivo arquivado tambem sera removido do armazenamento local.",
                 "Remover",
                 new SolidColorBrush(Color.FromRgb(220, 38, 38))))
             {
@@ -1796,7 +2820,9 @@ namespace MeuApp
                 DebugHelper.WriteLine($"Falha ao excluir arquivo local do hub: {ex.Message}");
             }
 
-            _filesHubStatusMessage = $"{item.FileName} foi removido da mochila local.";
+            _filesHubStatusMessage = IsFilesHubItemSynced(item)
+                ? $"{item.FileName} foi removido do hub local. A versão remota continua disponível na equipe vinculada."
+                : $"{item.FileName} foi removido da mochila local.";
             TrySaveFilesHubState(true);
             RenderFilesHub();
         }
@@ -2537,16 +3563,30 @@ namespace MeuApp
             TeamCourseComboBox.ItemsSource = KnownTeamCourses.OrderBy(item => item).ToList();
             TeamClassComboBox.ItemsSource = KnownTeamClasses.OrderBy(item => item).ToList();
             TeamUcInput.ItemsSource = KnownTeamUcs.OrderBy(item => item).ToList();
+            TeamTemplateComboBox.ItemsSource = AcademicProjectTemplateCatalog.GetAll().OrderBy(item => item.Title).ToList();
+            TeamTemplateComboBox.SelectedValuePath = nameof(AcademicProjectTemplateInfo.TemplateId);
             TeamMemberInput.ItemsSource = _teamMemberSearchResults;
             TeamMemberInput.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler(TeamMemberInput_TextChanged));
             TeamNameTextBox.TextChanged += (_, __) => RenderDraftTeamLogoPreview();
+            TeamCourseComboBox.SelectionChanged += (_, __) => SyncDraftTemplateSuggestion();
+            TeamMemberRoleComboBox.SelectionChanged += (_, __) => UpdateTeamMemberRoleHint();
 
             TeamClassComboBox.Text = KnownTeamClasses.First();
             TeamClassIdTextBox.Text = "TURMA-PI-001";
+            TeamAcademicTermTextBox.Text = ResolveCurrentAcademicTerm();
+            TeamMemberRoleComboBox.SelectedIndex = 0;
             TeamCreationStatusText.Text = string.Empty;
             TeamJoinStatusText.Text = string.Empty;
             TeamEntryOptionsPopup.IsOpen = false;
+            if (TeamListSearchStatusText != null)
+            {
+                TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
+                    ? "Pesquise por nome da equipe, turma, curso, UC ou professor focal."
+                    : "Filtre suas equipes por nome, turma, curso ou UC.";
+            }
 
+            SyncDraftTemplateSuggestion();
+            UpdateTeamMemberRoleHint();
             RenderTeamMembersDraft();
             RenderTeamUcsDraft();
             RenderDraftTeamLogoPreview();
@@ -2560,11 +3600,17 @@ namespace MeuApp
                 ? TeamCourseComboBox.Text
                 : profile.Course;
 
+            if (string.IsNullOrWhiteSpace(TeamAcademicTermTextBox.Text))
+            {
+                TeamAcademicTermTextBox.Text = ResolveCurrentAcademicTerm();
+            }
+
             if (string.IsNullOrWhiteSpace(TeamNameTextBox.Text))
             {
                 TeamNameTextBox.Text = $"Equipe {profile.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "Projeto"}";
             }
 
+            SyncDraftTemplateSuggestion();
             EnsureCurrentUserInTeamDraft();
         }
 
@@ -2576,13 +3622,104 @@ namespace MeuApp
                 return;
             }
 
-            if (_draftTeamMembers.Any(member => string.Equals(member.UserId, currentUser.UserId, StringComparison.OrdinalIgnoreCase)))
+            var existingMember = _draftTeamMembers.FirstOrDefault(member => string.Equals(member.UserId, currentUser.UserId, StringComparison.OrdinalIgnoreCase));
+            if (existingMember != null)
             {
+                existingMember.Name = currentUser.Name;
+                existingMember.Email = currentUser.Email;
+                existingMember.Phone = currentUser.Phone;
+                existingMember.Registration = currentUser.Registration;
+                existingMember.Course = currentUser.Course;
+                existingMember.Nickname = currentUser.Nickname;
+                existingMember.ProfessionalTitle = currentUser.ProfessionalTitle;
+                existingMember.AcademicDepartment = currentUser.AcademicDepartment;
+                existingMember.AcademicFocus = currentUser.AcademicFocus;
+                existingMember.OfficeHours = currentUser.OfficeHours;
+                existingMember.Role = currentUser.Role;
                 return;
             }
 
             _draftTeamMembers.Insert(0, currentUser);
             RenderTeamMembersDraft();
+        }
+
+        private string ResolveCurrentAcademicTerm()
+        {
+            var now = DateTime.Now;
+            var semester = now.Month <= 6 ? 1 : 2;
+            return $"{now.Year}.{semester}";
+        }
+
+        private void SyncDraftTemplateSuggestion()
+        {
+            if (TeamTemplateComboBox == null)
+            {
+                return;
+            }
+
+            if (TeamTemplateComboBox.SelectedItem is AcademicProjectTemplateInfo)
+            {
+                return;
+            }
+
+            var suggestion = AcademicProjectTemplateCatalog.FindBestMatch(TeamCourseComboBox?.Text, _draftTeamUcs);
+            if (suggestion != null)
+            {
+                TeamTemplateComboBox.SelectedValue = suggestion.TemplateId;
+            }
+            else if (TeamTemplateComboBox.Items.Count > 0)
+            {
+                TeamTemplateComboBox.SelectedIndex = 0;
+            }
+        }
+
+        private string GetSelectedDraftMemberRole()
+        {
+            return "student";
+        }
+
+        private void UpdateTeamMemberRoleHint()
+        {
+            if (TeamMemberRoleHintText == null)
+            {
+                return;
+            }
+
+            var role = GetSelectedDraftMemberRole();
+            TeamMemberRoleHintText.Text = role switch
+            {
+                "leader" => "Liderança discente é definida depois, pelo professor focal, para não misturar governança com entrada inicial na equipe.",
+                _ => "Novos participantes entram como alunos. Depois o professor focal pode promover alguém da equipe para liderança discente."
+            };
+        }
+
+        private UserInfo CloneUserInfo(UserInfo source, string? overrideRole = null)
+        {
+            return new UserInfo
+            {
+                UserId = source.UserId,
+                Name = source.Name,
+                Email = source.Email,
+                Registration = source.Registration,
+                Course = source.Course,
+                Phone = source.Phone,
+                Nickname = source.Nickname,
+                ProfessionalTitle = source.ProfessionalTitle,
+                AcademicDepartment = source.AcademicDepartment,
+                AcademicFocus = source.AcademicFocus,
+                OfficeHours = source.OfficeHours,
+                Bio = source.Bio,
+                Skills = source.Skills,
+                ProgrammingLanguages = source.ProgrammingLanguages,
+                PortfolioLink = source.PortfolioLink,
+                LinkedInLink = source.LinkedInLink,
+                Role = TeamPermissionService.NormalizeRole(string.IsNullOrWhiteSpace(overrideRole) ? source.Role : overrideRole),
+                AvatarBody = source.AvatarBody,
+                AvatarHair = source.AvatarHair,
+                AvatarHat = source.AvatarHat,
+                AvatarAccessory = source.AvatarAccessory,
+                AvatarClothing = source.AvatarClothing
+            };
         }
 
         private void SelectDraftTeamLogo_Click(object sender, RoutedEventArgs e)
@@ -3275,6 +4412,8 @@ namespace MeuApp
                 return null;
             }
 
+            var normalizedRole = TeamPermissionService.NormalizeRole(_currentProfile.Role);
+
             return new UserInfo
             {
                 UserId = string.IsNullOrWhiteSpace(_currentProfile.UserId) ? "current-user" : _currentProfile.UserId,
@@ -3283,8 +4422,12 @@ namespace MeuApp
                 Phone = _currentProfile.Phone,
                 Registration = _currentProfile.Registration,
                 Course = _currentProfile.Course,
+                Role = normalizedRole,
                 Nickname = _currentProfile.Nickname,
                 ProfessionalTitle = _currentProfile.ProfessionalTitle,
+                AcademicDepartment = _currentProfile.AcademicDepartment,
+                AcademicFocus = _currentProfile.AcademicFocus,
+                OfficeHours = _currentProfile.OfficeHours,
                 Bio = _currentProfile.Bio,
                 Skills = _currentProfile.Skills,
                 ProgrammingLanguages = _currentProfile.ProgrammingLanguages,
@@ -3350,13 +4493,54 @@ namespace MeuApp
                 : team.CreatedBy;
             if (team.CreatedAt == default) team.CreatedAt = DateTime.Now;
             if (team.UpdatedAt == default) team.UpdatedAt = DateTime.Now;
+            if (!team.LastRealtimeSyncAt.HasValue) team.LastRealtimeSyncAt = team.UpdatedAt;
+            if (string.IsNullOrWhiteSpace(team.AcademicTerm)) team.AcademicTerm = ResolveCurrentAcademicTerm();
+            team.DefaultFilePermissionScope = string.IsNullOrWhiteSpace(team.DefaultFilePermissionScope) ? "team" : team.DefaultFilePermissionScope;
+            team.FocalProfessorUserId = team.FocalProfessorUserId?.Trim() ?? string.Empty;
+            team.FocalProfessorName = team.FocalProfessorName?.Trim() ?? string.Empty;
+            team.ProfessorSupervisorUserIds = (team.ProfessorSupervisorUserIds ?? new List<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Select(userId => userId.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            team.ProfessorSupervisorNames = (team.ProfessorSupervisorNames ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name)
+                .ToList();
 
             team.Members = team.Members
                 .Where(member => member != null && !string.IsNullOrWhiteSpace(member.UserId))
                 .GroupBy(member => member.UserId, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
+                .Select(group =>
+                {
+                    var member = group.First();
+                    member.Role = TeamPermissionService.NormalizeRole(member.Role);
+                    return member;
+                })
                 .OrderBy(member => member.Name)
                 .ToList();
+
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorUserId) &&
+                string.IsNullOrWhiteSpace(team.FocalProfessorName))
+            {
+                team.FocalProfessorName = team.Members
+                    .FirstOrDefault(member => string.Equals(member.UserId, team.FocalProfessorUserId, StringComparison.OrdinalIgnoreCase))
+                    ?.Name ?? string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorUserId) &&
+                !team.ProfessorSupervisorUserIds.Contains(team.FocalProfessorUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorUserIds.Add(team.FocalProfessorUserId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorName) &&
+                !team.ProfessorSupervisorNames.Contains(team.FocalProfessorName, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorNames.Add(team.FocalProfessorName);
+            }
 
             team.Ucs = team.Ucs
                 .Where(uc => !string.IsNullOrWhiteSpace(uc))
@@ -3368,8 +4552,64 @@ namespace MeuApp
             team.Milestones ??= new List<TeamMilestoneInfo>();
             team.Notifications ??= new List<TeamNotificationInfo>();
             team.ChatMessages ??= new List<TeamChatMessageInfo>();
+            team.AccessRules ??= new List<TeamAccessRuleInfo>();
+            team.SemesterTimeline ??= new List<TeamTimelineItemInfo>();
             team.ProjectProgress = Math.Max(0, Math.Min(100, team.ProjectProgress));
             team.ProjectStatus = string.IsNullOrWhiteSpace(team.ProjectStatus) ? "Planejamento" : team.ProjectStatus;
+            team.AccessRules = TeamPermissionService.NormalizeAccessRules(team.AccessRules);
+
+            foreach (var asset in team.Assets)
+            {
+                asset.PermissionScope = string.IsNullOrWhiteSpace(asset.PermissionScope) ? team.DefaultFilePermissionScope : asset.PermissionScope;
+                asset.StorageKind = string.IsNullOrWhiteSpace(asset.StorageKind) ? "firestore-preview" : asset.StorageKind;
+                asset.MimeType = string.IsNullOrWhiteSpace(asset.MimeType) ? GetMimeTypeFromFileName(asset.FileName) : asset.MimeType;
+                asset.VersionHistory ??= new List<TeamAssetVersionInfo>();
+                if (asset.Version <= 0)
+                {
+                    asset.Version = 1;
+                }
+
+                foreach (var version in asset.VersionHistory)
+                {
+                    version.FileName = string.IsNullOrWhiteSpace(version.FileName) ? asset.FileName : version.FileName;
+                    version.MimeType = string.IsNullOrWhiteSpace(version.MimeType) ? asset.MimeType : version.MimeType;
+                    version.PermissionScope = string.IsNullOrWhiteSpace(version.PermissionScope) ? asset.PermissionScope : version.PermissionScope;
+                    version.StorageKind = string.IsNullOrWhiteSpace(version.StorageKind) ? asset.StorageKind : version.StorageKind;
+                    version.SizeBytes = version.SizeBytes <= 0 ? asset.SizeBytes : version.SizeBytes;
+                }
+            }
+
+            foreach (var milestone in team.Milestones)
+            {
+                milestone.CreatedByUserId = string.IsNullOrWhiteSpace(milestone.CreatedByUserId) ? team.CreatedBy : milestone.CreatedByUserId;
+                milestone.OwnerUserId = string.IsNullOrWhiteSpace(milestone.OwnerUserId) ? milestone.CreatedByUserId : milestone.OwnerUserId;
+                milestone.MentionedUserIds ??= new List<string>();
+                milestone.Comments ??= new List<TeamCommentInfo>();
+                milestone.Attachments ??= new List<TeamAttachmentInfo>();
+                if (milestone.UpdatedAt == default)
+                {
+                    milestone.UpdatedAt = milestone.CreatedAt == default ? DateTime.Now : milestone.CreatedAt;
+                }
+                milestone.UpdatedByUserId = string.IsNullOrWhiteSpace(milestone.UpdatedByUserId) ? milestone.CreatedByUserId : milestone.UpdatedByUserId;
+            }
+
+            foreach (var column in team.TaskColumns ?? Enumerable.Empty<TeamTaskColumnInfo>())
+            {
+                foreach (var card in column.Cards)
+                {
+                    card.ColumnId = string.IsNullOrWhiteSpace(card.ColumnId) ? column.Id : card.ColumnId;
+                    card.RequiredRole = TeamPermissionService.NormalizeRole(card.RequiredRole);
+                    card.CreatedByUserId = string.IsNullOrWhiteSpace(card.CreatedByUserId) ? team.CreatedBy : card.CreatedByUserId;
+                    card.MentionedUserIds ??= new List<string>();
+                    card.Comments ??= new List<TeamCommentInfo>();
+                    card.Attachments ??= new List<TeamAttachmentInfo>();
+                    if (card.UpdatedAt == default)
+                    {
+                        card.UpdatedAt = card.CreatedAt == default ? DateTime.Now : card.CreatedAt;
+                    }
+                    card.UpdatedByUserId = string.IsNullOrWhiteSpace(card.UpdatedByUserId) ? card.CreatedByUserId : card.UpdatedByUserId;
+                }
+            }
 
             if (team.TaskColumns == null || team.TaskColumns.Count == 0) team.TaskColumns = CreateDefaultTeamColumns();
             if (team.CsdBoard == null)
@@ -3396,6 +4636,161 @@ namespace MeuApp
         {
             return !string.IsNullOrWhiteSpace(team.CreatedBy)
                 && string.Equals(team.CreatedBy, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string GetCurrentUserRole(TeamWorkspaceInfo? team = null)
+        {
+            if (team != null)
+            {
+                var memberRole = team.Members
+                    .FirstOrDefault(member => string.Equals(member.UserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+                    ?.Role;
+
+                if (!string.IsNullOrWhiteSpace(memberRole))
+                {
+                    return TeamPermissionService.NormalizeRole(memberRole);
+                }
+            }
+
+            return TeamPermissionService.NormalizeRole(_currentProfile?.Role);
+        }
+
+        private bool CanCurrentUserManageMembers(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanManageMembers(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserAddMembers(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanAddMembers(team, GetCurrentUserRole(team), GetCurrentUserId());
+        }
+
+        private bool CanCurrentUserAssignLeadership(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanAssignLeadership(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserEditProjectSettings(TeamWorkspaceInfo team)
+        {
+            return IsCurrentUserTeamCreator(team)
+                || TeamPermissionService.CanEditProjectSettings(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserDeleteTeam(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanDeleteTeam(team, GetCurrentUserRole(team), GetCurrentUserId());
+        }
+
+        private bool CanCurrentUserComment(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanComment(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserUploadFiles(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanUploadFiles(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserReviewDeliverables(TeamWorkspaceInfo team)
+        {
+            return TeamPermissionService.CanReviewDeliverables(team, GetCurrentUserRole(team));
+        }
+
+        private bool CanCurrentUserViewAsset(TeamWorkspaceInfo team, TeamAssetInfo asset)
+        {
+            return TeamPermissionService.CanViewAsset(
+                team,
+                GetCurrentUserRole(team),
+                asset.PermissionScope,
+                GetCurrentUserId(),
+                asset.AddedByUserId);
+        }
+
+        private List<UserInfo> GetFacultyMembers(TeamWorkspaceInfo team)
+        {
+            return (team.Members ?? new List<UserInfo>())
+                .Where(member => TeamPermissionService.IsFacultyRole(member.Role))
+                .OrderBy(member => member.Name)
+                .ToList();
+        }
+
+        private List<UserInfo> GetStudentTeamMembers(TeamWorkspaceInfo team)
+        {
+            return (team.Members ?? new List<UserInfo>())
+                .Where(member => !TeamPermissionService.IsFacultyRole(member.Role))
+                .OrderBy(member => member.Name)
+                .ToList();
+        }
+
+        private List<UserInfo> GetTaskAssignableMembers(TeamWorkspaceInfo team)
+        {
+            return GetStudentTeamMembers(team)
+                .Where(member => TeamPermissionService.CanBeTaskAssignee(member.Role))
+                .ToList();
+        }
+
+        private List<UserInfo> GetStudentLeaders(TeamWorkspaceInfo team)
+        {
+            return GetStudentTeamMembers(team)
+                .Where(member => TeamPermissionService.IsLeaderLike(member.Role))
+                .ToList();
+        }
+
+        private string GetPermissionScopeLabel(string? permissionScope)
+        {
+            return TeamPermissionService.NormalizePermissionScope(permissionScope) switch
+            {
+                "course" => "Curso",
+                "leadership" => "Liderança",
+                "private" => "Privado",
+                _ => "Equipe"
+            };
+        }
+
+        private string ResolveAssetCategoryForFile(string filePath, string fallbackCategory = "documentos")
+        {
+            var extension = GetFilesHubExtension(filePath, string.Empty);
+            if (IsFilesHubImageExtension(extension))
+            {
+                return "imagens";
+            }
+
+            return string.IsNullOrWhiteSpace(fallbackCategory) ? "documentos" : fallbackCategory;
+        }
+
+        private string GetMimeTypeFromFileName(string fileName)
+        {
+            var extension = IOPath.GetExtension(fileName ?? string.Empty).Trim().ToLowerInvariant();
+            return extension switch
+            {
+                ".png" => "image/png",
+                ".jpg" => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                ".bmp" => "image/bmp",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".pdf" => "application/pdf",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".txt" => "text/plain",
+                ".md" => "text/markdown",
+                ".markdown" => "text/markdown",
+                ".json" => "application/json",
+                ".csv" => "text/csv",
+                ".xml" => "application/xml",
+                ".yml" => "application/yaml",
+                ".yaml" => "application/yaml",
+                ".rules" => "text/plain",
+                ".cs" => "text/plain",
+                ".xaml" => "application/xml",
+                _ => "application/octet-stream"
+            };
+        }
+
+        private string BuildTeamAssetCacheDirectory(TeamWorkspaceInfo team, string assetId)
+        {
+            return IOPath.Combine(GetFilesHubRootDirectory(), "remote-cache", SanitizeFileNameSegment(team.TeamId), SanitizeFileNameSegment(assetId));
         }
 
         private int CalculateTeamProgressPercentage(TeamWorkspaceInfo team)
@@ -3515,6 +4910,25 @@ namespace MeuApp
                         IsOverdue = item.Card.DueDate.Value.Date < DateTime.Today
                     });
                 }
+
+                foreach (var timelineItem in team.SemesterTimeline
+                    .Where(item => item.EndsAt.HasValue && !string.Equals(item.Status, "Concluido", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(item => item.EndsAt))
+                {
+                    items.Add(new CalendarAgendaItem
+                    {
+                        Team = team,
+                        KindLabel = "Timeline",
+                        Title = timelineItem.Title,
+                        Subtitle = $"{team.TeamName} • {timelineItem.Category}",
+                        Notes = timelineItem.Description,
+                        StatusLabel = timelineItem.Status,
+                        DueDate = timelineItem.EndsAt!.Value,
+                        AccentColor = Color.FromRgb(16, 185, 129),
+                        IconKind = PackIconMaterialKind.TimelineClockOutline,
+                        IsOverdue = timelineItem.EndsAt.Value.Date < DateTime.Today
+                    });
+                }
             }
 
             return items
@@ -3522,6 +4936,432 @@ namespace MeuApp
                 .ThenBy(item => item.Team.TeamName)
                 .ThenBy(item => item.Title)
                 .ToList();
+        }
+
+        private List<CalendarAgendaItem> ApplyCalendarAgendaFilters(IReadOnlyList<CalendarAgendaItem> agendaItems)
+        {
+            var endDate = DateTime.Today.AddDays(Math.Max(1, _calendarFilterWindowDays));
+
+            return agendaItems
+                .Where(item => string.IsNullOrWhiteSpace(_calendarFilterTeamId) || string.Equals(item.Team.TeamId, _calendarFilterTeamId, StringComparison.OrdinalIgnoreCase))
+                .Where(item => string.Equals(_calendarFilterKind, "Todos", StringComparison.OrdinalIgnoreCase) || string.Equals(item.KindLabel, _calendarFilterKind, StringComparison.OrdinalIgnoreCase))
+                .Where(item => item.DueDate.Date <= endDate)
+                .Where(CalendarAgendaStatusMatches)
+                .OrderBy(item => item.DueDate)
+                .ThenBy(item => item.Team.TeamName)
+                .ThenBy(item => item.Title)
+                .ToList();
+        }
+
+        private bool CalendarAgendaStatusMatches(CalendarAgendaItem item)
+        {
+            return _calendarFilterStatus switch
+            {
+                "Em risco" => item.IsOverdue,
+                "Hoje" => item.DueDate.Date == DateTime.Today,
+                "Proximos 7 dias" => !item.IsOverdue && item.DueDate.Date <= DateTime.Today.AddDays(7),
+                "Com revisão" => item.StatusLabel.Contains("Revis", StringComparison.OrdinalIgnoreCase),
+                _ => true
+            };
+        }
+
+        private Border CreateCalendarFiltersCard(IReadOnlyList<TeamWorkspaceInfo> teams, IReadOnlyList<CalendarAgendaItem> filteredAgendaItems, int totalAgendaCount)
+        {
+            var card = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 18)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Filtros e exportação",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"A visão atual mostra {filteredAgendaItems.Count} de {totalAgendaCount} compromisso(s). Ajuste a janela e exporte a semana para acompanhamento externo.",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+
+            var selectors = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            selectors.Children.Add(CreateCalendarFilterSelector(
+                "Equipe",
+                new[] { (Label: "Todas", Value: string.Empty) }.Concat(teams.Select(team => (team.TeamName, team.TeamId))).ToList(),
+                _calendarFilterTeamId,
+                value =>
+                {
+                    _calendarFilterTeamId = value;
+                    RenderCalendarAgenda();
+                }));
+            selectors.Children.Add(CreateCalendarFilterSelector(
+                "Tipo",
+                new[] { ("Todos", "Todos"), ("Projeto", "Projeto"), ("Marco", "Marco"), ("Tarefa", "Tarefa"), ("Timeline", "Timeline") },
+                _calendarFilterKind,
+                value =>
+                {
+                    _calendarFilterKind = string.IsNullOrWhiteSpace(value) ? "Todos" : value;
+                    RenderCalendarAgenda();
+                }));
+            selectors.Children.Add(CreateCalendarFilterSelector(
+                "Status",
+                new[] { ("Todos", "Todos"), ("Em risco", "Em risco"), ("Hoje", "Hoje"), ("Próximos 7 dias", "Proximos 7 dias"), ("Com revisão", "Com revisão") },
+                _calendarFilterStatus,
+                value =>
+                {
+                    _calendarFilterStatus = string.IsNullOrWhiteSpace(value) ? "Todos" : value;
+                    RenderCalendarAgenda();
+                }));
+            selectors.Children.Add(CreateCalendarFilterSelector(
+                "Janela",
+                new[] { ("7 dias", "7"), ("14 dias", "14"), ("30 dias", "30"), ("90 dias", "90") },
+                _calendarFilterWindowDays.ToString(CultureInfo.InvariantCulture),
+                value =>
+                {
+                    _calendarFilterWindowDays = int.TryParse(value, out var days) ? days : 14;
+                    RenderCalendarAgenda();
+                }));
+            stack.Children.Add(selectors);
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            actions.Children.Add(CreateSidebarButton("Exportar Excel", Color.FromRgb(16, 185, 129), (s, e) => ExportCalendarAgendaToExcel(), PackIconMaterialKind.FileDocumentOutline));
+            actions.Children.Add(CreateSidebarButton("Exportar PDF", Color.FromRgb(220, 38, 38), (s, e) => ExportCalendarAgendaToPdf(), PackIconMaterialKind.FilePdfBox));
+            actions.Children.Add(CreateSidebarButton("Limpar filtros", Color.FromRgb(100, 116, 139), (s, e) =>
+            {
+                _calendarFilterTeamId = string.Empty;
+                _calendarFilterKind = "Todos";
+                _calendarFilterStatus = "Todos";
+                _calendarFilterWindowDays = 14;
+                RenderCalendarAgenda();
+            }, PackIconMaterialKind.FilterOffOutline));
+            stack.Children.Add(actions);
+
+            card.Child = stack;
+            return card;
+        }
+
+        private Border CreateCalendarFilterSelector(string label, IEnumerable<(string Label, string Value)> options, string selectedValue, Action<string> onChanged)
+        {
+            var container = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 10, 10),
+                MinWidth = 188
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+
+            var combo = new ComboBox
+            {
+                Height = 40,
+                Margin = new Thickness(0, 8, 0, 0),
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = options.Select(item => new { item.Label, item.Value }).ToList(),
+                SelectedValue = selectedValue
+            };
+            ApplyDialogInputStyle(combo);
+            combo.SelectionChanged += (s, e) =>
+            {
+                if (combo.SelectedValue is string value)
+                {
+                    onChanged(value);
+                }
+            };
+
+            stack.Children.Add(combo);
+            container.Child = stack;
+            return container;
+        }
+
+        private Border CreateCalendarFilteredEmptyState()
+        {
+            return CreateSearchSlideInfoCard(
+                "Nenhum compromisso nessa visão",
+                "Ajuste equipe, tipo, status ou janela de datas para voltar a enxergar itens na agenda filtrada.");
+        }
+
+        private List<CalendarAgendaItem> GetWeeklyAgendaExportItems()
+        {
+            var limitDate = DateTime.Today.AddDays(7);
+            return (_lastCalendarAgendaItems ?? new List<CalendarAgendaItem>())
+                .Where(item => item.DueDate.Date <= limitDate)
+                .OrderBy(item => item.DueDate)
+                .ThenBy(item => item.Team.TeamName)
+                .ThenBy(item => item.Title)
+                .ToList();
+        }
+
+        private void ExportCalendarAgendaToExcel()
+        {
+            var items = GetWeeklyAgendaExportItems();
+            if (items.Count == 0)
+            {
+                ShowStyledAlertDialog("AGENDA", "Nada para exportar", "A semana filtrada não possui compromissos para exportação em Excel.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var dialog = new SaveFileDialog
+            {
+                FileName = $"agenda-semanal-{DateTime.Today:yyyyMMdd}.xlsx",
+                Filter = "Planilha Excel|*.xlsx",
+                DefaultExt = ".xlsx"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            using var document = SpreadsheetDocument.Create(dialog.FileName, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook);
+            var workbookPart = document.AddWorkbookPart();
+            workbookPart.Workbook = new S.Workbook();
+
+            var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+            var sheetData = new S.SheetData();
+            worksheetPart.Worksheet = new S.Worksheet(sheetData);
+
+            var sheets = workbookPart.Workbook.AppendChild(new S.Sheets());
+            sheets.Append(new S.Sheet
+            {
+                Id = workbookPart.GetIdOfPart(worksheetPart),
+                SheetId = 1,
+                Name = "Agenda Semanal"
+            });
+
+            sheetData.Append(CreateSpreadsheetRow(new[]
+            {
+                "Equipe",
+                "Turma",
+                "Semestre",
+                "Tipo",
+                "Título",
+                "Prazo",
+                "Status",
+                "Template",
+                "Observações"
+            }));
+
+            foreach (var item in items)
+            {
+                sheetData.Append(CreateSpreadsheetRow(new[]
+                {
+                    item.Team.TeamName,
+                    item.Team.ClassName,
+                    item.Team.AcademicTerm,
+                    item.KindLabel,
+                    item.Title,
+                    item.DueDate.ToString("dd/MM/yyyy"),
+                    item.StatusLabel,
+                    item.Team.TemplateName,
+                    item.Notes
+                }));
+            }
+
+            workbookPart.Workbook.Save();
+            ShowStyledAlertDialog("AGENDA", "Exportação concluída", $"A agenda semanal foi exportada para:\n{dialog.FileName}", "Fechar", GetThemeBrush("AccentBrush"));
+        }
+
+        private S.Row CreateSpreadsheetRow(IEnumerable<string> values)
+        {
+            var row = new S.Row();
+            foreach (var value in values)
+            {
+                row.AppendChild(new S.Cell
+                {
+                    DataType = S.CellValues.String,
+                    CellValue = new S.CellValue(value ?? string.Empty)
+                });
+            }
+
+            return row;
+        }
+
+        private void ExportCalendarAgendaToPdf()
+        {
+            var items = GetWeeklyAgendaExportItems();
+            if (items.Count == 0)
+            {
+                ShowStyledAlertDialog("AGENDA", "Nada para exportar", "A semana filtrada não possui compromissos para exportação em PDF.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var dialog = new SaveFileDialog
+            {
+                FileName = $"agenda-semanal-{DateTime.Today:yyyyMMdd}.pdf",
+                Filter = "Documento PDF|*.pdf",
+                DefaultExt = ".pdf"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            var lines = new List<string>
+            {
+                "Agenda semanal academica",
+                $"Gerada em {DateTime.Now:dd/MM/yyyy HH:mm}",
+                string.Empty
+            };
+
+            foreach (var item in items)
+            {
+                lines.Add($"[{item.KindLabel}] {item.Team.TeamName} - {item.Title}");
+                lines.Add($"Turma: {item.Team.ClassName} | Prazo: {item.DueDate:dd/MM/yyyy} | Status: {item.StatusLabel}");
+                if (!string.IsNullOrWhiteSpace(item.Notes))
+                {
+                    lines.Add($"Notas: {TruncateAgendaText(item.Notes, 140)}");
+                }
+                lines.Add(string.Empty);
+            }
+
+            WriteBasicPdfDocument(dialog.FileName, lines);
+            ShowStyledAlertDialog("AGENDA", "Exportação concluída", $"A agenda semanal foi exportada para:\n{dialog.FileName}", "Fechar", GetThemeBrush("AccentBrush"));
+        }
+
+        private void WriteBasicPdfDocument(string filePath, IReadOnlyList<string> lines)
+        {
+            var safeLines = (lines ?? Array.Empty<string>())
+                .Select(SanitizePdfText)
+                .ToList();
+
+            var pages = new List<List<string>>();
+            const int linesPerPage = 38;
+            for (var index = 0; index < safeLines.Count; index += linesPerPage)
+            {
+                pages.Add(safeLines.Skip(index).Take(linesPerPage).ToList());
+            }
+
+            if (pages.Count == 0)
+            {
+                pages.Add(new List<string> { "Agenda semanal vazia." });
+            }
+
+            var objects = new List<string>();
+            objects.Add("<< /Type /Catalog /Pages 2 0 R >>");
+
+            var pageObjectIds = new List<int>();
+            var contentObjectIds = new List<int>();
+            const int fontObjectId = 3;
+
+            var nextObjectId = 4;
+            foreach (var _ in pages)
+            {
+                pageObjectIds.Add(nextObjectId++);
+                contentObjectIds.Add(nextObjectId++);
+            }
+
+            var kids = string.Join(" ", pageObjectIds.Select(id => $"{id} 0 R"));
+            objects.Add($"<< /Type /Pages /Count {pages.Count} /Kids [ {kids} ] >>");
+            objects.Add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+
+            for (var pageIndex = 0; pageIndex < pages.Count; pageIndex++)
+            {
+                var pageObjectId = pageObjectIds[pageIndex];
+                var contentObjectId = contentObjectIds[pageIndex];
+                objects.Add($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 {fontObjectId} 0 R >> >> /Contents {contentObjectId} 0 R >>");
+
+                var contentBuilder = new StringBuilder();
+                contentBuilder.AppendLine("BT");
+                contentBuilder.AppendLine("/F1 12 Tf");
+                contentBuilder.AppendLine("40 800 Td");
+
+                var isFirstLine = true;
+                foreach (var line in pages[pageIndex])
+                {
+                    if (isFirstLine)
+                    {
+                        contentBuilder.AppendLine($"({EscapePdfText(line)}) Tj");
+                        isFirstLine = false;
+                    }
+                    else
+                    {
+                        contentBuilder.AppendLine("0 -18 Td");
+                        contentBuilder.AppendLine($"({EscapePdfText(line)}) Tj");
+                    }
+                }
+
+                contentBuilder.AppendLine("ET");
+                var contentStream = contentBuilder.ToString();
+                objects.Add($"<< /Length {Encoding.ASCII.GetByteCount(contentStream)} >>\nstream\n{contentStream}endstream");
+            }
+
+            using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+            using var writer = new StreamWriter(stream, Encoding.ASCII);
+            writer.WriteLine("%PDF-1.4");
+
+            var offsets = new List<long> { 0 };
+            for (var objectIndex = 0; objectIndex < objects.Count; objectIndex++)
+            {
+                writer.Flush();
+                offsets.Add(stream.Position);
+                writer.WriteLine($"{objectIndex + 1} 0 obj");
+                writer.WriteLine(objects[objectIndex]);
+                writer.WriteLine("endobj");
+            }
+
+            writer.Flush();
+            var xrefPosition = stream.Position;
+            writer.WriteLine($"xref\n0 {objects.Count + 1}");
+            writer.WriteLine("0000000000 65535 f ");
+            foreach (var offset in offsets.Skip(1))
+            {
+                writer.WriteLine($"{offset:D10} 00000 n ");
+            }
+            writer.WriteLine("trailer");
+            writer.WriteLine($"<< /Size {objects.Count + 1} /Root 1 0 R >>");
+            writer.WriteLine("startxref");
+            writer.WriteLine(xrefPosition.ToString(CultureInfo.InvariantCulture));
+            writer.WriteLine("%%EOF");
+            writer.Flush();
+        }
+
+        private string SanitizePdfText(string value)
+        {
+            var normalized = (value ?? string.Empty).Normalize(NormalizationForm.FormD);
+            var builder = new StringBuilder();
+            foreach (var character in normalized)
+            {
+                if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+                {
+                    continue;
+                }
+
+                builder.Append(character <= 127 ? character : '?');
+            }
+
+            return builder.ToString().Normalize(NormalizationForm.FormC);
+        }
+
+        private string EscapePdfText(string value)
+        {
+            return (value ?? string.Empty)
+                .Replace("\\", "\\\\")
+                .Replace("(", "\\(")
+                .Replace(")", "\\)");
         }
 
         private int GetCalendarTeamRiskScore(TeamWorkspaceInfo team, IReadOnlyList<CalendarAgendaItem> items)
@@ -3631,11 +5471,14 @@ namespace MeuApp
                 .OrderBy(team => team.TeamName)
                 .ToList();
             var agendaItems = BuildCalendarAgendaItems(teams);
-            var overdueCount = agendaItems.Count(item => item.IsOverdue);
+            var filteredAgendaItems = ApplyCalendarAgendaFilters(agendaItems);
+            var overdueCount = filteredAgendaItems.Count(item => item.IsOverdue);
+            _lastCalendarAgendaTeams = teams;
+            _lastCalendarAgendaItems = filteredAgendaItems;
 
             CalendarStatusText.Text = teams.Count == 0
                 ? "Crie ou entre em uma equipe para acompanhar prazos, marcos e tarefas em uma agenda consolidada."
-                : $"{teams.Count} equipe(s) monitorada(s), {agendaItems.Count} compromisso(s) com data e {overdueCount} ponto(s) em risco imediato.";
+                : $"{teams.Count} equipe(s) monitorada(s), {filteredAgendaItems.Count} compromisso(s) na visão atual e {overdueCount} ponto(s) em risco imediato.";
 
             if (teams.Count == 0)
             {
@@ -3643,8 +5486,16 @@ namespace MeuApp
                 return;
             }
 
-            CalendarAgendaHost.Children.Add(CreateCalendarHeroCard(teams, agendaItems));
-            CalendarAgendaHost.Children.Add(CreateCalendarWeekStripCard(agendaItems));
+            CalendarAgendaHost.Children.Add(CreateCalendarHeroCard(teams, filteredAgendaItems));
+            CalendarAgendaHost.Children.Add(CreateCalendarFiltersCard(teams, filteredAgendaItems, agendaItems.Count));
+
+            if (filteredAgendaItems.Count == 0)
+            {
+                CalendarAgendaHost.Children.Add(CreateCalendarFilteredEmptyState());
+                return;
+            }
+
+            CalendarAgendaHost.Children.Add(CreateCalendarWeekStripCard(filteredAgendaItems));
 
             var mainGrid = new Grid { Margin = new Thickness(0, 0, 0, 18) };
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
@@ -3652,14 +5503,14 @@ namespace MeuApp
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var leftStack = new StackPanel();
-            leftStack.Children.Add(CreateCalendarPrioritySection(agendaItems));
-            leftStack.Children.Add(CreateCalendarTimelineSection(agendaItems));
+            leftStack.Children.Add(CreateCalendarPrioritySection(filteredAgendaItems));
+            leftStack.Children.Add(CreateCalendarTimelineSection(filteredAgendaItems));
             mainGrid.Children.Add(leftStack);
 
             var rightStack = new StackPanel();
-            rightStack.Children.Add(CreateCalendarTeamRadarSection(teams, agendaItems));
+            rightStack.Children.Add(CreateCalendarTeamRadarSection(teams, filteredAgendaItems));
             rightStack.Children.Add(CreateCalendarRecentActivitySection(teams));
-            rightStack.Children.Add(CreateCalendarGuidanceSection(teams, agendaItems));
+            rightStack.Children.Add(CreateCalendarGuidanceSection(teams, filteredAgendaItems));
             Grid.SetColumn(rightStack, 2);
             mainGrid.Children.Add(rightStack);
 
@@ -4157,7 +6008,7 @@ namespace MeuApp
                 chips.Children.Add(CreateStaticTeamChip(statusLabel, new SolidColorBrush(statusColor), Brushes.White));
                 chips.Children.Add(CreateStaticTeamChip($"Progresso {CalculateTeamProgressPercentage(item.Team)}%", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
                 chips.Children.Add(CreateStaticTeamChip($"Proximo {GetNextTeamDeadlineLabel(item.Team)}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
-                chips.Children.Add(CreateStaticTeamChip($"{item.Team.Members.Count} membro(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateStaticTeamChip(BuildTeamBalanceLabel(item.Team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
                 stack.Children.Add(chips);
 
                 stack.Children.Add(new TextBlock
@@ -4498,7 +6349,9 @@ namespace MeuApp
                 ClipToBounds = true,
                 Child = CreateUserAvatarVisual(member, 28)
             });
-            content.Children.Add(new TextBlock
+
+            var labels = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labels.Children.Add(new TextBlock
             {
                 Text = string.IsNullOrWhiteSpace(member.Name) ? member.Email : member.Name,
                 Foreground = foreground,
@@ -4506,6 +6359,19 @@ namespace MeuApp
                 FontWeight = FontWeights.SemiBold,
                 VerticalAlignment = VerticalAlignment.Center
             });
+
+            var roleLabel = TeamPermissionService.GetRoleLabel(member.Role);
+            labels.Children.Add(new TextBlock
+            {
+                Text = roleLabel,
+                Foreground = foreground,
+                Opacity = 0.78,
+                FontSize = 10,
+                Margin = new Thickness(0, 2, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            content.Children.Add(labels);
 
             if (onRemove != null)
             {
@@ -4544,7 +6410,7 @@ namespace MeuApp
             {
                 TeamMembersPanel.Children.Add(new TextBlock
                 {
-                    Text = "Nenhum aluno adicionado ainda.",
+                    Text = "Nenhum participante adicionado ainda.",
                     Foreground = GetThemeBrush("SecondaryTextBrush"),
                     FontSize = 12
                 });
@@ -4751,6 +6617,26 @@ namespace MeuApp
                 Foreground = GetThemeBrush("AccentBrush"),
                 FontWeight = FontWeights.SemiBold
             });
+
+            var metadataWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            metadataWrap.Children.Add(CreateStaticTeamChip(
+                string.IsNullOrWhiteSpace(team.AcademicTerm) ? "Sem semestre" : $"Semestre {team.AcademicTerm}",
+                GetThemeBrush("AccentMutedBrush"),
+                GetThemeBrush("AccentBrush")));
+            if (!string.IsNullOrWhiteSpace(team.TemplateName))
+            {
+                metadataWrap.Children.Add(CreateStaticTeamChip(team.TemplateName, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            metadataWrap.Children.Add(CreateStaticTeamChip(
+                team.LastRealtimeSyncAt.HasValue
+                    ? $"Sync {team.LastRealtimeSyncAt.Value:dd/MM HH:mm}"
+                    : "Sync pendente",
+                GetThemeBrush("CardBackgroundBrush"),
+                GetThemeBrush("PrimaryTextBrush")));
+            metadataWrap.Children.Add(CreateStaticTeamChip(BuildTeamProfessorFocusLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            metadataWrap.Children.Add(CreateStaticTeamChip(BuildTeamLeadershipLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            metadataWrap.Children.Add(CreateStaticTeamChip(BuildTeamBalanceLabel(team), GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            titleStack.Children.Add(metadataWrap);
             Grid.SetColumn(titleStack, 1);
             grid.Children.Add(titleStack);
 
@@ -4766,9 +6652,19 @@ namespace MeuApp
             {
                 actions.Children.Add(CreateTeamWorkspaceActionButton("Remover logo", Color.FromRgb(100, 116, 139), RemoveTeamLogo_Click, PackIconMaterialKind.DeleteOutline));
             }
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Adicionar membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
-            if (IsCurrentUserTeamCreator(team))
+            if (CanCurrentUserAddMembers(team))
+            {
+                actions.Children.Add(CreateTeamWorkspaceActionButton("Adicionar membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
+            }
+            if (CanCurrentUserAssignLeadership(team))
+            {
+                actions.Children.Add(CreateTeamWorkspaceActionButton("Definir líder", Color.FromRgb(124, 58, 237), (s, e) => OpenAssignTeamLeaderDialog(team), PackIconMaterialKind.AccountStarOutline));
+            }
+            if (CanCurrentUserManageMembers(team))
+            {
+                actions.Children.Add(CreateTeamWorkspaceActionButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
+            }
+            if (CanCurrentUserDeleteTeam(team))
             {
                 actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace, PackIconMaterialKind.DeleteOutline));
             }
@@ -4785,13 +6681,16 @@ namespace MeuApp
         {
             var overdueCount = team.TaskColumns.SelectMany(column => column.Cards).Count(card => card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today);
             var completedMilestones = team.Milestones.Count(milestone => string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase));
+            var studentCount = GetStudentTeamMembers(team).Count;
+            var facultyCount = GetFacultyMembers(team).Count;
 
             var wrap = new WrapPanel
             {
                 Margin = new Thickness(22, 18, 22, 18)
             };
 
-            wrap.Children.Add(CreateTeamMetricCard("Membros", $"{team.Members.Count}", "Equipe ativa", Color.FromRgb(37, 99, 235)));
+            wrap.Children.Add(CreateTeamMetricCard("Discentes", $"{studentCount}", "Execução do projeto", Color.FromRgb(37, 99, 235)));
+            wrap.Children.Add(CreateTeamMetricCard("Docência", $"{facultyCount}", "Orientação e governança", Color.FromRgb(124, 58, 237)));
             wrap.Children.Add(CreateTeamMetricCard("Tarefas", $"{team.TaskColumns.Sum(column => column.Cards.Count)}", "Cards no board", Color.FromRgb(16, 185, 129)));
             wrap.Children.Add(CreateTeamMetricCard("Progresso", $"{CalculateTeamProgressPercentage(team)}%", "Fluxo concluido", Color.FromRgb(14, 165, 233)));
             wrap.Children.Add(CreateTeamMetricCard("Atrasos", $"{overdueCount}", "Itens fora do prazo", Color.FromRgb(220, 38, 38)));
@@ -5483,6 +7382,36 @@ namespace MeuApp
                     isOverdue ? Brushes.White : GetThemeBrush("AccentBrush")));
             }
 
+            if (card.EstimatedHours > 0)
+            {
+                chips.Children.Add(CreateStaticTeamChip($"{card.EstimatedHours}h", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            if (card.WorkloadPoints > 0)
+            {
+                chips.Children.Add(CreateStaticTeamChip($"{card.WorkloadPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            if (!string.IsNullOrWhiteSpace(card.RequiredRole) && !string.Equals(card.RequiredRole, "student", StringComparison.OrdinalIgnoreCase))
+            {
+                chips.Children.Add(CreateStaticTeamChip(TeamPermissionService.GetRoleLabel(card.RequiredRole), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            if (card.RequiresProfessorReview)
+            {
+                chips.Children.Add(CreateStaticTeamChip("Revisão docente", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            }
+
+            if (card.Comments.Count > 0)
+            {
+                chips.Children.Add(CreateStaticTeamChip($"{card.Comments.Count} comentário(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            if (card.Attachments.Count > 0)
+            {
+                chips.Children.Add(CreateStaticTeamChip($"{card.Attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
             stack.Children.Add(chips);
 
             var assignedMembers = team.Members
@@ -5505,6 +7434,7 @@ namespace MeuApp
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             footer.Children.Add(new TextBlock
             {
@@ -5513,37 +7443,59 @@ namespace MeuApp
                 Foreground = GetThemeBrush("TertiaryTextBrush")
             });
 
-            var editButton = new Button
+            if (CanCurrentUserComment(team) || CanCurrentUserUploadFiles(team))
             {
-                Content = "Editar",
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Foreground = GetThemeBrush("AccentBrush"),
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Cursor = Cursors.Hand,
-                Padding = new Thickness(6, 0, 0, 0),
-                Tag = Tuple.Create(team, column, card)
-            };
-            editButton.Click += EditTeamTask_Click;
-            Grid.SetColumn(editButton, 1);
-            footer.Children.Add(editButton);
+                var collaborateButton = new Button
+                {
+                    Content = "Colaborar",
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = GetThemeBrush("AccentBrush"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(6, 0, 0, 0),
+                    Tag = Tuple.Create(team, column, card)
+                };
+                collaborateButton.Click += OpenTaskCollaboration_Click;
+                Grid.SetColumn(collaborateButton, 1);
+                footer.Children.Add(collaborateButton);
+            }
 
-            var deleteButton = new Button
+            if (CanCurrentUserEditProjectSettings(team))
             {
-                Content = "Excluir",
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
-                FontSize = 10,
-                FontWeight = FontWeights.SemiBold,
-                Cursor = Cursors.Hand,
-                Padding = new Thickness(8, 0, 0, 0),
-                Tag = Tuple.Create(team, column, card)
-            };
-            deleteButton.Click += DeleteTeamTask_Click;
-            Grid.SetColumn(deleteButton, 2);
-            footer.Children.Add(deleteButton);
+                var editButton = new Button
+                {
+                    Content = "Editar",
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = GetThemeBrush("AccentBrush"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(8, 0, 0, 0),
+                    Tag = Tuple.Create(team, column, card)
+                };
+                editButton.Click += EditTeamTask_Click;
+                Grid.SetColumn(editButton, 2);
+                footer.Children.Add(editButton);
+
+                var deleteButton = new Button
+                {
+                    Content = "Excluir",
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(8, 0, 0, 0),
+                    Tag = Tuple.Create(team, column, card)
+                };
+                deleteButton.Click += DeleteTeamTask_Click;
+                Grid.SetColumn(deleteButton, 3);
+                footer.Children.Add(deleteButton);
+            }
 
             stack.Children.Add(footer);
             cardBorder.Child = stack;
@@ -5811,10 +7763,13 @@ namespace MeuApp
         {
             var stack = new StackPanel();
             stack.Children.Add(CreateProjectManagementSection(team));
+            stack.Children.Add(CreateTeamAcademicTimelineSection(team));
             stack.Children.Add(CreateTeamMilestonesSection(team));
+            stack.Children.Add(CreateTeamWorkloadSection(team));
             stack.Children.Add(CreateProjectChatSection(team));
             stack.Children.Add(CreateTeamMembersSection(team));
             stack.Children.Add(CreateTeamAssetsSection(team));
+            stack.Children.Add(CreateTeamProfessorNotesSection(team));
             stack.Children.Add(CreateTeamNotificationsSection(team));
             return stack;
         }
@@ -5825,6 +7780,14 @@ namespace MeuApp
             var content = (StackPanel)border.Child;
 
             content.Children.Add(CreateStaticTeamChip($"Status: {team.ProjectStatus}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            if (!string.IsNullOrWhiteSpace(team.TemplateName))
+            {
+                content.Children.Add(CreateStaticTeamChip(team.TemplateName, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            if (!string.IsNullOrWhiteSpace(team.AcademicTerm))
+            {
+                content.Children.Add(CreateStaticTeamChip($"Semestre {team.AcademicTerm}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
 
             content.Children.Add(new TextBlock
             {
@@ -5853,7 +7816,98 @@ namespace MeuApp
                 TextWrapping = TextWrapping.Wrap
             });
 
-            content.Children.Add(CreateSidebarButton("Atualizar progresso e prazo", Color.FromRgb(14, 165, 233), (s, e) => OpenProjectManagementDialog(team), PackIconMaterialKind.Refresh));
+            if (!string.IsNullOrWhiteSpace(team.TeacherNotes))
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = team.TeacherNotes,
+                    Margin = new Thickness(0, 10, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+
+            if (CanCurrentUserEditProjectSettings(team))
+            {
+                content.Children.Add(CreateSidebarButton("Atualizar progresso e prazo", Color.FromRgb(14, 165, 233), (s, e) => OpenProjectManagementDialog(team), PackIconMaterialKind.Refresh));
+            }
+            else
+            {
+                content.Children.Add(CreateDialogHintCard(
+                    "A leitura global do projeto fica com a liderança discente e a docência focal. Alunos sem esse papel continuam na execução e colaboração diária.",
+                    GetThemeBrush("AccentBrush"),
+                    new Thickness(0, 12, 0, 0)));
+            }
+
+            return border;
+        }
+
+        private Border CreateTeamAcademicTimelineSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Timeline acadêmica", "Macrofases do semestre e checkpoints que estruturam a jornada da equipe.");
+            var content = (StackPanel)border.Child;
+
+            if (team.SemesterTimeline.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Nenhuma timeline foi configurada ainda. Escolha um template ou registre fases do semestre para enxergar a cadência acadêmica.",
+                    Margin = new Thickness(0, 12, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+                return border;
+            }
+
+            foreach (var item in team.SemesterTimeline.OrderBy(entry => entry.StartsAt ?? DateTime.MaxValue).Take(5))
+            {
+                var card = new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16),
+                    Padding = new Thickness(12),
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+
+                var stack = new StackPanel();
+                stack.Children.Add(new TextBlock
+                {
+                    Text = item.Title,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+                stack.Children.Add(new TextBlock
+                {
+                    Text = string.IsNullOrWhiteSpace(item.Description) ? "Sem descrição adicional." : item.Description,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+
+                var chips = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                chips.Children.Add(CreateStaticTeamChip(item.Category, GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+                chips.Children.Add(CreateStaticTeamChip(item.Status, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                if (item.StartsAt.HasValue || item.EndsAt.HasValue)
+                {
+                    chips.Children.Add(CreateStaticTeamChip(
+                        $"{item.StartsAt:dd/MM} → {item.EndsAt:dd/MM}",
+                        GetThemeBrush("CardBackgroundBrush"),
+                        GetThemeBrush("PrimaryTextBrush")));
+                }
+                stack.Children.Add(chips);
+                card.Child = stack;
+                content.Children.Add(card);
+            }
+
             return border;
         }
 
@@ -6007,6 +8061,18 @@ namespace MeuApp
                 {
                     badges.Children.Add(CreateStaticTeamChip("Atrasada", new SolidColorBrush(Color.FromRgb(245, 158, 11)), Brushes.White));
                 }
+                if (milestone.RequiresProfessorReview)
+                {
+                    badges.Children.Add(CreateStaticTeamChip("Revisão docente", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+                }
+                if (milestone.Comments.Count > 0)
+                {
+                    badges.Children.Add(CreateStaticTeamChip($"{milestone.Comments.Count} comentário(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                }
+                if (milestone.Attachments.Count > 0)
+                {
+                    badges.Children.Add(CreateStaticTeamChip($"{milestone.Attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                }
                 info.Children.Add(badges);
 
                 var actions = new WrapPanel
@@ -6014,33 +8080,56 @@ namespace MeuApp
                     Margin = new Thickness(0, 8, 0, 0)
                 };
 
-                var toggleButton = new Button
+                if (CanCurrentUserComment(team) || CanCurrentUserUploadFiles(team))
                 {
-                    Content = isDone ? "Reabrir" : "Concluir",
-                    Background = Brushes.Transparent,
-                    Foreground = GetThemeBrush("AccentBrush"),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    Padding = new Thickness(0),
-                    FontWeight = FontWeights.SemiBold,
-                    Tag = Tuple.Create(team, milestone)
-                };
-                toggleButton.Click += ToggleMilestoneStatus_Click;
-                actions.Children.Add(toggleButton);
+                    var collaborateButton = new Button
+                    {
+                        Content = "Colaboração",
+                        Background = Brushes.Transparent,
+                        Foreground = GetThemeBrush("AccentBrush"),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(0),
+                        FontWeight = FontWeights.SemiBold,
+                        Tag = Tuple.Create(team, milestone)
+                    };
+                    collaborateButton.Click += OpenMilestoneCollaboration_Click;
+                    actions.Children.Add(collaborateButton);
+                }
 
-                var removeButton = new Button
+                if (CanCurrentUserReviewDeliverables(team))
                 {
-                    Content = "Remover",
-                    Background = Brushes.Transparent,
-                    Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
-                    BorderThickness = new Thickness(0),
-                    Cursor = Cursors.Hand,
-                    Padding = new Thickness(12, 0, 0, 0),
-                    FontWeight = FontWeights.SemiBold,
-                    Tag = Tuple.Create(team, milestone)
-                };
-                removeButton.Click += DeleteMilestone_Click;
-                actions.Children.Add(removeButton);
+                    var toggleButton = new Button
+                    {
+                        Content = isDone ? "Reabrir" : "Concluir",
+                        Background = Brushes.Transparent,
+                        Foreground = GetThemeBrush("AccentBrush"),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(actions.Children.Count == 0 ? 0 : 12, 0, 0, 0),
+                        FontWeight = FontWeights.SemiBold,
+                        Tag = Tuple.Create(team, milestone)
+                    };
+                    toggleButton.Click += ToggleMilestoneStatus_Click;
+                    actions.Children.Add(toggleButton);
+                }
+
+                if (CanCurrentUserEditProjectSettings(team))
+                {
+                    var removeButton = new Button
+                    {
+                        Content = "Remover",
+                        Background = Brushes.Transparent,
+                        Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                        BorderThickness = new Thickness(0),
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(actions.Children.Count == 0 ? 0 : 12, 0, 0, 0),
+                        FontWeight = FontWeights.SemiBold,
+                        Tag = Tuple.Create(team, milestone)
+                    };
+                    removeButton.Click += DeleteMilestone_Click;
+                    actions.Children.Add(removeButton);
+                }
 
                 info.Children.Add(actions);
 
@@ -6053,30 +8142,191 @@ namespace MeuApp
             return border;
         }
 
+        private Border CreateTeamWorkloadSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Carga por membro", "Leitura de distribuição de tarefas para orientar equilíbrio, risco e mentoria.");
+            var content = (StackPanel)border.Child;
+            var workload = AcademicRiskEngine.BuildMemberWorkload(team).Take(5).ToList();
+
+            if (workload.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Ainda não há tarefas atribuídas o suficiente para medir carga da equipe.",
+                    Margin = new Thickness(0, 12, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+                return border;
+            }
+
+            foreach (var item in workload)
+            {
+                var accent = item.Level switch
+                {
+                    "Alta" => Color.FromRgb(220, 38, 38),
+                    "Media" => Color.FromRgb(245, 158, 11),
+                    _ => Color.FromRgb(16, 185, 129)
+                };
+
+                var row = new Border
+                {
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = new SolidColorBrush(accent),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Padding = new Thickness(12),
+                    Margin = new Thickness(0, 10, 0, 0)
+                };
+
+                var stack = new StackPanel();
+                stack.Children.Add(new TextBlock
+                {
+                    Text = item.Name,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+                stack.Children.Add(new TextBlock
+                {
+                    Text = $"{item.Role} • {item.Summary}",
+                    Margin = new Thickness(0, 4, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+
+                var chips = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                chips.Children.Add(CreateStaticTeamChip($"Carga {item.Level}", new SolidColorBrush(accent), Brushes.White));
+                chips.Children.Add(CreateStaticTeamChip($"{item.WorkloadPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateStaticTeamChip($"{item.EstimatedHours}h", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                if (item.OverdueTasks > 0)
+                {
+                    chips.Children.Add(CreateStaticTeamChip($"{item.OverdueTasks} atraso(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                }
+                stack.Children.Add(chips);
+
+                row.Child = stack;
+                content.Children.Add(row);
+            }
+
+            return border;
+        }
+
         private Border CreateTeamMembersSection(TeamWorkspaceInfo team)
         {
-            var border = CreateSidebarSection("Membros da equipe", "Adicione e gerencie o time sem sair do board.");
+            var border = CreateSidebarSection("Pessoas e papéis", "Execução fica com estudantes; docência focal entra para orientar, revisar e organizar a governança.");
             var content = (StackPanel)border.Child;
 
-            var membersWrap = new WrapPanel();
-            foreach (var member in team.Members.OrderBy(item => item.Name))
+            content.Children.Add(CreateDialogHintCard(
+                $"{BuildTeamBalanceLabel(team)}. O professor focal define a liderança e cuida de remoções; a equipe discente segue na execução diária.",
+                GetThemeBrush("AccentBrush"),
+                new Thickness(0, 12, 0, 0)));
+
+            var studentMembers = GetStudentTeamMembers(team);
+            var facultyMembers = GetFacultyMembers(team);
+
+            content.Children.Add(new TextBlock
             {
-                membersWrap.Children.Add(CreateMemberChip(
+                Text = "Equipe discente",
+                Margin = new Thickness(0, 14, 0, 8),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            var studentWrap = new WrapPanel();
+            foreach (var member in studentMembers)
+            {
+                studentWrap.Children.Add(CreateMemberChip(
                     member,
                     GetThemeBrush("AccentMutedBrush"),
                     GetThemeBrush("AccentBrush"),
-                    team.Members.Count > 1 ? () => RemoveMemberFromActiveTeam(member) : null));
+                    CanCurrentUserManageMembers(team) && team.Members.Count > 1
+                        ? () => RemoveMemberFromActiveTeam(member)
+                        : null));
             }
 
-            content.Children.Add(membersWrap);
-            var actions = new WrapPanel();
-            actions.Children.Add(CreateSidebarButton("Adicionar novo membro", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
-            if (team.Members.Count > 1)
+            if (studentWrap.Children.Count == 0)
             {
-                actions.Children.Add(CreateSidebarButton("Remover membro", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Nenhum aluno foi vinculado ainda a esta equipe.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            else
+            {
+                content.Children.Add(studentWrap);
             }
 
-            content.Children.Add(actions);
+            content.Children.Add(new TextBlock
+            {
+                Text = "Orientação docente",
+                Margin = new Thickness(0, 14, 0, 8),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            if (facultyMembers.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Nenhum docente vinculado ainda. Use a descoberta docente ou a supervisão focal para orientar a equipe sem misturar execução e mentoria.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                var facultyWrap = new WrapPanel();
+                foreach (var member in facultyMembers)
+                {
+                    facultyWrap.Children.Add(CreateMemberChip(
+                        member,
+                        GetThemeBrush("MutedCardBackgroundBrush"),
+                        GetThemeBrush("PrimaryTextBrush"),
+                        CanCurrentUserManageMembers(team) && team.Members.Count > 1
+                            ? () => RemoveMemberFromActiveTeam(member)
+                            : null));
+                }
+
+                content.Children.Add(facultyWrap);
+            }
+
+            var actions = new WrapPanel();
+            if (CanCurrentUserAddMembers(team))
+            {
+                actions.Children.Add(CreateSidebarButton("Adicionar integrante", Color.FromRgb(37, 99, 235), (s, e) => OpenAddTeamMemberDialog(team), PackIconMaterialKind.AccountPlusOutline));
+            }
+            if (CanCurrentUserAssignLeadership(team) && studentMembers.Count > 0)
+            {
+                actions.Children.Add(CreateSidebarButton("Definir liderança", Color.FromRgb(124, 58, 237), (s, e) => OpenAssignTeamLeaderDialog(team), PackIconMaterialKind.AccountStarOutline));
+            }
+            if (CanCurrentUserManageMembers(team) && team.Members.Count > 1)
+            {
+                actions.Children.Add(CreateSidebarButton("Remover integrante", Color.FromRgb(245, 158, 11), (s, e) => OpenRemoveTeamMemberDialog(team), PackIconMaterialKind.AccountRemoveOutline));
+            }
+
+            if (actions.Children.Count > 0)
+            {
+                content.Children.Add(actions);
+            }
+            else
+            {
+                content.Children.Add(CreateDialogHintCard(
+                    "Você pode acompanhar a composição da equipe, mas a governança de pessoas fica com o professor focal e a entrada inicial fica com o criador da equipe.",
+                    GetThemeBrush("AccentBrush"),
+                    new Thickness(0, 12, 0, 0)));
+            }
             return border;
         }
 
@@ -6084,48 +8334,68 @@ namespace MeuApp
         {
             var border = CreateSidebarSection("Materiais e planos", "Arquivos e artefatos da equipe ficam centralizados aqui.");
             var content = (StackPanel)border.Child;
+            var visibleAssets = team.Assets
+                .Where(asset => CanCurrentUserViewAsset(team, asset))
+                .OrderByDescending(asset => asset.LastSyncedAt ?? asset.AddedAt)
+                .ToList();
 
-            var logoCount = team.Assets.Count(item => string.Equals(item.Category, "logo", StringComparison.OrdinalIgnoreCase));
-            var imagesCount = team.Assets.Count(item => string.Equals(item.Category, "imagens", StringComparison.OrdinalIgnoreCase));
-            var documentsCount = team.Assets.Count(item => string.Equals(item.Category, "documentos", StringComparison.OrdinalIgnoreCase));
-            var plansCount = team.Assets.Count(item => string.Equals(item.Category, "planos", StringComparison.OrdinalIgnoreCase));
+            var logoCount = visibleAssets.Count(item => string.Equals(item.Category, "logo", StringComparison.OrdinalIgnoreCase));
+            var imagesCount = visibleAssets.Count(item => string.Equals(item.Category, "imagens", StringComparison.OrdinalIgnoreCase));
+            var documentsCount = visibleAssets.Count(item => string.Equals(item.Category, "documentos", StringComparison.OrdinalIgnoreCase));
+            var plansCount = visibleAssets.Count(item => string.Equals(item.Category, "planos", StringComparison.OrdinalIgnoreCase));
+            var syncedCount = visibleAssets.Count(item => item.LastSyncedAt.HasValue);
 
             var stats = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) };
             stats.Children.Add(CreateSidebarMiniMetric("Logo", logoCount.ToString(), Color.FromRgb(236, 72, 153)));
             stats.Children.Add(CreateSidebarMiniMetric("Imagens", imagesCount.ToString(), Color.FromRgb(14, 165, 233)));
             stats.Children.Add(CreateSidebarMiniMetric("Docs", documentsCount.ToString(), Color.FromRgb(37, 99, 235)));
             stats.Children.Add(CreateSidebarMiniMetric("Planos", plansCount.ToString(), Color.FromRgb(16, 185, 129)));
+            stats.Children.Add(CreateSidebarMiniMetric("Sync", syncedCount.ToString(), Color.FromRgb(124, 58, 237)));
             content.Children.Add(stats);
 
-            var actions = new WrapPanel();
-            actions.Children.Add(CreateSidebarButton(logoCount == 0 ? "Logo" : "Trocar logo", Color.FromRgb(236, 72, 153), (s, e) => AddTeamAsset("logo"), PackIconMaterialKind.ImageOutline));
-            actions.Children.Add(CreateSidebarButton("Imagens", Color.FromRgb(14, 165, 233), (s, e) => AddTeamAsset("imagens"), PackIconMaterialKind.ImageOutline));
-            actions.Children.Add(CreateSidebarButton("Documentos", Color.FromRgb(37, 99, 235), (s, e) => AddTeamAsset("documentos"), PackIconMaterialKind.FileDocumentOutline));
-            actions.Children.Add(CreateSidebarButton("Planos", Color.FromRgb(16, 185, 129), (s, e) => AddTeamAsset("planos"), PackIconMaterialKind.ClipboardTextOutline));
-            content.Children.Add(actions);
+            if (CanCurrentUserUploadFiles(team))
+            {
+                var actions = new WrapPanel();
+                actions.Children.Add(CreateSidebarButton(logoCount == 0 ? "Logo" : "Trocar logo", Color.FromRgb(236, 72, 153), (s, e) => AddTeamAsset("logo"), PackIconMaterialKind.ImageOutline));
+                actions.Children.Add(CreateSidebarButton("Imagens", Color.FromRgb(14, 165, 233), (s, e) => AddTeamAsset("imagens"), PackIconMaterialKind.ImageOutline));
+                actions.Children.Add(CreateSidebarButton("Documentos", Color.FromRgb(37, 99, 235), (s, e) => AddTeamAsset("documentos"), PackIconMaterialKind.FileDocumentOutline));
+                actions.Children.Add(CreateSidebarButton("Planos", Color.FromRgb(16, 185, 129), (s, e) => AddTeamAsset("planos"), PackIconMaterialKind.ClipboardTextOutline));
+                content.Children.Add(actions);
+            }
+            else
+            {
+                content.Children.Add(CreateDialogHintCard(
+                    "Seu papel atual pode consultar materiais liberados, mas não publicar novos arquivos ou versões nesta equipe.",
+                    GetThemeBrush("AccentBrush"),
+                    new Thickness(0, 12, 0, 0)));
+            }
 
-            if (team.Assets.Count == 0)
+            if (visibleAssets.Count == 0)
             {
                 content.Children.Add(new TextBlock
                 {
-                    Text = "Nenhum material foi anexado ainda.",
+                    Text = team.Assets.Count == 0
+                        ? "Nenhum material foi anexado ainda."
+                        : "Existem materiais na equipe, mas o escopo atual impede abrir o conteúdo remoto com o seu papel.",
                     FontSize = 11,
                     Margin = new Thickness(0, 12, 0, 0),
-                    Foreground = GetThemeBrush("SecondaryTextBrush")
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
                 });
             }
             else
             {
-                foreach (var asset in team.Assets.OrderByDescending(item => item.AddedAt).Take(6))
+                foreach (var asset in visibleAssets.Take(6))
                 {
-                    content.Children.Add(CreateAssetSidebarCard(asset));
+                    content.Children.Add(CreateAssetSidebarCard(team, asset));
                 }
             }
 
             return border;
         }
 
-        private Border CreateAssetSidebarCard(TeamAssetInfo asset)
+        private Border CreateAssetSidebarCard(TeamWorkspaceInfo team, TeamAssetInfo asset)
         {
             var accent = asset.Category.ToLowerInvariant() switch
             {
@@ -6181,9 +8451,116 @@ namespace MeuApp
                 Margin = new Thickness(0, 6, 0, 0),
                 Foreground = GetThemeBrush("SecondaryTextBrush")
             });
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Versão {asset.Version} • Escopo {GetPermissionScopeLabel(asset.PermissionScope)}" + (asset.LastSyncedAt.HasValue ? $" • Sync {asset.LastSyncedAt.Value:dd/MM HH:mm}" : string.Empty),
+                FontSize = 10,
+                Margin = new Thickness(0, 4, 0, 0),
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var actions = new WrapPanel
+            {
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+
+            var openButton = new Button
+            {
+                Content = "Abrir",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = GetThemeBrush("AccentBrush"),
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand,
+                Padding = new Thickness(0),
+                Tag = Tuple.Create(team, asset)
+            };
+            openButton.Click += OpenTeamAssetPreview_Click;
+            actions.Children.Add(openButton);
+
+            if (asset.VersionHistory.Any(version => !string.IsNullOrWhiteSpace(version.StorageReference)))
+            {
+                var historyButton = new Button
+                {
+                    Content = "Histórico",
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(12, 0, 0, 0),
+                    Tag = Tuple.Create(team, asset)
+                };
+                historyButton.Click += OpenTeamAssetHistory_Click;
+                actions.Children.Add(historyButton);
+            }
+
+            if (CanCurrentUserUploadFiles(team) && !string.Equals(asset.Category, "logo", StringComparison.OrdinalIgnoreCase))
+            {
+                var versionButton = new Button
+                {
+                    Content = "Nova versão",
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    Padding = new Thickness(12, 0, 0, 0),
+                    Tag = Tuple.Create(team, asset)
+                };
+                versionButton.Click += UpdateTeamAssetVersion_Click;
+                actions.Children.Add(versionButton);
+            }
+
+            stack.Children.Add(actions);
             layout.Children.Add(stack);
             card.Child = layout;
             return card;
+        }
+
+        private Border CreateTeamProfessorNotesSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateSidebarSection("Mentoria e IA acadêmica", "Notas docentes, brief automático e orientação de próxima ação para a equipe.");
+            var content = (StackPanel)border.Child;
+
+            var identityWrap = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            identityWrap.Children.Add(CreateStaticTeamChip(BuildTeamProfessorFocusLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            identityWrap.Children.Add(CreateStaticTeamChip(BuildTeamLeadershipLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            content.Children.Add(identityWrap);
+
+            var brief = AcademicRiskEngine.BuildAcademicAssistantBrief(team);
+            content.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(team.TeacherNotes) ? "Sem observação docente fixa até agora." : team.TeacherNotes,
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+            content.Children.Add(new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 12, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = brief,
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                }
+            });
+
+            return border;
         }
 
         private Border CreateSidebarMiniMetric(string title, string value, Color accent)
@@ -6330,7 +8707,23 @@ namespace MeuApp
         {
             TeamListPanel.Children.Clear();
 
-            foreach (var team in _teamWorkspaces.OrderBy(item => item.TeamName))
+            var teamsToRender = ResolveVisibleTeamListResults();
+            if (teamsToRender.Count == 0)
+            {
+                var activeQuery = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
+                TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
+                    string.IsNullOrWhiteSpace(activeQuery)
+                        ? CurrentViewerCanUseProfessorDiscovery()
+                            ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
+                            : "Nenhuma equipe carregada ainda para sua conta."
+                        : $"Nenhuma equipe encontrada para \"{activeQuery}\"."));
+
+                RenderProfileProjectSelection(_currentProfile);
+                RenderCalendarAgenda();
+                return;
+            }
+
+            foreach (var team in teamsToRender)
             {
                 TeamListPanel.Children.Add(CreateTeamListItem(team));
             }
@@ -6376,7 +8769,9 @@ namespace MeuApp
                 FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 16,
                 FontWeight = FontWeights.Bold,
-                Foreground = GetThemeBrush("PrimaryTextBrush")
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 360
             });
             headingStack.Children.Add(new TextBlock
             {
@@ -6390,10 +8785,11 @@ namespace MeuApp
             textStack.Children.Add(identityRow);
             textStack.Children.Add(new TextBlock
             {
-                Text = $"{team.Members.Count} membro(s) • {team.Ucs.Count} UC(s)",
+                Text = $"{BuildTeamBalanceLabel(team)} • {team.Ucs.Count} UC(s)",
                 FontSize = 11,
                 Margin = new Thickness(0, 10, 0, 0),
-                Foreground = GetThemeBrush("TertiaryTextBrush")
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
             });
             var metaWrap = new WrapPanel
             {
@@ -6402,6 +8798,7 @@ namespace MeuApp
             metaWrap.Children.Add(CreateStaticTeamChip($"Codigo {team.TeamId}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
             metaWrap.Children.Add(CreateStaticTeamChip($"Progresso {progress}%", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             metaWrap.Children.Add(CreateStaticTeamChip($"Proximo prazo {GetNextTeamDeadlineLabel(team)}", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            metaWrap.Children.Add(CreateStaticTeamChip(BuildTeamLeadershipLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             textStack.Children.Add(metaWrap);
             layout.Children.Add(textStack);
 
@@ -6455,6 +8852,9 @@ namespace MeuApp
         private void SaveTeamWorkspace(TeamWorkspaceInfo team, bool persistInBackground = true)
         {
             EnsureTeamWorkspaceDefaults(team);
+            team.UpdatedAt = DateTime.Now;
+            team.LastRealtimeSyncAt = DateTime.Now;
+            _userAcademicPortfolioCache.Clear();
 
             var existingIndex = _teamWorkspaces.FindIndex(item =>
                 string.Equals(item.TeamId, team.TeamId, StringComparison.OrdinalIgnoreCase));
@@ -6476,6 +8876,43 @@ namespace MeuApp
                 SetTeamSyncStatus("Sincronizando alterações da equipe no Firebase...", GetThemeBrush("SecondaryTextBrush"));
                 _ = PersistTeamWorkspaceInBackgroundAsync(team, syncSequence);
             }
+
+            if (_activeTeamWorkspace != null && string.Equals(_activeTeamWorkspace.TeamId, team.TeamId, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeTeamWorkspace = team;
+            }
+
+            RenderProfessorDashboard();
+            RenderCalendarAgenda();
+        }
+
+        private void TrackTeamWorkspaceLocally(TeamWorkspaceInfo team, bool refreshVisuals = true)
+        {
+            EnsureTeamWorkspaceDefaults(team);
+
+            var existingIndex = _teamWorkspaces.FindIndex(item =>
+                string.Equals(item.TeamId, team.TeamId, StringComparison.OrdinalIgnoreCase));
+
+            if (existingIndex >= 0)
+            {
+                _teamWorkspaces[existingIndex] = team;
+            }
+            else
+            {
+                _teamWorkspaces.Add(team);
+            }
+
+            _userAcademicPortfolioCache.Clear();
+
+            if (!refreshVisuals)
+            {
+                return;
+            }
+
+            UpdateTeamsViewState();
+            RenderTeamsList();
+            RenderProfessorDashboard();
+            RenderCalendarAgenda();
         }
 
         private async Task PersistTeamWorkspaceInBackgroundAsync(TeamWorkspaceInfo team, int syncSequence)
@@ -6984,7 +9421,7 @@ namespace MeuApp
             TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamListCard.Visibility = _teamWorkspaces.Count > 0
+            TeamListCard.Visibility = (_teamWorkspaces.Count > 0 || CurrentViewerCanUseProfessorDiscovery())
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamWorkspaceCard.Visibility = _activeTeamWorkspace == null
@@ -6998,10 +9435,14 @@ namespace MeuApp
             AccountNameText.Text = profile.Name;
             NicknameTextBox.Text = profile.Nickname;
             ProfessionalTitleTextBox.Text = profile.ProfessionalTitle;
+            AcademicDepartmentTextBox.Text = profile.AcademicDepartment;
+            AcademicFocusTextBox.Text = profile.AcademicFocus;
+            OfficeHoursTextBox.Text = profile.OfficeHours;
             BioTextBox.Text = profile.Bio;
             SkillsTextBox.Text = profile.Skills;
             PortfolioLinkTextBox.Text = profile.PortfolioLink;
             LinkedInLinkTextBox.Text = profile.LinkedInLink;
+            UpdateRoleAwareShellState(profile);
             SetProgrammingLanguages(profile.ProgrammingLanguages);
             RefreshAvatarUi(profile);
             RenderProfileGalleryEditor(profile);
@@ -7966,7 +10407,7 @@ namespace MeuApp
             });
             content.Children.Add(new TextBlock
             {
-                Text = $"{team.Course} • {team.ClassName} • {team.Members.Count} membro(s)",
+                Text = $"{team.Course} • {team.ClassName} • {BuildTeamBalanceLabel(team)}",
                 Margin = new Thickness(0, 5, 0, 0),
                 FontSize = 11,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
@@ -8326,7 +10767,7 @@ namespace MeuApp
 
             try
             {
-                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{userId}";
+                var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{userId}");
                 var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -8352,7 +10793,10 @@ namespace MeuApp
                     Phone = GetFirestoreStringValue(fields, "phone"),
                     Registration = GetFirestoreStringValue(fields, "registration"),
                     Course = GetFirestoreStringValue(fields, "course"),
-                    Role = GetFirestoreStringValue(fields, "role"),
+                    Role = TeamPermissionService.NormalizeRole(GetFirestoreStringValue(fields, "role")),
+                    AcademicDepartment = GetFirestoreStringValue(fields, "academicDepartment"),
+                    AcademicFocus = GetFirestoreStringValue(fields, "academicFocus"),
+                    OfficeHours = GetFirestoreStringValue(fields, "officeHours"),
                     Nickname = GetFirestoreStringValue(fields, "nickname"),
                     ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
                     Bio = GetFirestoreStringValue(fields, "bio"),
@@ -8398,7 +10842,7 @@ namespace MeuApp
 
             try
             {
-                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{userId}";
+                var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{userId}");
                 var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -8424,6 +10868,11 @@ namespace MeuApp
                     Phone = GetFirestoreStringValue(fields, "phone"),
                     Course = GetFirestoreStringValue(fields, "course"),
                     Registration = GetFirestoreStringValue(fields, "registration"),
+                    Role = TeamPermissionService.NormalizeRole(GetFirestoreStringValue(fields, "role")),
+                    AcademicDepartment = GetFirestoreStringValue(fields, "academicDepartment"),
+                    AcademicFocus = GetFirestoreStringValue(fields, "academicFocus"),
+                    OfficeHours = GetFirestoreStringValue(fields, "officeHours"),
+                    ProfessorAccessLevel = GetFirestoreStringValue(fields, "professorAccessLevel"),
                     Nickname = GetFirestoreStringValue(fields, "nickname"),
                     ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
                     Bio = GetFirestoreStringValue(fields, "bio"),
@@ -8457,6 +10906,221 @@ namespace MeuApp
             return _userProfileCache.GetOrAdd(userId, LoadUserProfileByIdAsync);
         }
 
+        private bool CurrentViewerCanUseProfessorDiscovery()
+        {
+            return TeamPermissionService.CanUseProfessorDashboard(_currentProfile);
+        }
+
+        private bool CurrentViewerCanClaimFocalProfessor()
+        {
+            return TeamPermissionService.CanClaimFocalProfessorRole(_currentProfile);
+        }
+
+        private List<TeamWorkspaceInfo> GetLocalTeamsForUser(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return new List<TeamWorkspaceInfo>();
+            }
+
+            return _teamWorkspaces
+                .Where(team => team.Members.Any(member => string.Equals(member.UserId, userId, StringComparison.OrdinalIgnoreCase)))
+                .Select(EnsureTeamWorkspaceDefaults)
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderByDescending(team => team.UpdatedAt)
+                .ThenBy(team => team.TeamName)
+                .ToList();
+        }
+
+        private Task<List<TeamWorkspaceInfo>> LoadAcademicPortfolioCachedAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return Task.FromResult(new List<TeamWorkspaceInfo>());
+            }
+
+            return _userAcademicPortfolioCache.GetOrAdd(userId, LoadAcademicPortfolioByUserIdAsync);
+        }
+
+        private async Task<List<TeamWorkspaceInfo>> LoadAcademicPortfolioByUserIdAsync(string userId)
+        {
+            var localTeams = GetLocalTeamsForUser(userId);
+            if (_teamService == null)
+            {
+                return localTeams;
+            }
+
+            if (string.Equals(userId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+            {
+                return localTeams;
+            }
+
+            if (!CurrentViewerCanUseProfessorDiscovery())
+            {
+                return localTeams;
+            }
+
+            try
+            {
+                var remoteTeams = await _teamService.LoadTeamsForUserAsync(userId);
+                await EnrichTeamMembersAvatarsAsync(remoteTeams);
+
+                return remoteTeams
+                    .Concat(localTeams)
+                    .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => EnsureTeamWorkspaceDefaults(group.OrderByDescending(team => team.UpdatedAt).First()))
+                    .OrderByDescending(team => team.UpdatedAt)
+                    .ThenBy(team => team.TeamName)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[AcademicPortfolio] Falha ao carregar equipes de '{userId}': {ex.Message}");
+                return localTeams;
+            }
+        }
+
+        private async Task EnrichUsersWithAcademicPortfolioAsync(IEnumerable<UserInfo> users)
+        {
+            var targets = (users ?? Enumerable.Empty<UserInfo>())
+                .Where(user => user != null && !string.IsNullOrWhiteSpace(user.UserId))
+                .ToList();
+
+            if (targets.Count == 0 || !CurrentViewerCanUseProfessorDiscovery())
+            {
+                return;
+            }
+
+            var portfolioResults = await Task.WhenAll(targets.Select(async user => new
+            {
+                User = user,
+                Teams = await LoadAcademicPortfolioCachedAsync(user.UserId)
+            }));
+
+            foreach (var result in portfolioResults)
+            {
+                result.User.AcademicProjects = result.Teams;
+            }
+        }
+
+        private async Task<List<TeamWorkspaceInfo>> LoadSearchSlideTeamMatchesAsync(string query, int maxResults = 10)
+        {
+            var localTeams = GetLocalTeamSearchMatches(query, maxResults);
+            if (_teamService == null || !CurrentViewerCanUseProfessorDiscovery())
+            {
+                return localTeams;
+            }
+
+            try
+            {
+                var remoteTeams = await _teamService.SearchTeamsAsync(query, maxResults: maxResults);
+                return remoteTeams
+                    .Concat(localTeams)
+                    .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => EnsureTeamWorkspaceDefaults(group.OrderByDescending(team => team.UpdatedAt).First()))
+                    .OrderByDescending(team => team.UpdatedAt)
+                    .ThenBy(team => team.TeamName)
+                    .Take(Math.Max(1, maxResults))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[SearchSlideTeams] Falha ao buscar equipes remotamente: {ex.Message}");
+                return localTeams;
+            }
+        }
+
+        private List<TeamWorkspaceInfo> GetLocalTeamSearchMatches(string query, int maxResults = 8)
+        {
+            var normalizedQuery = NormalizeTeamValue(query);
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return new List<TeamWorkspaceInfo>();
+            }
+
+            return _teamWorkspaces
+                .Select(EnsureTeamWorkspaceDefaults)
+                .Where(team =>
+                    team.TeamName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || team.Course.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || team.ClassName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || team.ClassId.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || team.TeamId.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || team.Ucs.Any(uc => uc.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(team.TemplateName) && team.TemplateName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(team.FocalProfessorName) && team.FocalProfessorName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                    || (team.ProfessorSupervisorNames?.Any(name => name.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)) ?? false))
+                .OrderByDescending(team => team.UpdatedAt)
+                .ThenBy(team => team.TeamName)
+                .Take(Math.Max(1, maxResults))
+                .ToList();
+        }
+
+        private List<TeamWorkspaceInfo> ResolveVisibleTeamListResults()
+        {
+            var activeQuery = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(activeQuery))
+            {
+                return _teamWorkspaces
+                    .Select(EnsureTeamWorkspaceDefaults)
+                    .OrderBy(item => item.TeamName)
+                    .ToList();
+            }
+
+            return (_teamListSearchResults ?? new List<TeamWorkspaceInfo>())
+                .Select(EnsureTeamWorkspaceDefaults)
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(team => team.TeamName)
+                .ToList();
+        }
+
+        private Border CreateTeamsListDiscoveryHintCard(string message)
+        {
+            return CreateSearchSlideInfoCard("Pesquisa de equipes", message);
+        }
+
+        private List<TeamWorkspaceInfo> ResolveFeaturedProjectsFromPortfolio(UserProfile profile, IEnumerable<TeamWorkspaceInfo>? portfolioTeams)
+        {
+            var featuredIds = (profile?.FeaturedProjectIds ?? new List<string>())
+                .Where(projectId => !string.IsNullOrWhiteSpace(projectId))
+                .Select(projectId => projectId.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (featuredIds.Count == 0)
+            {
+                return new List<TeamWorkspaceInfo>();
+            }
+
+            return (portfolioTeams ?? Enumerable.Empty<TeamWorkspaceInfo>())
+                .Where(team => featuredIds.Contains(team.TeamId, StringComparer.OrdinalIgnoreCase))
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(team => team.TeamName)
+                .ToList();
+        }
+
+        private void RefreshSearchSlideTeams(TeamWorkspaceInfo updatedTeam)
+        {
+            foreach (var user in _searchSlideResults)
+            {
+                if (user.AcademicProjects == null || user.AcademicProjects.Count == 0)
+                {
+                    continue;
+                }
+
+                for (var index = 0; index < user.AcademicProjects.Count; index++)
+                {
+                    if (string.Equals(user.AcademicProjects[index].TeamId, updatedTeam.TeamId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        user.AcademicProjects[index] = updatedTeam;
+                    }
+                }
+            }
+        }
+
         private async Task ShowUserProfileDialogAsync(UserInfo summaryUser)
         {
             if (summaryUser == null || string.IsNullOrWhiteSpace(summaryUser.UserId))
@@ -8471,6 +11135,10 @@ namespace MeuApp
             profile.Phone = string.IsNullOrWhiteSpace(profile.Phone) ? summaryUser.Phone : profile.Phone;
             profile.Course = string.IsNullOrWhiteSpace(profile.Course) ? summaryUser.Course : profile.Course;
             profile.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? summaryUser.Registration : profile.Registration;
+            profile.Role = string.IsNullOrWhiteSpace(profile.Role) ? TeamPermissionService.NormalizeRole(summaryUser.Role) : TeamPermissionService.NormalizeRole(profile.Role);
+            profile.AcademicDepartment = string.IsNullOrWhiteSpace(profile.AcademicDepartment) ? summaryUser.AcademicDepartment : profile.AcademicDepartment;
+            profile.AcademicFocus = string.IsNullOrWhiteSpace(profile.AcademicFocus) ? summaryUser.AcademicFocus : profile.AcademicFocus;
+            profile.OfficeHours = string.IsNullOrWhiteSpace(profile.OfficeHours) ? summaryUser.OfficeHours : profile.OfficeHours;
             profile.Nickname = string.IsNullOrWhiteSpace(profile.Nickname) ? summaryUser.Nickname : profile.Nickname;
             profile.ProfessionalTitle = string.IsNullOrWhiteSpace(profile.ProfessionalTitle) ? summaryUser.ProfessionalTitle : profile.ProfessionalTitle;
             profile.Bio = string.IsNullOrWhiteSpace(profile.Bio) ? summaryUser.Bio : profile.Bio;
@@ -8485,7 +11153,22 @@ namespace MeuApp
             profile.AvatarClothing = string.IsNullOrWhiteSpace(profile.AvatarClothing) ? summaryUser.AvatarClothing : profile.AvatarClothing;
             NormalizeProfileCollections(profile);
 
-            var accessibleFeaturedProjects = await LoadAccessibleFeaturedProjectsAsync(profile);
+            var accessiblePortfolioTeams = (summaryUser.AcademicProjects ?? new List<TeamWorkspaceInfo>())
+                .Where(team => team != null)
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+            if (accessiblePortfolioTeams.Count == 0)
+            {
+                accessiblePortfolioTeams = await LoadAcademicPortfolioCachedAsync(profile.UserId);
+            }
+
+            var accessibleFeaturedProjects = ResolveFeaturedProjectsFromPortfolio(profile, accessiblePortfolioTeams);
+            if (accessibleFeaturedProjects.Count == 0 && (profile.FeaturedProjectIds?.Count ?? 0) > 0)
+            {
+                accessibleFeaturedProjects = await LoadAccessibleFeaturedProjectsAsync(profile);
+            }
 
             var avatarUser = new UserInfo
             {
@@ -8501,7 +11184,18 @@ namespace MeuApp
                 AvatarClothing = profile.AvatarClothing
             };
 
-            var dialog = new UserProfileViewWindow(profile, CreateUserAvatarVisual(avatarUser, 108, true), accessibleFeaturedProjects)
+            var dialog = new UserProfileViewWindow(
+                profile,
+                CreateUserAvatarVisual(avatarUser, 108, true),
+                accessibleFeaturedProjects,
+                accessiblePortfolioTeams,
+                _currentProfile,
+                team =>
+                {
+                    TrackTeamWorkspaceLocally(team);
+                    OpenTeamWorkspace(team, navigateToTeams: true);
+                },
+                CurrentViewerCanClaimFocalProfessor() ? AssignCurrentProfessorAsFocalAsync : null)
             {
                 Owner = this
             };
@@ -8553,6 +11247,112 @@ namespace MeuApp
             }
 
             return projects;
+        }
+
+        private async Task<TeamWorkspaceInfo?> AssignCurrentProfessorAsFocalAsync(TeamWorkspaceInfo team)
+        {
+            if (team == null)
+            {
+                return null;
+            }
+
+            if (!CurrentViewerCanClaimFocalProfessor())
+            {
+                ShowStyledAlertDialog("DOCENTE", "Ação indisponível", "Somente perfis com papel de professor podem assumir a supervisão focal da equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return null;
+            }
+
+            if (_teamService == null)
+            {
+                ShowStyledAlertDialog("DOCENTE", "Serviço indisponível", "O serviço de equipes ainda não foi inicializado para registrar a supervisão focal.", "Fechar", GetThemeBrush("AccentBrush"));
+                return null;
+            }
+
+            var professor = CreateCurrentUserInfo();
+            if (professor == null || string.IsNullOrWhiteSpace(professor.UserId))
+            {
+                return null;
+            }
+
+            professor.Role = "professor";
+            EnsureTeamWorkspaceDefaults(team);
+
+            var changed = false;
+            var existingMember = team.Members.FirstOrDefault(member => string.Equals(member.UserId, professor.UserId, StringComparison.OrdinalIgnoreCase));
+            if (existingMember == null)
+            {
+                team.Members.Add(CloneUserInfo(professor, "professor"));
+                changed = true;
+            }
+            else
+            {
+                existingMember.Name = professor.Name;
+                existingMember.Email = professor.Email;
+                existingMember.Phone = professor.Phone;
+                existingMember.Registration = professor.Registration;
+                existingMember.Course = professor.Course;
+                existingMember.Nickname = professor.Nickname;
+                existingMember.ProfessionalTitle = professor.ProfessionalTitle;
+                existingMember.AcademicDepartment = professor.AcademicDepartment;
+                existingMember.AcademicFocus = professor.AcademicFocus;
+                existingMember.OfficeHours = professor.OfficeHours;
+                existingMember.AvatarBody = professor.AvatarBody;
+                existingMember.AvatarHair = professor.AvatarHair;
+                existingMember.AvatarHat = professor.AvatarHat;
+                existingMember.AvatarAccessory = professor.AvatarAccessory;
+                existingMember.AvatarClothing = professor.AvatarClothing;
+                if (!string.Equals(existingMember.Role, "professor", StringComparison.OrdinalIgnoreCase))
+                {
+                    existingMember.Role = "professor";
+                    changed = true;
+                }
+            }
+
+            team.ProfessorSupervisorUserIds ??= new List<string>();
+            team.ProfessorSupervisorNames ??= new List<string>();
+
+            if (!team.ProfessorSupervisorUserIds.Contains(professor.UserId, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorUserIds.Add(professor.UserId);
+                changed = true;
+            }
+
+            if (!team.ProfessorSupervisorNames.Contains(professor.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorNames.Add(professor.Name);
+                changed = true;
+            }
+
+            if (!string.Equals(team.FocalProfessorUserId, professor.UserId, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(team.FocalProfessorName, professor.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                team.FocalProfessorUserId = professor.UserId;
+                team.FocalProfessorName = professor.Name;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                return team;
+            }
+
+            AddTeamNotification(team, $"{professor.Name} assumiu a supervisão focal da equipe.");
+
+            var saveResult = await _teamService.UpdateProfessorFocusAsync(team);
+            if (!saveResult.Success)
+            {
+                ShowStyledAlertDialog(
+                    "DOCENTE",
+                    "Falha ao assumir foco",
+                    $"Não foi possível registrar a supervisão focal desta equipe.\n\n{saveResult.ErrorMessage}\n\nLogs: {DebugHelper.GetLogFilePath()}",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+                return null;
+            }
+
+            SaveTeamWorkspace(team, persistInBackground: false);
+            RefreshSearchSlideTeams(team);
+            return team;
         }
 
         private string GetFirestoreStringValue(JsonElement fields, string fieldName)
@@ -9973,6 +12773,9 @@ namespace MeuApp
         {
             _teamEntryMode = TeamEntryMode.Create;
             TeamCreationStatusText.Text = string.Empty;
+            SyncDraftTemplateSuggestion();
+            EnsureCurrentUserInTeamDraft();
+            UpdateTeamMemberRoleHint();
             UpdateTeamsViewState();
         }
 
@@ -9999,7 +12802,8 @@ namespace MeuApp
                 return;
             }
 
-            TeamCreationStatusText.Text = $"Aluno selecionado: {selectedUser.Name}. Clique em Adicionar aluno para confirmar.";
+            var roleLabel = TeamPermissionService.GetRoleLabel(GetSelectedDraftMemberRole());
+            TeamCreationStatusText.Text = $"Participante selecionado: {selectedUser.Name}. Clique em Adicionar participante para incluir como {roleLabel.ToLowerInvariant()}.";
         }
 
         private async void TeamMemberInput_TextChanged(object sender, TextChangedEventArgs e)
@@ -10026,7 +12830,7 @@ namespace MeuApp
             }
 
             var currentSearchVersion = ++_teamMemberSearchVersion;
-            TeamCreationStatusText.Text = "Buscando alunos no Firebase...";
+            TeamCreationStatusText.Text = "Buscando participantes no Firebase...";
 
             TeamMemberInput.SelectedItem = null;
 
@@ -10048,25 +12852,25 @@ namespace MeuApp
 
                 if (results.Count > 1)
                 {
-                    TeamCreationStatusText.Text = $"{results.Count} alunos encontrados. Selecione um nas previas.";
+                    TeamCreationStatusText.Text = $"{results.Count} participantes encontrados. Selecione um nas prévias.";
                     TeamMemberInput.IsDropDownOpen = true;
                     return;
                 }
 
                 if (results.Count == 1)
                 {
-                    TeamCreationStatusText.Text = "1 aluno encontrado. Selecione a previa e clique em Adicionar aluno.";
+                    TeamCreationStatusText.Text = "1 participante encontrado. Selecione a prévia e clique em Adicionar participante.";
                     TeamMemberInput.IsDropDownOpen = true;
                     return;
                 }
 
-                TeamCreationStatusText.Text = "Nenhum aluno encontrado com esse criterio.";
+                TeamCreationStatusText.Text = "Nenhum participante encontrado com esse critério.";
                 TeamMemberInput.IsDropDownOpen = false;
             }
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[TeamMemberInput_TextChanged ERROR] {ex.Message}");
-                TeamCreationStatusText.Text = "Nao foi possivel buscar alunos agora.";
+                TeamCreationStatusText.Text = "Não foi possível buscar participantes agora.";
             }
         }
 
@@ -10121,15 +12925,16 @@ namespace MeuApp
         {
             if (_draftTeamMembers.Any(item => string.Equals(item.UserId, member.UserId, StringComparison.OrdinalIgnoreCase)))
             {
-                TeamCreationStatusText.Text = "Esse aluno ja faz parte da equipe.";
+                TeamCreationStatusText.Text = "Esse participante já faz parte da equipe.";
                 ClearTeamMemberSearchUi();
                 return;
             }
 
-            _draftTeamMembers.Add(member);
+            var draftMember = CloneUserInfo(member, GetSelectedDraftMemberRole());
+            _draftTeamMembers.Add(draftMember);
             RenderTeamMembersDraft();
             ClearTeamMemberSearchUi();
-            TeamCreationStatusText.Text = $"Aluno {member.Name} adicionado com sucesso.";
+            TeamCreationStatusText.Text = $"{draftMember.Name} adicionado com sucesso como {TeamPermissionService.GetRoleLabel(draftMember.Role).ToLowerInvariant()}.";
         }
 
         private void ClearTeamMemberSearchUi()
@@ -10191,6 +12996,8 @@ namespace MeuApp
             var course = NormalizeTeamValue(TeamCourseComboBox.Text);
             var className = NormalizeTeamValue(TeamClassComboBox.Text);
             var classId = NormalizeTeamValue(TeamClassIdTextBox.Text);
+            var academicTerm = NormalizeTeamValue(TeamAcademicTermTextBox.Text);
+            var selectedTemplate = TeamTemplateComboBox.SelectedItem as AcademicProjectTemplateInfo;
 
             if (string.IsNullOrWhiteSpace(teamName) ||
                 string.IsNullOrWhiteSpace(course) ||
@@ -10214,12 +13021,26 @@ namespace MeuApp
                 Course = course,
                 ClassName = className,
                 ClassId = classId,
+                AcademicTerm = string.IsNullOrWhiteSpace(academicTerm) ? ResolveCurrentAcademicTerm() : academicTerm,
+                TemplateId = selectedTemplate?.TemplateId ?? string.Empty,
+                TemplateName = selectedTemplate?.Title ?? string.Empty,
                 CreatedBy = GetCurrentUserId(),
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now,
+                LastRealtimeSyncAt = DateTime.Now,
                 ProjectProgress = 0,
                 ProjectDeadline = null,
                 ProjectStatus = "Planejamento",
+                TeacherNotes = selectedTemplate?.ProfessorGuidance ?? string.Empty,
+                FocalProfessorUserId = CurrentViewerCanClaimFocalProfessor() ? GetCurrentUserId() : string.Empty,
+                FocalProfessorName = CurrentViewerCanClaimFocalProfessor() ? (_currentProfile?.Name ?? string.Empty) : string.Empty,
+                ProfessorSupervisorUserIds = CurrentViewerCanClaimFocalProfessor() && !string.IsNullOrWhiteSpace(GetCurrentUserId())
+                    ? new List<string> { GetCurrentUserId() }
+                    : new List<string>(),
+                ProfessorSupervisorNames = CurrentViewerCanClaimFocalProfessor() && !string.IsNullOrWhiteSpace(_currentProfile?.Name)
+                    ? new List<string> { _currentProfile?.Name ?? string.Empty }
+                    : new List<string>(),
+                DefaultFilePermissionScope = TeamPermissionService.IsProfessorLike(_currentProfile?.Role) ? "course" : "team",
                 Members = _draftTeamMembers
                     .GroupBy(item => item.UserId, StringComparer.OrdinalIgnoreCase)
                     .Select(group => group.First())
@@ -10229,6 +13050,8 @@ namespace MeuApp
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(item => item)
                     .ToList(),
+                AccessRules = TeamPermissionService.CreateDefaultAccessRules(),
+                SemesterTimeline = new List<TeamTimelineItemInfo>(),
                 Milestones = CreateDefaultMilestones(),
                 Assets = _draftTeamLogoAsset == null
                     ? new List<TeamAssetInfo>()
@@ -10249,6 +13072,17 @@ namespace MeuApp
                 ChatMessages = new List<TeamChatMessageInfo>(),
                 CsdBoard = CreateDefaultCsdBoard()
             };
+
+            if (selectedTemplate != null)
+            {
+                AcademicProjectTemplateCatalog.ApplyToTeam(teamWorkspace, selectedTemplate, GetCurrentUserId());
+            }
+
+            AddTeamNotification(
+                teamWorkspace,
+                selectedTemplate == null
+                    ? "Equipe criada com estrutura personalizada."
+                    : $"Equipe criada com o modelo acadêmico {selectedTemplate.Title}.");
 
             CreateTeamButton.IsEnabled = false;
             TeamCreationStatusText.Text = "Salvando equipe no Firebase...";
@@ -10337,10 +13171,306 @@ namespace MeuApp
             RenderTeamWorkspace();
         }
 
+        private void ShowProfessorDashboardSection()
+        {
+            ResetNavigation();
+            ProfessorDashboardContent.Visibility = Visibility.Visible;
+            RenderProfessorDashboard();
+        }
+
         private void ShowTeamsSection()
         {
             ResetNavigation();
             TeamsContent.Visibility = Visibility.Visible;
+            RenderTeamsList();
+        }
+
+        private async void TeamListSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var query = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                _teamListSearchVersion++;
+                _teamListSearchResults = new List<TeamWorkspaceInfo>();
+                if (TeamListSearchStatusText != null)
+                {
+                    TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
+                        ? "Pesquise por nome da equipe, turma, curso, UC ou professor focal."
+                        : "Filtre suas equipes por nome, turma, curso ou UC.";
+                }
+                RenderTeamsList();
+                return;
+            }
+
+            var currentVersion = ++_teamListSearchVersion;
+            if (TeamListSearchStatusText != null)
+            {
+                TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
+                    ? "Buscando equipes no ambiente local e no Firestore..."
+                    : "Filtrando suas equipes carregadas...";
+            }
+
+            await Task.Delay(220);
+            if (currentVersion != _teamListSearchVersion)
+            {
+                return;
+            }
+
+            _teamListSearchResults = await LoadSearchSlideTeamMatchesAsync(query, maxResults: 40);
+            if (currentVersion != _teamListSearchVersion)
+            {
+                return;
+            }
+
+            if (TeamListSearchStatusText != null)
+            {
+                TeamListSearchStatusText.Text = _teamListSearchResults.Count == 0
+                    ? $"Nenhuma equipe encontrada para \"{query}\"."
+                    : _teamListSearchResults.Count == 1
+                        ? "1 equipe encontrada."
+                        : $"{_teamListSearchResults.Count} equipes encontradas.";
+            }
+
+            RenderTeamsList();
+        }
+
+        private void RenderProfessorDashboard()
+        {
+            if (ProfessorDashboardHost == null || ProfessorDashboardStatusText == null)
+            {
+                return;
+            }
+
+            ProfessorDashboardHost.Children.Clear();
+
+            if (!TeamPermissionService.CanUseProfessorDashboard(_currentProfile))
+            {
+                ProfessorDashboardStatusText.Text = "O dashboard docente é exibido apenas para perfis com papel de professor orientador.";
+                ProfessorDashboardHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Sem acesso docente",
+                    "Atualize o cadastro como professor orientador para acompanhar risco, marcos e carga de várias equipes ao mesmo tempo."));
+                return;
+            }
+
+            var teams = _teamWorkspaces
+                .Select(EnsureTeamWorkspaceDefaults)
+                .OrderBy(team => team.Course)
+                .ThenBy(team => team.ClassName)
+                .ThenBy(team => team.TeamName)
+                .ToList();
+
+            if (teams.Count == 0)
+            {
+                ProfessorDashboardStatusText.Text = "Nenhuma equipe vinculada ainda para leitura executiva.";
+                ProfessorDashboardHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Aguardando equipes",
+                    "Assim que equipes forem criadas ou vinculadas, o painel docente passa a consolidar risco, atrasos, checkpoints e sinais de carga por turma."));
+                return;
+            }
+
+            var snapshot = AcademicRiskEngine.BuildProfessorDashboard(teams);
+            ProfessorDashboardStatusText.Text = $"{snapshot.Teams.Count} equipe(s) em leitura, {snapshot.HighRiskTeams} em risco alto e {snapshot.OverdueItems} item(ns) atrasados no consolidado.";
+
+            ProfessorDashboardHost.Children.Add(CreateProfessorDashboardHero(snapshot));
+
+            foreach (var group in snapshot.Teams.GroupBy(item => $"{item.Course} • {item.ClassName}"))
+            {
+                ProfessorDashboardHost.Children.Add(new TextBlock
+                {
+                    Text = group.Key,
+                    Margin = new Thickness(0, 18, 0, 10),
+                    FontSize = 14,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+
+                foreach (var risk in group)
+                {
+                    var team = teams.First(current => string.Equals(current.TeamId, risk.TeamId, StringComparison.OrdinalIgnoreCase));
+                    ProfessorDashboardHost.Children.Add(CreateProfessorDashboardTeamCard(team, risk));
+                }
+            }
+        }
+
+        private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
+        {
+            var card = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(20),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Leitura executiva por turma",
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 22,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = "O consolidado docente mistura radar de atraso, carga dos membros e checkpoints para orientar a próxima intervenção acadêmica.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+
+            var metrics = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            metrics.Children.Add(CreateTeamMetricCard("Turmas", snapshot.Teams.Select(item => item.ClassName).Distinct(StringComparer.OrdinalIgnoreCase).Count().ToString(), "Agrupamentos ativos", Color.FromRgb(37, 99, 235)));
+            metrics.Children.Add(CreateTeamMetricCard("Risco alto", snapshot.HighRiskTeams.ToString(), "Intervenção imediata", Color.FromRgb(220, 38, 38)));
+            metrics.Children.Add(CreateTeamMetricCard("Risco moderado", snapshot.ModerateRiskTeams.ToString(), "Acompanhamento próximo", Color.FromRgb(245, 158, 11)));
+            metrics.Children.Add(CreateTeamMetricCard("Atrasos", snapshot.OverdueItems.ToString(), "Pendências abertas", Color.FromRgb(124, 58, 237)));
+            metrics.Children.Add(CreateTeamMetricCard("Próx. 7 dias", snapshot.UpcomingItems.ToString(), "Janela crítica", Color.FromRgb(16, 185, 129)));
+            stack.Children.Add(metrics);
+
+            card.Child = stack;
+            return card;
+        }
+
+        private Border CreateProfessorDashboardTeamCard(TeamWorkspaceInfo team, TeamRiskSnapshot risk)
+        {
+            var workload = AcademicRiskEngine.BuildMemberWorkload(team).Take(4).ToList();
+            var accent = string.Equals(risk.Level, "Alto", StringComparison.OrdinalIgnoreCase)
+                ? Color.FromRgb(220, 38, 38)
+                : string.Equals(risk.Level, "Moderado", StringComparison.OrdinalIgnoreCase)
+                    ? Color.FromRgb(245, 158, 11)
+                    : Color.FromRgb(16, 185, 129);
+
+            var card = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = new SolidColorBrush(accent),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 14)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = team.TeamName,
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(team.TemplateName)
+                    ? $"{team.Course} • {team.ClassName} • {team.AcademicTerm}"
+                    : $"{team.Course} • {team.ClassName} • {team.TemplateName}",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            chips.Children.Add(CreateStaticTeamChip($"Risco {risk.Level}", new SolidColorBrush(accent), Brushes.White));
+            chips.Children.Add(CreateStaticTeamChip($"{risk.OverdueItems} atraso(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip($"{risk.UpcomingSevenDays} na janela 7d", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip($"{risk.PendingMilestones} marcos ativos", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip(BuildTeamProfessorFocusLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            stack.Children.Add(chips);
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = risk.Summary,
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = risk.Recommendation,
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+
+            if (workload.Count > 0)
+            {
+                var workloadWrap = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                foreach (var member in workload)
+                {
+                    workloadWrap.Children.Add(CreateStaticTeamChip(
+                        $"{member.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? member.Name}: {member.Level}",
+                        GetThemeBrush("CardBackgroundBrush"),
+                        GetThemeBrush("PrimaryTextBrush")));
+                }
+                stack.Children.Add(workloadWrap);
+            }
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            actions.Children.Add(CreateCalendarOpenTeamButton(team, "Abrir equipe"));
+
+            var openAgendaButton = new Button
+            {
+                Content = "Abrir agenda",
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(8, 0, 0, 0),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = team.TeamId
+            };
+            openAgendaButton.Click += (_, __) =>
+            {
+                _calendarFilterTeamId = team.TeamId;
+                ResetNavigation();
+                CalendarContent.Visibility = Visibility.Visible;
+                RenderCalendarAgenda();
+            };
+            actions.Children.Add(openAgendaButton);
+
+            if (CurrentViewerCanClaimFocalProfessor() && !string.Equals(team.FocalProfessorUserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+            {
+                var claimButton = new Button
+                {
+                    Content = "Assumir foco docente",
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(14, 8, 14, 8),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Cursor = Cursors.Hand,
+                    FontWeight = FontWeights.SemiBold,
+                    Tag = team
+                };
+                claimButton.Click += async (_, __) =>
+                {
+                    var updatedTeam = await AssignCurrentProfessorAsFocalAsync(team);
+                    if (updatedTeam == null)
+                    {
+                        return;
+                    }
+
+                    ProfessorDashboardStatusText.Text = $"{updatedTeam.TeamName} agora está sob sua supervisão focal.";
+                    ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    RenderProfessorDashboard();
+                };
+                actions.Children.Add(claimButton);
+            }
+
+            stack.Children.Add(actions);
+            card.Child = stack;
+            return card;
         }
 
         private void CloseTeamWorkspace_Click(object sender, RoutedEventArgs e)
@@ -10364,6 +13494,11 @@ namespace MeuApp
         private void TeamTaskCard_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton != MouseButtonState.Pressed || sender is not Border border || border.Tag is not TeamTaskDragInfo dragInfo)
+            {
+                return;
+            }
+
+            if (!CanCurrentUserEditProjectSettings(dragInfo.Team))
             {
                 return;
             }
@@ -10776,6 +13911,11 @@ namespace MeuApp
                 return;
             }
 
+            if (!CanCurrentUserEditProjectSettings(_activeTeamWorkspace))
+            {
+                return;
+            }
+
             var draggedCard = e.Data.GetData(typeof(TeamTaskCardInfo)) as TeamTaskCardInfo ?? _draggedTeamTaskCard;
             if (draggedCard == null)
             {
@@ -10789,6 +13929,9 @@ namespace MeuApp
             }
 
             sourceColumn.Cards.RemoveAll(card => card.Id == draggedCard.Id);
+            draggedCard.ColumnId = targetColumn.Id;
+            draggedCard.UpdatedAt = DateTime.Now;
+            draggedCard.UpdatedByUserId = GetCurrentUserId();
             targetColumn.Cards.Add(draggedCard);
             AddTeamNotification(_activeTeamWorkspace, $"Tarefa \"{draggedCard.Title}\" movida para {targetColumn.Title}.");
             SaveTeamWorkspace(_activeTeamWorkspace);
@@ -10797,6 +13940,12 @@ namespace MeuApp
 
         private void OpenCreateTaskDialog(TeamWorkspaceInfo team)
         {
+            if (!CanCurrentUserEditProjectSettings(team))
+            {
+                ShowStyledAlertDialog("TAREFA", "Permissão insuficiente", "Seu papel atual pode colaborar nas tarefas, mas não criar novas entradas neste board.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var dialog = CreateTaskDialog(team, null, null);
             if (dialog is not { } taskDialog)
             {
@@ -10804,6 +13953,10 @@ namespace MeuApp
             }
 
             var targetColumn = team.TaskColumns.FirstOrDefault(column => column.Id == taskDialog.TargetColumnId) ?? team.TaskColumns.First();
+            taskDialog.Card.ColumnId = targetColumn.Id;
+            taskDialog.Card.CreatedByUserId = string.IsNullOrWhiteSpace(taskDialog.Card.CreatedByUserId) ? GetCurrentUserId() : taskDialog.Card.CreatedByUserId;
+            taskDialog.Card.UpdatedAt = DateTime.Now;
+            taskDialog.Card.UpdatedByUserId = GetCurrentUserId();
             targetColumn.Cards.Add(taskDialog.Card);
 
             NotifyTaskAssignments(team, taskDialog.Card);
@@ -10823,11 +13976,22 @@ namespace MeuApp
             var column = payload.Item2;
             var card = payload.Item3;
 
+            if (!CanCurrentUserEditProjectSettings(team))
+            {
+                ShowStyledAlertDialog("TAREFA", "Permissão insuficiente", "Seu papel atual não permite editar a estrutura das tarefas desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var dialog = CreateTaskDialog(team, column, card);
             if (dialog is not { } taskDialog)
             {
                 return;
             }
+
+            taskDialog.Card.ColumnId = taskDialog.TargetColumnId;
+            taskDialog.Card.CreatedByUserId = string.IsNullOrWhiteSpace(taskDialog.Card.CreatedByUserId) ? GetCurrentUserId() : taskDialog.Card.CreatedByUserId;
+            taskDialog.Card.UpdatedAt = DateTime.Now;
+            taskDialog.Card.UpdatedByUserId = GetCurrentUserId();
 
             if (column.Id != taskDialog.TargetColumnId)
             {
@@ -10853,6 +14017,12 @@ namespace MeuApp
             var column = payload.Item2;
             var card = payload.Item3;
 
+            if (!CanCurrentUserEditProjectSettings(team))
+            {
+                ShowStyledAlertDialog("TAREFA", "Permissão insuficiente", "Seu papel atual não permite excluir tarefas desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             if (MessageBox.Show($"Excluir a tarefa \"{card.Title}\"?", "Excluir tarefa", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
                 return;
@@ -10864,12 +14034,616 @@ namespace MeuApp
             RenderTeamWorkspace();
         }
 
+        private void OpenTaskCollaboration_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamTaskColumnInfo, TeamTaskCardInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var column = payload.Item2;
+            var card = payload.Item3;
+            OpenCollaborationDialogCore(
+                team,
+                "TAREFA",
+                card.Title,
+                $"{column.Title} • {card.Priority}" + (card.DueDate.HasValue ? $" • prazo {card.DueDate.Value:dd/MM}" : string.Empty),
+                card.Comments,
+                card.Attachments,
+                card.MentionedUserIds,
+                () =>
+                {
+                    card.UpdatedAt = DateTime.Now;
+                    card.UpdatedByUserId = GetCurrentUserId();
+                });
+        }
+
+        private void OpenMilestoneCollaboration_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not Tuple<TeamWorkspaceInfo, TeamMilestoneInfo> payload)
+            {
+                return;
+            }
+
+            var team = payload.Item1;
+            var milestone = payload.Item2;
+            OpenCollaborationDialogCore(
+                team,
+                "ENTREGA",
+                milestone.Title,
+                $"{milestone.Status}" + (milestone.DueDate.HasValue ? $" • prazo {milestone.DueDate.Value:dd/MM}" : string.Empty),
+                milestone.Comments,
+                milestone.Attachments,
+                milestone.MentionedUserIds,
+                () =>
+                {
+                    milestone.UpdatedAt = DateTime.Now;
+                    milestone.UpdatedByUserId = GetCurrentUserId();
+                });
+        }
+
+        private async Task<(bool Success, TeamAttachmentInfo? Attachment, TeamAssetInfo? Asset, string? ErrorMessage)> CreateTeamAttachmentFromFileAsync(
+            TeamWorkspaceInfo team,
+            string filePath,
+            string entityTitle,
+            string permissionScope)
+        {
+            var assetResult = await CreateOrUpdateTeamAssetAsync(
+                team,
+                filePath,
+                ResolveAssetCategoryForFile(filePath, "documentos"),
+                permissionScope,
+                $"Anexo registrado em {entityTitle}.",
+                null,
+                $"Anexo vinculado a {entityTitle}.");
+            if (!assetResult.Success || assetResult.Asset == null)
+            {
+                return (false, null, null, assetResult.ErrorMessage ?? "Não foi possível sincronizar o anexo remotamente.");
+            }
+
+            var asset = assetResult.Asset;
+            return (true, new TeamAttachmentInfo
+            {
+                AttachmentId = Guid.NewGuid().ToString("N"),
+                AssetId = asset.AssetId,
+                FileName = asset.FileName,
+                PreviewImageDataUri = asset.PreviewImageDataUri,
+                PermissionScope = asset.PermissionScope,
+                Version = asset.Version,
+                AddedByUserId = GetCurrentUserId(),
+                AddedAt = DateTime.Now
+            }, asset, null);
+        }
+
+        private void OpenCollaborationDialogCore(
+            TeamWorkspaceInfo team,
+            string eyebrow,
+            string entityTitle,
+            string entitySubtitle,
+            List<TeamCommentInfo> comments,
+            List<TeamAttachmentInfo> attachments,
+            List<string> mentionedUserIds,
+            Action? markEntityUpdated = null)
+        {
+            if (!CanCurrentUserComment(team) && !CanCurrentUserUploadFiles(team))
+            {
+                ShowStyledAlertDialog(eyebrow, "Permissão insuficiente", "Seu papel atual não permite comentar ou anexar materiais neste item.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var accentBrush = GetThemeBrush("AccentBrush");
+            var dialog = CreateStyledDialogWindow($"Colaboração • {entityTitle}", 860, 900, 760, true);
+            var commentBox = new TextBox
+            {
+                MinHeight = 124,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var permissionScopeBox = new ComboBox
+            {
+                Height = 46,
+                Margin = new Thickness(0, 8, 0, 0),
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Equipe", Value = "team" },
+                    new { Label = "Curso", Value = "course" },
+                    new { Label = "Liderança", Value = "leadership" },
+                    new { Label = "Privado", Value = "private" }
+                },
+                SelectedValue = team.DefaultFilePermissionScope
+            };
+            ApplyDialogInputStyle(commentBox);
+            ApplyDialogInputStyle(permissionScopeBox);
+
+            var selectedMentionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pendingAttachments = new List<PendingAttachmentFile>();
+            var selectedMentionsWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var mentionPanel = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var pendingAttachmentsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var attachmentsHost = new StackPanel();
+            var commentsHost = new StackPanel();
+            var composerStateText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            void RefreshComposerState()
+            {
+                composerStateText.Text = $"{commentBox.Text.Trim().Length} caractere(s) • {selectedMentionIds.Count} menção(ões) • {pendingAttachments.Count} anexo(s) pendente(s).";
+            }
+
+            void RenderSelectedMentions()
+            {
+                selectedMentionsWrap.Children.Clear();
+                foreach (var member in team.Members.Where(member => selectedMentionIds.Contains(member.UserId)).OrderBy(member => member.Name))
+                {
+                    selectedMentionsWrap.Children.Add(CreateStaticTeamChip(
+                        GetTeamMemberChipLabel(member),
+                        GetThemeBrush("AccentMutedBrush"),
+                        GetThemeBrush("AccentBrush")));
+                }
+
+                selectedMentionsWrap.Visibility = selectedMentionsWrap.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+                RefreshComposerState();
+            }
+
+            void RenderMentionSelector()
+            {
+                mentionPanel.Children.Clear();
+                foreach (var member in team.Members.OrderBy(member => member.Name))
+                {
+                    var localMember = member;
+                    mentionPanel.Children.Add(CreateDialogMemberChoiceCard(
+                        localMember,
+                        selectedMentionIds.Contains(localMember.UserId),
+                        (_, __) =>
+                        {
+                            if (!selectedMentionIds.Add(localMember.UserId))
+                            {
+                                selectedMentionIds.Remove(localMember.UserId);
+                            }
+
+                            RenderMentionSelector();
+                            RenderSelectedMentions();
+                        }));
+                }
+            }
+
+            void RenderPendingAttachments()
+            {
+                pendingAttachmentsHost.Children.Clear();
+                if (pendingAttachments.Count == 0)
+                {
+                    pendingAttachmentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum anexo preparado ainda. Os arquivos só sobem para o remoto quando você salvar o comentário.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    RefreshComposerState();
+                    return;
+                }
+
+                foreach (var attachment in pendingAttachments.ToList())
+                {
+                    var card = new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14)
+                    };
+
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = attachment.FileName,
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+
+                    var removeButton = new Button
+                    {
+                        Content = "Remover",
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(10, 0, 0, 0)
+                    };
+                    removeButton.Click += (_, __) =>
+                    {
+                        pendingAttachments.Remove(attachment);
+                        RenderPendingAttachments();
+                    };
+                    Grid.SetColumn(removeButton, 1);
+                    row.Children.Add(removeButton);
+                    card.Child = row;
+                    pendingAttachmentsHost.Children.Add(card);
+                }
+
+                RefreshComposerState();
+            }
+
+            void RenderExistingAttachments()
+            {
+                attachmentsHost.Children.Clear();
+                if (attachments.Count == 0)
+                {
+                    attachmentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum anexo foi publicado ainda neste item.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var attachment in attachments.OrderByDescending(item => item.AddedAt))
+                {
+                    var relatedAsset = team.Assets.FirstOrDefault(asset => string.Equals(asset.AssetId, attachment.AssetId, StringComparison.OrdinalIgnoreCase));
+                    var canOpen = relatedAsset != null && CanCurrentUserViewAsset(team, relatedAsset);
+                    var card = new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(14),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(16)
+                    };
+
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var info = new StackPanel();
+                    info.Children.Add(new TextBlock
+                    {
+                        Text = attachment.FileName,
+                        FontSize = 12,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    var chips = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                    chips.Children.Add(CreateStaticTeamChip($"v{Math.Max(1, attachment.Version)}", accentBrush, Brushes.White));
+                    chips.Children.Add(CreateStaticTeamChip(GetPermissionScopeLabel(attachment.PermissionScope), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    chips.Children.Add(CreateStaticTeamChip(attachment.AddedAt == default ? "Sem data" : attachment.AddedAt.ToString("dd/MM HH:mm"), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    info.Children.Add(chips);
+                    row.Children.Add(info);
+
+                    if (canOpen)
+                    {
+                        var openButton = CreateDialogActionButton("Abrir", accentBrush, Brushes.White, Brushes.Transparent, 92);
+                        openButton.Margin = new Thickness(12, 0, 0, 0);
+                        openButton.Click += async (_, __) => await OpenTeamAssetPreviewAsync(team, relatedAsset!);
+                        Grid.SetColumn(openButton, 1);
+                        row.Children.Add(openButton);
+                    }
+
+                    card.Child = row;
+                    attachmentsHost.Children.Add(card);
+                }
+            }
+
+            void RenderComments()
+            {
+                commentsHost.Children.Clear();
+                if (comments.Count == 0)
+                {
+                    commentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum comentário registrado ainda. Use o composer acima para abrir a trilha de colaboração deste item.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var comment in comments.OrderByDescending(item => item.CreatedAt))
+                {
+                    commentsHost.Children.Add(CreateTeamCommentTimelineCard(team, comment));
+                }
+            }
+
+            commentBox.TextChanged += (_, __) => RefreshComposerState();
+
+            var addAttachmentButton = CreateDialogActionButton("Adicionar anexo", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 144);
+            addAttachmentButton.Click += (_, __) =>
+            {
+                if (!CanCurrentUserUploadFiles(team))
+                {
+                    ShowStyledAlertDialog(eyebrow, "Upload bloqueado", "Seu papel atual não permite anexar arquivos neste item.", "Fechar", accentBrush);
+                    return;
+                }
+
+                var openDialog = new OpenFileDialog
+                {
+                    Multiselect = true,
+                    Title = $"Selecionar anexos para {entityTitle}",
+                    Filter = "Todos os arquivos|*.*"
+                };
+
+                if (openDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                foreach (var filePath in openDialog.FileNames)
+                {
+                    if (pendingAttachments.Any(existing => string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    pendingAttachments.Add(new PendingAttachmentFile
+                    {
+                        FilePath = filePath,
+                        FileName = IOPath.GetFileName(filePath),
+                        PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                            ? TryCreateCompressedImageDataUri(filePath, 220, 70) ?? string.Empty
+                            : string.Empty
+                    });
+                }
+
+                RenderPendingAttachments();
+            };
+
+            var summaryContent = new StackPanel();
+            var summaryChips = new WrapPanel();
+            summaryChips.Children.Add(CreateStaticTeamChip(team.TeamName, GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            summaryChips.Children.Add(CreateStaticTeamChip($"{comments.Count} comentário(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            summaryChips.Children.Add(CreateStaticTeamChip($"{attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            if (!string.IsNullOrWhiteSpace(entitySubtitle))
+            {
+                summaryChips.Children.Add(CreateStaticTeamChip(entitySubtitle, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            summaryContent.Children.Add(summaryChips);
+            summaryContent.Children.Add(new TextBlock
+            {
+                Text = "Comentários e anexos usam a mesma trilha remota dos materiais da equipe, com histórico de versão e respeito ao escopo escolhido no upload.",
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+
+            var composerContent = new StackPanel();
+            composerContent.Children.Add(CreateDialogFieldLabel("Comentário"));
+            composerContent.Children.Add(commentBox);
+            composerContent.Children.Add(composerStateText);
+            composerContent.Children.Add(CreateDialogFieldLabel("Escopo dos anexos desta publicação"));
+            composerContent.Children.Add(permissionScopeBox);
+            composerContent.Children.Add(CreateDialogFieldLabel("Menções"));
+            composerContent.Children.Add(selectedMentionsWrap);
+            composerContent.Children.Add(mentionPanel);
+            if (CanCurrentUserUploadFiles(team))
+            {
+                composerContent.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 14, 0, 0),
+                    Child = addAttachmentButton
+                });
+            }
+            composerContent.Children.Add(pendingAttachmentsHost);
+
+            var attachmentsContent = new StackPanel();
+            attachmentsContent.Children.Add(attachmentsHost);
+
+            var commentsContent = new StackPanel();
+            commentsContent.Children.Add(commentsHost);
+
+            var form = new StackPanel();
+            form.Children.Add(CreateDialogSectionCard("Visão geral", "Este item já carrega contagem de comentários, menções e anexos no board principal.", accentBrush, summaryContent));
+            form.Children.Add(CreateDialogSectionCard("Nova colaboração", "Escreva o comentário, marque membros e escolha os anexos que devem subir para o remoto ao salvar.", accentBrush, composerContent));
+            form.Children.Add(CreateDialogSectionCard("Anexos publicados", "Todo arquivo publicado aqui também entra na trilha de materiais da equipe com o escopo configurado.", accentBrush, attachmentsContent));
+            form.Children.Add(CreateDialogSectionCard("Timeline", "Leitura rápida dos comentários já registrados neste item.", accentBrush, commentsContent, new Thickness(0, 0, 0, 0)));
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(eyebrow, $"Colaboração • {entityTitle}", "Centralize comentários, menções e anexos sem sair do fluxo visual do workspace acadêmico.", accentBrush));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var cancelButton = CreateDialogActionButton("Fechar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 104);
+            cancelButton.Click += (_, __) => dialog.Close();
+            var saveButton = CreateDialogActionButton("Publicar", accentBrush, Brushes.White, Brushes.Transparent, 112);
+            saveButton.Click += async (_, __) =>
+            {
+                var commentText = commentBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(commentText) && pendingAttachments.Count == 0)
+                {
+                    ShowStyledAlertDialog(eyebrow, "Nada para publicar", "Escreva um comentário ou prepare ao menos um anexo antes de publicar.", "Continuar", accentBrush);
+                    return;
+                }
+
+                if (!string.IsNullOrWhiteSpace(commentText) && !CanCurrentUserComment(team))
+                {
+                    ShowStyledAlertDialog(eyebrow, "Comentário bloqueado", "Seu papel atual não permite comentar neste item.", "Fechar", accentBrush);
+                    return;
+                }
+
+                if (pendingAttachments.Count > 0 && !CanCurrentUserUploadFiles(team))
+                {
+                    ShowStyledAlertDialog(eyebrow, "Upload bloqueado", "Seu papel atual não permite anexar arquivos neste item.", "Fechar", accentBrush);
+                    return;
+                }
+
+                var createdAttachments = new List<TeamAttachmentInfo>();
+                foreach (var pendingAttachment in pendingAttachments)
+                {
+                    var attachmentResult = await CreateTeamAttachmentFromFileAsync(
+                        team,
+                        pendingAttachment.FilePath,
+                        entityTitle,
+                        permissionScopeBox.SelectedValue?.ToString() ?? team.DefaultFilePermissionScope);
+                    if (!attachmentResult.Success || attachmentResult.Attachment == null || attachmentResult.Asset == null)
+                    {
+                        ShowStyledAlertDialog(eyebrow, "Falha ao anexar", attachmentResult.ErrorMessage ?? "Não foi possível sincronizar um dos anexos desta publicação.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                        return;
+                    }
+
+                    if (!team.Assets.Any(asset => string.Equals(asset.AssetId, attachmentResult.Asset.AssetId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        team.Assets.Add(attachmentResult.Asset);
+                    }
+
+                    attachments.Add(attachmentResult.Attachment);
+                    createdAttachments.Add(attachmentResult.Attachment);
+                }
+
+                comments.Add(new TeamCommentInfo
+                {
+                    CommentId = Guid.NewGuid().ToString("N"),
+                    AuthorUserId = GetCurrentUserId(),
+                    AuthorName = string.IsNullOrWhiteSpace(_currentProfile?.Name) ? "Equipe" : _currentProfile!.Name,
+                    Content = commentText,
+                    MentionedUserIds = selectedMentionIds.ToList(),
+                    AttachmentFileNames = createdAttachments.Select(attachment => attachment.FileName).ToList(),
+                    CreatedAt = DateTime.Now
+                });
+
+                foreach (var mentionId in selectedMentionIds)
+                {
+                    if (!mentionedUserIds.Contains(mentionId, StringComparer.OrdinalIgnoreCase))
+                    {
+                        mentionedUserIds.Add(mentionId);
+                    }
+                }
+
+                AddTeamNotification(team, $"Novo comentário em {entityTitle}.");
+                if (selectedMentionIds.Count > 0)
+                {
+                    AddTeamNotification(team, $"{selectedMentionIds.Count} menção(ões) registradas em {entityTitle}.");
+                }
+
+                markEntityUpdated?.Invoke();
+                SaveTeamWorkspace(team);
+                dialog.DialogResult = true;
+                dialog.Close();
+                RenderTeamWorkspace();
+            };
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { cancelButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+
+            RenderSelectedMentions();
+            RenderMentionSelector();
+            RenderPendingAttachments();
+            RenderExistingAttachments();
+            RenderComments();
+            RefreshComposerState();
+
+            dialog.ShowDialog();
+        }
+
+        private Border CreateTeamCommentTimelineCard(TeamWorkspaceInfo team, TeamCommentInfo comment)
+        {
+            var card = new Border
+            {
+                Margin = new Thickness(0, 0, 0, 10),
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(comment.AuthorName) ? "Equipe" : comment.AuthorName,
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = comment.CreatedAt == default ? "Sem data" : comment.CreatedAt.ToString("dd/MM HH:mm"),
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 10,
+                Foreground = GetThemeBrush("TertiaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(comment.Content) ? "(Comentário publicado apenas com anexos)" : comment.Content,
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+
+            var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            foreach (var mentionId in comment.MentionedUserIds ?? new List<string>())
+            {
+                var mentionName = team.Members.FirstOrDefault(member => string.Equals(member.UserId, mentionId, StringComparison.OrdinalIgnoreCase))?.Name;
+                chips.Children.Add(CreateStaticTeamChip($"@{(string.IsNullOrWhiteSpace(mentionName) ? mentionId : mentionName)}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            }
+            foreach (var attachmentName in comment.AttachmentFileNames ?? new List<string>())
+            {
+                chips.Children.Add(CreateStaticTeamChip(attachmentName, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            if (chips.Children.Count > 0)
+            {
+                stack.Children.Add(chips);
+            }
+
+            card.Child = stack;
+            return card;
+        }
+
         private (TeamTaskCardInfo Card, string TargetColumnId)? CreateTaskDialog(TeamWorkspaceInfo team, TeamTaskColumnInfo? currentColumn, TeamTaskCardInfo? existingCard)
         {
             var dialog = CreateStyledDialogWindow(existingCard == null ? "Nova tarefa" : "Editar tarefa", 660, 820, 760);
             var accentBrush = GetThemeBrush("AccentBrush");
             var selectedPriority = existingCard?.Priority ?? "Media";
-            var selectedAssignedUserIds = new HashSet<string>(existingCard?.AssignedUserIds ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            var assignableMembers = GetTaskAssignableMembers(team);
+            var assignableMemberIds = new HashSet<string>(assignableMembers.Select(member => member.UserId), StringComparer.OrdinalIgnoreCase);
+            var selectedAssignedUserIds = new HashSet<string>((existingCard?.AssignedUserIds ?? new List<string>())
+                .Where(assignableMemberIds.Contains), StringComparer.OrdinalIgnoreCase);
 
             var root = new Grid { Margin = new Thickness(6) };
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -10928,11 +14702,49 @@ namespace MeuApp
                 Height = 48,
                 Margin = new Thickness(0, 8, 0, 0)
             };
+            var estimatedHoursBox = new TextBox
+            {
+                Text = existingCard != null && existingCard.EstimatedHours > 0 ? existingCard.EstimatedHours.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                Height = 48,
+                FontSize = 13,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var workloadPointsBox = new TextBox
+            {
+                Text = existingCard != null && existingCard.WorkloadPoints > 0 ? existingCard.WorkloadPoints.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                Height = 48,
+                FontSize = 13,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            var requiredRoleBox = new ComboBox
+            {
+                Height = 48,
+                Margin = new Thickness(0, 8, 0, 0),
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Aluno", Value = "student" },
+                    new { Label = "Líder", Value = "leader" }
+                },
+                SelectedValue = TeamPermissionService.NormalizeExecutionRole(existingCard?.RequiredRole)
+            };
+            var professorReviewCheckBox = new CheckBox
+            {
+                Content = "Exigir revisão do professor orientador",
+                IsChecked = existingCard?.RequiresProfessorReview == true,
+                Margin = new Thickness(0, 12, 0, 0),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                FontWeight = FontWeights.SemiBold
+            };
 
             ApplyDialogInputStyle(titleBox);
             ApplyDialogInputStyle(descriptionBox);
             ApplyDialogInputStyle(dueDatePicker);
             ApplyDialogInputStyle(columnBox);
+            ApplyDialogInputStyle(estimatedHoursBox);
+            ApplyDialogInputStyle(workloadPointsBox);
+            ApplyDialogInputStyle(requiredRoleBox);
 
             var priorityPanel = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
             var selectedAssigneesLabel = new TextBlock
@@ -10974,15 +14786,15 @@ namespace MeuApp
                 assigneePanel.Children.Clear();
                 selectedAssigneesWrap.Children.Clear();
 
-                var selectedMembers = team.Members
+                var selectedMembers = assignableMembers
                     .Where(member => selectedAssignedUserIds.Contains(member.UserId))
                     .OrderBy(member => member.Name)
                     .ToList();
 
                 if (selectedMembers.Count == 0)
                 {
-                    selectedAssigneesLabel.Text = team.Members.Count == 0
-                        ? "A equipe ainda não tem membros cadastrados para receber a tarefa."
+                    selectedAssigneesLabel.Text = assignableMembers.Count == 0
+                        ? "Ainda não há alunos ou liderança discente disponíveis para receber esta tarefa."
                         : "Nenhum responsável selecionado. A tarefa será criada sem atribuição direta.";
                     selectedAssigneesWrap.Visibility = Visibility.Collapsed;
                 }
@@ -10999,16 +14811,16 @@ namespace MeuApp
                     }
                 }
 
-                if (team.Members.Count == 0)
+                if (assignableMembers.Count == 0)
                 {
                     assigneePanel.Children.Add(CreateDialogHintCard(
-                        "Adicione membros à equipe para transformar esta tarefa em uma entrega atribuída com notificação para o time.",
+                        "Professor orientador e coordenação não entram como executores do projeto. Adicione alunos ou defina uma liderança discente para atribuir esta tarefa.",
                         accentBrush,
                         new Thickness(0, 0, 0, 0)));
                     return;
                 }
 
-                foreach (var member in team.Members.OrderBy(item => item.Name))
+                foreach (var member in assignableMembers.OrderBy(item => item.Name))
                 {
                     var currentMember = member;
                     assigneePanel.Children.Add(CreateDialogMemberChoiceCard(
@@ -11030,7 +14842,7 @@ namespace MeuApp
             var summaryWrap = new WrapPanel();
             summaryWrap.Children.Add(CreateStaticTeamChip(team.TeamName, GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
             summaryWrap.Children.Add(CreateStaticTeamChip($"{team.TaskColumns.Count} etapas", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
-            summaryWrap.Children.Add(CreateStaticTeamChip($"{team.Members.Count} membros", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            summaryWrap.Children.Add(CreateStaticTeamChip($"{assignableMembers.Count} executores disponíveis", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             summaryWrap.Children.Add(CreateStaticTeamChip(existingCard == null ? "Modo criacao" : "Modo edicao", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             summaryContent.Children.Add(summaryWrap);
             summaryContent.Children.Add(new TextBlock
@@ -11079,8 +14891,43 @@ namespace MeuApp
             planningGrid.Children.Add(columnStack);
 
             planningContent.Children.Add(planningGrid);
+
+            var workloadGrid = new Grid { Margin = new Thickness(0, 16, 0, 0) };
+            workloadGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            workloadGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+            workloadGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var estimatedHoursStack = new StackPanel();
+            estimatedHoursStack.Children.Add(CreateDialogFieldLabel("Horas estimadas"));
+            estimatedHoursStack.Children.Add(estimatedHoursBox);
+            workloadGrid.Children.Add(estimatedHoursStack);
+
+            var workloadPointsStack = new StackPanel();
+            workloadPointsStack.Children.Add(CreateDialogFieldLabel("Pontos de carga"));
+            workloadPointsStack.Children.Add(workloadPointsBox);
+            Grid.SetColumn(workloadPointsStack, 2);
+            workloadGrid.Children.Add(workloadPointsStack);
+            planningContent.Children.Add(workloadGrid);
+
+            var roleGrid = new Grid { Margin = new Thickness(0, 16, 0, 0) };
+            roleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            roleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+            roleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var roleStack = new StackPanel();
+            roleStack.Children.Add(CreateDialogFieldLabel("Papel recomendado"));
+            roleStack.Children.Add(requiredRoleBox);
+            roleGrid.Children.Add(roleStack);
+
+            var reviewStack = new StackPanel();
+            reviewStack.Children.Add(CreateDialogFieldLabel("Validação"));
+            reviewStack.Children.Add(professorReviewCheckBox);
+            Grid.SetColumn(reviewStack, 2);
+            roleGrid.Children.Add(reviewStack);
+            planningContent.Children.Add(roleGrid);
+
             planningContent.Children.Add(CreateDialogHintCard(
-                "Defina a prioridade pelo impacto e use a etapa para indicar o próximo ponto do fluxo. Isso evita cards fortes visualmente, mas vagos operacionalmente.",
+                "Professor orientador revisa e guia o fluxo, mas a execução continua com alunos e liderança discente. Use a revisão docente para manter essa separação visível.",
                 accentBrush));
             form.Children.Add(CreateDialogSectionCard(
                 "Planejamento e fluxo",
@@ -11136,7 +14983,16 @@ namespace MeuApp
                 resultCard.Description = descriptionBox.Text.Trim();
                 resultCard.Priority = selectedPriority;
                 resultCard.DueDate = dueDatePicker.SelectedDate;
+                resultCard.EstimatedHours = int.TryParse(estimatedHoursBox.Text, out var estimatedHours) ? Math.Max(0, estimatedHours) : 0;
+                resultCard.WorkloadPoints = int.TryParse(workloadPointsBox.Text, out var workloadPoints) ? Math.Max(0, workloadPoints) : 0;
+                resultCard.RequiredRole = TeamPermissionService.NormalizeExecutionRole(requiredRoleBox.SelectedValue?.ToString());
+                resultCard.RequiresProfessorReview = professorReviewCheckBox.IsChecked == true;
                 resultCard.AssignedUserIds = selectedAssignedUserIds.ToList();
+                resultCard.ColumnId = selectedColumn.Id;
+                resultCard.CreatedAt = resultCard.CreatedAt == default ? DateTime.Now : resultCard.CreatedAt;
+                resultCard.CreatedByUserId = string.IsNullOrWhiteSpace(resultCard.CreatedByUserId) ? GetCurrentUserId() : resultCard.CreatedByUserId;
+                resultCard.UpdatedAt = DateTime.Now;
+                resultCard.UpdatedByUserId = GetCurrentUserId();
                 resultColumnId = selectedColumn.Id;
                 dialog.DialogResult = true;
                 dialog.Close();
@@ -11649,9 +15505,16 @@ namespace MeuApp
 
         private void OpenAddTeamMemberDialog(TeamWorkspaceInfo team)
         {
+            if (!CanCurrentUserAddMembers(team))
+            {
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Seu papel atual não permite adicionar participantes nesta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var dialog = CreateStyledDialogWindow("Adicionar membro", 620, 580);
 
             var root = new Grid { Margin = new Thickness(20) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -11670,7 +15533,7 @@ namespace MeuApp
 
             var subtitleBlock = new TextBlock
             {
-                Text = "Busque em tempo real por nome, matricula ou email e confirme manualmente quem entra na equipe.",
+                Text = "Busque por nome, matrícula ou email. Toda entrada nova chega como aluno; a liderança discente é definida depois pela docência focal.",
                 Margin = new Thickness(0, 8, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
@@ -11688,6 +15551,18 @@ namespace MeuApp
             root.Children.Add(queryBox);
             Grid.SetRow(queryBox, 2);
 
+            var roleBox = new ComboBox
+            {
+                Height = 42,
+                Margin = new Thickness(0, 0, 0, 12),
+                SelectedIndex = 0,
+                IsEnabled = false
+            };
+            ApplyDialogInputStyle(roleBox);
+            roleBox.Items.Add(new ComboBoxItem { Content = "Aluno", Tag = "student" });
+            root.Children.Add(roleBox);
+            Grid.SetRow(roleBox, 3);
+
             var resultsList = new ListBox
             {
                 Height = 300
@@ -11698,7 +15573,7 @@ namespace MeuApp
                 VisualTree = CreateTeamMemberSearchItemTemplate()
             };
             root.Children.Add(resultsList);
-            Grid.SetRow(resultsList, 3);
+            Grid.SetRow(resultsList, 4);
 
             var statusText = new TextBlock
             {
@@ -11707,7 +15582,7 @@ namespace MeuApp
                 Text = "Digite para buscar no Firebase."
             };
             root.Children.Add(statusText);
-            Grid.SetRow(statusText, 4);
+            Grid.SetRow(statusText, 5);
 
             var footer = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 8, 0, 0) };
             var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
@@ -11730,7 +15605,7 @@ namespace MeuApp
                 }
 
                 var currentSearch = ++localSearchVersion;
-                statusText.Text = "Buscando alunos...";
+                statusText.Text = "Buscando participantes...";
                 await Task.Delay(220);
                 if (currentSearch != localSearchVersion)
                 {
@@ -11749,8 +15624,8 @@ namespace MeuApp
 
                 resultsList.ItemsSource = filteredResults;
                 statusText.Text = filteredResults.Count == 0
-                    ? "Nenhum aluno disponivel para adicionar com esse criterio."
-                    : $"{filteredResults.Count} aluno(s) disponivel(is). Selecione um para confirmar.";
+                    ? "Nenhum participante disponível para adicionar com esse critério."
+                    : $"{filteredResults.Count} participante(s) disponível(is). Selecione um para confirmar.";
             }
 
             queryBox.TextChanged += async (s, e) => await RefreshSearchResultsAsync();
@@ -11760,25 +15635,29 @@ namespace MeuApp
             {
                 if (resultsList.SelectedItem is not UserInfo selected)
                 {
-                    statusText.Text = "Selecione um aluno da lista.";
+                    statusText.Text = "Selecione um participante da lista.";
                     return;
                 }
 
                 if (team.Members.Any(member => string.Equals(member.UserId, selected.UserId, StringComparison.OrdinalIgnoreCase)))
                 {
-                    statusText.Text = "Esse aluno ja faz parte da equipe.";
+                    statusText.Text = "Esse participante já faz parte da equipe.";
                     return;
                 }
 
-                team.Members.Add(selected);
-                AddTeamNotification(team, $"{selected.Name} foi adicionado(a) a equipe.");
+                var selectedRole = roleBox.SelectedItem is ComboBoxItem roleItem && roleItem.Tag is string roleTag
+                    ? roleTag
+                    : "student";
+                var draftMember = CloneUserInfo(selected, selectedRole);
+                team.Members.Add(draftMember);
+                AddTeamNotification(team, $"{draftMember.Name} entrou na equipe como {TeamPermissionService.GetRoleLabel(draftMember.Role).ToLowerInvariant()}.");
                 SaveTeamWorkspace(team);
                 dialog.DialogResult = true;
                 dialog.Close();
             };
 
             root.Children.Add(footer);
-            Grid.SetRow(footer, 5);
+            Grid.SetRow(footer, 6);
 
             dialog.Loaded += async (s, e) =>
             {
@@ -11794,6 +15673,12 @@ namespace MeuApp
 
         private void OpenRemoveTeamMemberDialog(TeamWorkspaceInfo team)
         {
+            if (!CanCurrentUserManageMembers(team))
+            {
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Seu papel atual não permite remover participantes desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var removableMembers = team.Members.Where(member => !string.Equals(member.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase)).ToList();
             if (removableMembers.Count == 0)
             {
@@ -11885,10 +15770,134 @@ namespace MeuApp
             }
         }
 
+        private void OpenAssignTeamLeaderDialog(TeamWorkspaceInfo team)
+        {
+            if (!CanCurrentUserAssignLeadership(team))
+            {
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Somente a docência focal pode definir a liderança discente desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var candidates = GetStudentTeamMembers(team);
+            if (candidates.Count == 0)
+            {
+                ShowStyledAlertDialog("EQUIPE", "Sem candidatos", "Adicione pelo menos um aluno à equipe antes de nomear uma liderança discente.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var dialog = CreateStyledDialogWindow("Definir liderança discente", 560, 520);
+            var currentLeader = GetStudentLeaders(team).FirstOrDefault();
+
+            var root = new Grid { Margin = new Thickness(20) };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            root.Children.Add(new TextBlock
+            {
+                Text = "Nomear liderança estudantil",
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            var helperText = new TextBlock
+            {
+                Text = currentLeader == null
+                    ? "Escolha o aluno que vai coordenar o ritmo do projeto. A docência continua separada da execução e das entregas do grupo."
+                    : $"Liderança atual: {currentLeader.Name}. Selecione outro aluno para transferir a coordenação operacional da equipe.",
+                Margin = new Thickness(0, 8, 0, 12),
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            };
+            root.Children.Add(helperText);
+            Grid.SetRow(helperText, 1);
+
+            var list = new ListBox
+            {
+                ItemsSource = candidates,
+                SelectedItem = currentLeader,
+                ItemTemplate = new DataTemplate(typeof(UserInfo))
+                {
+                    VisualTree = CreateTeamMemberSearchItemTemplate()
+                }
+            };
+            ApplyDialogInputStyle(list);
+            root.Children.Add(list);
+            Grid.SetRow(list, 2);
+
+            var footer = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 14, 0, 0) };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Aplicar liderança", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent, 160);
+            DockPanel.SetDock(cancelButton, Dock.Right);
+            DockPanel.SetDock(saveButton, Dock.Right);
+            footer.Children.Add(saveButton);
+            footer.Children.Add(cancelButton);
+            root.Children.Add(footer);
+            Grid.SetRow(footer, 3);
+
+            dialog.Content = CreateStyledDialogShell(root);
+
+            cancelButton.Click += (s, e) => dialog.Close();
+            saveButton.Click += (s, e) =>
+            {
+                if (list.SelectedItem is not UserInfo selectedLeader)
+                {
+                    helperText.Text = "Selecione um aluno antes de aplicar a liderança discente.";
+                    helperText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var changed = false;
+                foreach (var member in team.Members)
+                {
+                    if (TeamPermissionService.IsFacultyRole(member.Role))
+                    {
+                        continue;
+                    }
+
+                    var targetRole = string.Equals(member.UserId, selectedLeader.UserId, StringComparison.OrdinalIgnoreCase)
+                        ? "leader"
+                        : "student";
+
+                    if (!string.Equals(TeamPermissionService.NormalizeRole(member.Role), targetRole, StringComparison.OrdinalIgnoreCase))
+                    {
+                        member.Role = targetRole;
+                        changed = true;
+                    }
+                }
+
+                if (!changed)
+                {
+                    helperText.Text = $"{selectedLeader.Name} já está como liderança discente desta equipe.";
+                    helperText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                    return;
+                }
+
+                AddTeamNotification(team, $"{selectedLeader.Name} foi definido(a) como liderança discente da equipe.");
+                SaveTeamWorkspace(team);
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                RenderTeamWorkspace();
+            }
+        }
+
         private void RemoveMemberFromActiveTeam(UserInfo member)
         {
             if (_activeTeamWorkspace == null)
             {
+                return;
+            }
+
+            if (!CanCurrentUserManageMembers(_activeTeamWorkspace))
+            {
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Seu papel atual não permite remover participantes desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
                 return;
             }
 
@@ -11898,11 +15907,30 @@ namespace MeuApp
             }
 
             _activeTeamWorkspace.Members.RemoveAll(item => string.Equals(item.UserId, member.UserId, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(_activeTeamWorkspace.FocalProfessorUserId) &&
+                string.Equals(_activeTeamWorkspace.FocalProfessorUserId, member.UserId, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeTeamWorkspace.FocalProfessorUserId = string.Empty;
+                _activeTeamWorkspace.FocalProfessorName = string.Empty;
+            }
+
+            _activeTeamWorkspace.ProfessorSupervisorUserIds?.RemoveAll(id => string.Equals(id, member.UserId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(member.Name))
+            {
+                _activeTeamWorkspace.ProfessorSupervisorNames?.RemoveAll(name => string.Equals(name, member.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
             foreach (var column in _activeTeamWorkspace.TaskColumns)
             {
                 foreach (var card in column.Cards)
                 {
-                    card.AssignedUserIds.RemoveAll(id => string.Equals(id, member.UserId, StringComparison.OrdinalIgnoreCase));
+                    var removedAssignments = card.AssignedUserIds.RemoveAll(id => string.Equals(id, member.UserId, StringComparison.OrdinalIgnoreCase));
+                    if (removedAssignments > 0)
+                    {
+                        card.UpdatedAt = DateTime.Now;
+                        card.UpdatedByUserId = GetCurrentUserId();
+                    }
                 }
             }
 
@@ -11918,9 +15946,9 @@ namespace MeuApp
                 return;
             }
 
-            if (!IsCurrentUserTeamCreator(_activeTeamWorkspace))
+            if (!CanCurrentUserDeleteTeam(_activeTeamWorkspace))
             {
-                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Apenas quem criou a equipe pode apagá-la.", "Entendi", GetThemeBrush("AccentBrush"));
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Seu papel atual não permite apagar esta equipe.", "Entendi", GetThemeBrush("AccentBrush"));
                 return;
             }
 
@@ -11946,7 +15974,7 @@ namespace MeuApp
             UpdateTeamsViewState();
         }
 
-        private void AddTeamAsset(string category)
+        private async void AddTeamAsset(string category)
         {
             if (_activeTeamWorkspace == null)
             {
@@ -11969,6 +15997,12 @@ namespace MeuApp
                 return;
             }
 
+            if (!CanCurrentUserUploadFiles(_activeTeamWorkspace))
+            {
+                ShowStyledAlertDialog("ARQUIVOS", "Permissão insuficiente", "Seu papel atual não permite publicar materiais nesta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var dialog = new OpenFileDialog
             {
                 Multiselect = true,
@@ -11983,24 +16017,56 @@ namespace MeuApp
                 return;
             }
 
-            foreach (var file in dialog.FileNames)
+            var options = ShowTeamAssetSyncOptionsDialog(
+                _activeTeamWorkspace,
+                $"Publicar {category}",
+                "ARQUIVOS",
+                "Defina o escopo do conteúdo remoto e registre um resumo para a primeira versão destes materiais.",
+                _activeTeamWorkspace.DefaultFilePermissionScope,
+                $"Versão inicial publicada em {category}.");
+            if (!options.Confirmed)
             {
-                _activeTeamWorkspace.Assets.Add(new TeamAssetInfo
-                {
-                    AssetId = Guid.NewGuid().ToString("N"),
-                    Category = category,
-                    FileName = System.IO.Path.GetFileName(file),
-                    PreviewImageDataUri = string.Equals(category, "imagens", StringComparison.OrdinalIgnoreCase)
-                        ? TryCreateCompressedImageDataUri(file, 420, 74) ?? string.Empty
-                        : string.Empty,
-                    AddedByUserId = _currentProfile?.UserId ?? string.Empty,
-                    AddedAt = DateTime.Now
-                });
+                return;
             }
 
-            AddTeamNotification(_activeTeamWorkspace, $"{dialog.FileNames.Length} arquivo(s) adicionado(s) em {category}.");
-            SaveTeamWorkspace(_activeTeamWorkspace);
-            RenderTeamWorkspace();
+            var importedCount = 0;
+            var failures = new List<string>();
+            foreach (var file in dialog.FileNames)
+            {
+                var assetResult = await CreateOrUpdateTeamAssetAsync(
+                    _activeTeamWorkspace,
+                    file,
+                    category,
+                    options.PermissionScope,
+                    options.ChangeSummary,
+                    null,
+                    $"Material publicado manualmente em {category}.");
+                if (!assetResult.Success || assetResult.Asset == null)
+                {
+                    failures.Add($"{IOPath.GetFileName(file)}: {assetResult.ErrorMessage}");
+                    continue;
+                }
+
+                _activeTeamWorkspace.Assets.Add(assetResult.Asset);
+                importedCount++;
+            }
+
+            if (importedCount > 0)
+            {
+                AddTeamNotification(_activeTeamWorkspace, $"{importedCount} arquivo(s) adicionado(s) em {category}.");
+                SaveTeamWorkspace(_activeTeamWorkspace);
+                RenderTeamWorkspace();
+            }
+
+            if (failures.Count > 0)
+            {
+                ShowStyledAlertDialog(
+                    "ARQUIVOS",
+                    "Alguns arquivos falharam",
+                    string.Join("\n", failures.Take(3)) + (failures.Count > 3 ? "\n..." : string.Empty),
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(234, 88, 12)));
+            }
         }
 
         private void CopyTeamCode_Click(object? sender, RoutedEventArgs e)
@@ -12023,6 +16089,12 @@ namespace MeuApp
 
         private void OpenAddMilestoneDialog(TeamWorkspaceInfo team)
         {
+            if (!CanCurrentUserEditProjectSettings(team))
+            {
+                ShowStyledAlertDialog("EQUIPE", "Permissão insuficiente", "Seu papel atual pode colaborar nas entregas, mas não criar novos marcos nesta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             var dialog = CreateStyledDialogWindow("Nova entrega", 500, 420);
 
             var root = new StackPanel { Margin = new Thickness(20) };
@@ -12079,7 +16151,11 @@ namespace MeuApp
                     Notes = notesBox.Text.Trim(),
                     Status = statusBox.SelectedItem?.ToString() ?? "Planejada",
                     DueDate = dueDatePicker.SelectedDate,
-                    CreatedAt = DateTime.Now
+                    CreatedByUserId = GetCurrentUserId(),
+                    OwnerUserId = GetCurrentUserId(),
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now,
+                    UpdatedByUserId = GetCurrentUserId()
                 });
 
                 AddTeamNotification(team, $"Nova entrega planejada: {titleBox.Text.Trim()}.");
@@ -12103,9 +16179,18 @@ namespace MeuApp
 
             var team = payload.Item1;
             var milestone = payload.Item2;
+
+            if (!CanCurrentUserReviewDeliverables(team))
+            {
+                ShowStyledAlertDialog("ENTREGA", "Permissão insuficiente", "Seu papel atual não permite concluir ou reabrir entregas desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             milestone.Status = string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase)
                 ? "Em andamento"
                 : "Concluida";
+            milestone.UpdatedAt = DateTime.Now;
+            milestone.UpdatedByUserId = GetCurrentUserId();
             AddTeamNotification(team, $"Entrega atualizada: {milestone.Title} agora está {milestone.Status.ToLowerInvariant()}.");
             SaveTeamWorkspace(team);
             RenderTeamWorkspace();
@@ -12120,6 +16205,12 @@ namespace MeuApp
 
             var team = payload.Item1;
             var milestone = payload.Item2;
+            if (!CanCurrentUserEditProjectSettings(team))
+            {
+                ShowStyledAlertDialog("ENTREGA", "Permissão insuficiente", "Seu papel atual não permite remover entregas desta equipe.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
             if (MessageBox.Show($"Remover a entrega '{milestone.Title}'?", "Equipe", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             {
                 return;
@@ -12609,6 +16700,18 @@ namespace MeuApp
                     user.ConnectionState = _connectionService?.GetRelationshipState(user.UserId, _connectionEntries) ?? "none";
                 }
 
+                await EnrichUsersWithAcademicPortfolioAsync(results);
+                if (requestVersion != _searchSlideRequestVersion)
+                {
+                    return;
+                }
+
+                _searchSlideTeamResults = await LoadSearchSlideTeamMatchesAsync(query);
+                if (requestVersion != _searchSlideRequestVersion)
+                {
+                    return;
+                }
+
                 DebugHelper.WriteLine($"Busca concluída. Resultados: {results.Count}");
 
                 if (results.Count > 0)
@@ -12646,14 +16749,15 @@ namespace MeuApp
         {
             _searchSlideQuery = query;
             _searchSlideResults.Clear();
+            _searchSlideTeamResults.Clear();
             SearchSlideTitleText.Text = $"Resultados para \"{query}\"";
             SearchSlideStatusText.Text = triggeredByTyping
                 ? "Atualizando resultados enquanto você digita..."
-                : "Buscando por nome, matricula e email dentro da sua rede academica...";
+                : "Buscando em perfis, equipes, chats e arquivos do ambiente acadêmico...";
             SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
             SearchSlideResultsHost.Children.Clear();
             SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
-            SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Buscando agora", "Assim que os perfis forem encontrados, eles aparecem aqui sem abrir uma nova janela."));
+            SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Buscando agora", "Assim que os perfis, equipes, chats e materiais forem encontrados, eles aparecem aqui sem abrir uma nova janela."));
             ShowSearchSlidePanel();
         }
 
@@ -12662,27 +16766,121 @@ namespace MeuApp
             _searchSlideResults = results;
             SearchSlideResultsHost.Children.Clear();
 
-            if (results.Count == 0)
+            var teamMatches = FindSearchSlideTeams(_searchSlideQuery);
+            var conversationMatches = FindSearchSlideConversations(_searchSlideQuery);
+            var fileMatches = FindSearchSlideFiles(_searchSlideQuery);
+            var totalMatches = results.Count + teamMatches.Count + conversationMatches.Count + fileMatches.Count;
+
+            if (totalMatches == 0)
             {
                 SearchSlideStatusText.Text = string.IsNullOrWhiteSpace(_searchSlideQuery)
                     ? "Nenhuma pesquisa ativa."
-                    : $"Nenhum perfil encontrado para \"{_searchSlideQuery}\".";
+                    : $"Nenhum resultado encontrado para \"{_searchSlideQuery}\".";
                 SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
-                SearchSlideEmptyStateText.Text = "Tente outro nome, matrícula ou email para localizar a pessoa certa.";
+                SearchSlideEmptyStateText.Text = "Tente outro nome, matrícula, email, equipe, mensagem ou arquivo para localizar o contexto certo.";
                 SearchSlideEmptyStateText.Visibility = Visibility.Visible;
                 return;
             }
 
             SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
-            SearchSlideStatusText.Text = results.Count == 1
-                ? "1 perfil encontrado. Você já pode conversar, conectar ou abrir os detalhes daqui."
-                : $"{results.Count} perfis encontrados. Converse, conecte ou abra os detalhes do aluno.";
+            SearchSlideStatusText.Text = totalMatches == 1
+                ? "1 resultado encontrado. Você já pode abrir o contexto certo daqui."
+                : $"{totalMatches} resultados encontrados entre perfis, equipes, chats e arquivos.";
             SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+            if (teamMatches.Count > 0)
+            {
+                SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Equipes", "Abra o workspace certo, acompanhe o semestre e pule para o board ou agenda."));
+                foreach (var team in teamMatches)
+                {
+                    SearchSlideResultsHost.Children.Add(CreateSearchSlideTeamResultCard(team));
+                }
+            }
+
+            if (conversationMatches.Count > 0)
+            {
+                SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Chats", "Retome conversas e contexto recente sem sair da busca global."));
+                foreach (var conversation in conversationMatches)
+                {
+                    SearchSlideResultsHost.Children.Add(CreateSearchSlideConversationResultCard(conversation));
+                }
+            }
+
+            if (fileMatches.Count > 0)
+            {
+                SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard("Arquivos", "A busca também passa pelo hub local de materiais e documentos recentes."));
+                foreach (var file in fileMatches)
+                {
+                    SearchSlideResultsHost.Children.Add(CreateSearchSlideFileResultCard(file));
+                }
+            }
+
+            if (results.Count > 0)
+            {
+                SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Perfis",
+                    CurrentViewerCanUseProfessorDiscovery()
+                        ? "Abra o perfil acadêmico, veja equipes do aluno e assuma rapidamente a supervisão focal quando necessário."
+                        : "Converse, conecte ou abra os detalhes do participante encontrado."));
+            }
 
             foreach (var user in results)
             {
                 SearchSlideResultsHost.Children.Add(CreateSearchSlideResultCard(user));
             }
+        }
+
+        private List<TeamWorkspaceInfo> FindSearchSlideTeams(string query)
+        {
+            var normalizedQuery = NormalizeTeamValue(query);
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return new List<TeamWorkspaceInfo>();
+            }
+
+            return (_searchSlideTeamResults.Count > 0 ? _searchSlideTeamResults : GetLocalTeamSearchMatches(query))
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderByDescending(team => team.UpdatedAt)
+                .ThenBy(team => team.TeamName)
+                .Take(8)
+                .ToList();
+        }
+
+        private List<Conversation> FindSearchSlideConversations(string query)
+        {
+            var normalizedQuery = NormalizeTeamValue(query);
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return new List<Conversation>();
+            }
+
+            return _conversations
+                .Where(conversation =>
+                    conversation.ContactName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrWhiteSpace(conversation.LastMessage) && conversation.LastMessage.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(conversation => conversation.LastMessageTime)
+                .Take(4)
+                .ToList();
+        }
+
+        private List<FilesHubItem> FindSearchSlideFiles(string query)
+        {
+            var normalizedQuery = NormalizeTeamValue(query);
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return new List<FilesHubItem>();
+            }
+
+            EnsureFilesHubStateLoaded();
+            return (_filesHubState.Items ?? new List<FilesHubItem>())
+                .Where(item =>
+                    item.FileName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || item.AssociationType.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                    || item.AssociationLabel.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(item => item.AddedAt)
+                .Take(4)
+                .ToList();
         }
 
         private Border CreateSearchSlideInfoCard(string title, string description)
@@ -12732,11 +16930,13 @@ namespace MeuApp
             };
 
             var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            layout.Children.Add(new Border
+            var avatar = new Border
             {
                 Width = 52,
                 Height = 52,
@@ -12744,7 +16944,9 @@ namespace MeuApp
                 ClipToBounds = true,
                 Margin = new Thickness(0, 0, 14, 0),
                 Child = CreateUserAvatarVisual(user, 52, true)
-            });
+            };
+            Grid.SetRowSpan(avatar, 2);
+            layout.Children.Add(avatar);
 
             var info = new StackPanel
             {
@@ -12762,6 +16964,14 @@ namespace MeuApp
                 FontWeights.Normal);
             emailBlock.Margin = new Thickness(0, 4, 0, 0);
             info.Children.Add(emailBlock);
+
+            var roleLine = BuildSearchSlideUserRoleLine(user);
+            if (!string.IsNullOrWhiteSpace(roleLine))
+            {
+                var roleBlock = CreateHighlightedSearchTextBlock(roleLine, GetThemeBrush("SecondaryTextBrush"), 11, FontWeights.SemiBold);
+                roleBlock.Margin = new Thickness(0, 4, 0, 0);
+                info.Children.Add(roleBlock);
+            }
 
             var registrationBlock = new TextBlock
             {
@@ -12835,11 +17045,406 @@ namespace MeuApp
             connectionButton.Click += SearchSlideCreateConnection_Click;
             actions.Children.Add(connectionButton);
 
+            Grid.SetRowSpan(actions, 2);
             Grid.SetColumn(actions, 2);
             layout.Children.Add(actions);
 
+            if (CurrentViewerCanUseProfessorDiscovery())
+            {
+                var portfolioPanel = CreateSearchSlideUserPortfolioPanel(user);
+                Grid.SetColumn(portfolioPanel, 1);
+                Grid.SetRow(portfolioPanel, 1);
+                layout.Children.Add(portfolioPanel);
+            }
+
             card.Child = layout;
             return card;
+        }
+
+        private string BuildSearchSlideUserRoleLine(UserInfo user)
+        {
+            var parts = new List<string>();
+            var roleLabel = TeamPermissionService.GetRoleLabel(user.Role);
+            if (!string.IsNullOrWhiteSpace(roleLabel))
+            {
+                parts.Add(roleLabel);
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.ProfessionalTitle) &&
+                !string.Equals(user.ProfessionalTitle, roleLabel, StringComparison.OrdinalIgnoreCase))
+            {
+                parts.Add(user.ProfessionalTitle);
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.AcademicDepartment))
+            {
+                parts.Add(user.AcademicDepartment);
+            }
+
+            return string.Join(" • ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        }
+
+        private Border CreateSearchSlideUserPortfolioPanel(UserInfo user)
+        {
+            var panel = new Border
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(14, 12, 14, 12),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16)
+            };
+
+            var stack = new StackPanel();
+            var teams = (user.AcademicProjects ?? new List<TeamWorkspaceInfo>())
+                .Where(team => team != null)
+                .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderByDescending(team => team.UpdatedAt)
+                .ThenBy(team => team.TeamName)
+                .ToList();
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = teams.Count == 0
+                    ? "Portfólio acadêmico sem equipes visíveis ainda"
+                    : teams.Count == 1
+                        ? "1 equipe/projeto visível para supervisão"
+                        : $"{teams.Count} equipes/projetos visíveis para supervisão",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            if (teams.Count == 0)
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = "Ao abrir o perfil, você continua com os dados acadêmicos do aluno e pode voltar depois que houver equipe vinculada.",
+                    Margin = new Thickness(0, 6, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                foreach (var team in teams.Take(3))
+                {
+                    stack.Children.Add(CreateSearchSlideUserPortfolioRow(team));
+                }
+
+                if (teams.Count > 3)
+                {
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = $"+{teams.Count - 3} equipe(s) adicional(is) no perfil completo.",
+                        Margin = new Thickness(0, 8, 0, 0),
+                        FontSize = 10,
+                        Foreground = GetThemeBrush("TertiaryTextBrush")
+                    });
+                }
+            }
+
+            panel.Child = stack;
+            return panel;
+        }
+
+        private Border CreateSearchSlideUserPortfolioRow(TeamWorkspaceInfo team)
+        {
+            var row = new Border
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14)
+            };
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var info = new StackPanel();
+            info.Children.Add(new TextBlock
+            {
+                Text = team.TeamName,
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(team.ClassName)
+                    ? $"{team.Course} • {Math.Clamp(team.ProjectProgress, 0, 100)}% • {team.ProjectStatus}"
+                    : $"{team.Course} • {team.ClassName} • {Math.Clamp(team.ProjectProgress, 0, 100)}%",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 10,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            info.Children.Add(new TextBlock
+            {
+                Text = BuildTeamProfessorFocusLabel(team),
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 10,
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            layout.Children.Add(info);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0)
+            };
+
+            var openButton = new Button
+            {
+                Content = "Abrir",
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(12, 7, 12, 7),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = team
+            };
+            openButton.Click += SearchSlideOpenDiscoveredTeam_Click;
+            actions.Children.Add(openButton);
+
+            if (CurrentViewerCanClaimFocalProfessor())
+            {
+                var alreadyFocal = string.Equals(team.FocalProfessorUserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase);
+                var claimButton = new Button
+                {
+                    Content = alreadyFocal ? "Você é focal" : "Assumir foco",
+                    Background = alreadyFocal ? GetThemeBrush("AccentMutedBrush") : GetThemeBrush("AccentBrush"),
+                    Foreground = alreadyFocal ? GetThemeBrush("AccentBrush") : Brushes.White,
+                    BorderBrush = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(12, 7, 12, 7),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Cursor = alreadyFocal ? Cursors.Arrow : Cursors.Hand,
+                    FontWeight = FontWeights.SemiBold,
+                    IsEnabled = !alreadyFocal,
+                    Tag = team
+                };
+                claimButton.Click += SearchSlideClaimProfessorFocus_Click;
+                actions.Children.Add(claimButton);
+            }
+
+            Grid.SetColumn(actions, 1);
+            layout.Children.Add(actions);
+
+            row.Child = layout;
+            return row;
+        }
+
+        private string BuildTeamProfessorFocusLabel(TeamWorkspaceInfo team)
+        {
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorName))
+            {
+                return $"Professor focal: {team.FocalProfessorName}";
+            }
+
+            var supervisors = (team.ProfessorSupervisorNames ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (supervisors.Count == 0)
+            {
+                return "Sem professor focal definido";
+            }
+
+            return supervisors.Count == 1
+                ? $"Docente vinculado: {supervisors[0]}"
+                : $"Docentes vinculados: {string.Join(", ", supervisors.Take(2))}";
+        }
+
+        private string BuildTeamLeadershipLabel(TeamWorkspaceInfo team)
+        {
+            var leaders = GetStudentLeaders(team);
+            if (leaders.Count == 0)
+            {
+                return "Sem líder discente definido";
+            }
+
+            return leaders.Count == 1
+                ? $"Líder discente: {leaders[0].Name}"
+                : $"Liderança discente: {string.Join(", ", leaders.Take(2).Select(member => member.Name))}";
+        }
+
+        private string BuildTeamBalanceLabel(TeamWorkspaceInfo team)
+        {
+            var studentCount = GetStudentTeamMembers(team).Count;
+            var facultyCount = GetFacultyMembers(team).Count;
+            return $"{studentCount} aluno(s) em execução • {facultyCount} docente(s) em orientação";
+        }
+
+        private Border CreateSearchSlideTeamResultCard(TeamWorkspaceInfo team)
+        {
+            var card = CreateSearchSlideInfoCard(team.TeamName, $"{team.Course} • {team.ClassName} • {team.AcademicTerm}");
+            if (card.Child is not StackPanel stack)
+            {
+                return card;
+            }
+
+            var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            chips.Children.Add(CreateStaticTeamChip($"Código {team.TeamId}", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            if (!string.IsNullOrWhiteSpace(team.TemplateName))
+            {
+                chips.Children.Add(CreateStaticTeamChip(team.TemplateName, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            chips.Children.Add(CreateStaticTeamChip(BuildTeamBalanceLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip(BuildTeamProfessorFocusLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip(BuildTeamLeadershipLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            stack.Children.Add(chips);
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+
+            var openButton = new Button
+            {
+                Content = "Abrir equipe",
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(14, 8, 14, 8),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = team
+            };
+            openButton.Click += SearchSlideOpenDiscoveredTeam_Click;
+            actions.Children.Add(openButton);
+
+            if (CurrentViewerCanClaimFocalProfessor())
+            {
+                var alreadyFocal = string.Equals(team.FocalProfessorUserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase);
+                var assignButton = new Button
+                {
+                    Content = alreadyFocal ? "Você é focal" : "Assumir foco docente",
+                    Background = alreadyFocal ? GetThemeBrush("AccentMutedBrush") : GetThemeBrush("CardBackgroundBrush"),
+                    Foreground = alreadyFocal ? GetThemeBrush("AccentBrush") : GetThemeBrush("PrimaryTextBrush"),
+                    BorderBrush = alreadyFocal ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = alreadyFocal ? new Thickness(0) : new Thickness(1),
+                    Padding = new Thickness(14, 8, 14, 8),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Cursor = alreadyFocal ? Cursors.Arrow : Cursors.Hand,
+                    FontWeight = FontWeights.SemiBold,
+                    IsEnabled = !alreadyFocal,
+                    Tag = team
+                };
+                assignButton.Click += SearchSlideClaimProfessorFocus_Click;
+                actions.Children.Add(assignButton);
+            }
+
+            stack.Children.Add(actions);
+            return card;
+        }
+
+        private Border CreateSearchSlideConversationResultCard(Conversation conversation)
+        {
+            var card = CreateSearchSlideInfoCard(conversation.ContactName, string.IsNullOrWhiteSpace(conversation.LastMessage) ? "Conversa pronta para retomar." : conversation.LastMessage);
+            if (card.Child is not StackPanel stack)
+            {
+                return card;
+            }
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Última atividade em {conversation.LastMessageTime:dd/MM HH:mm}",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 10,
+                Foreground = GetThemeBrush("TertiaryTextBrush")
+            });
+
+            var openButton = new Button
+            {
+                Content = "Abrir conversa",
+                Background = GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(0, 10, 0, 0),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                Tag = conversation
+            };
+            openButton.Click += (s, e) =>
+            {
+                _selectedConversation = conversation;
+                ResetNavigation();
+                ChatsContent.Visibility = Visibility.Visible;
+                RefreshChatsUI();
+                HideSearchSlidePanel();
+            };
+            stack.Children.Add(openButton);
+            return card;
+        }
+
+        private Border CreateSearchSlideFileResultCard(FilesHubItem item)
+        {
+            var card = CreateSearchSlideInfoCard(item.FileName, $"{item.AssociationType} • {item.AssociationLabel}");
+            if (card.Child is not StackPanel stack)
+            {
+                return card;
+            }
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Adicionado em {item.AddedAt:dd/MM HH:mm} • {FormatFileSize(item.FileSizeBytes)}",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 10,
+                Foreground = GetThemeBrush("TertiaryTextBrush")
+            });
+
+            var openButton = new Button
+            {
+                Content = "Abrir hub de arquivos",
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 8, 14, 8),
+                Margin = new Thickness(0, 10, 0, 0),
+                Cursor = Cursors.Hand,
+                FontWeight = FontWeights.SemiBold
+            };
+            openButton.Click += (s, e) =>
+            {
+                ResetNavigation();
+                FilesContent.Visibility = Visibility.Visible;
+                RenderFilesHub();
+                HideSearchSlidePanel();
+            };
+            stack.Children.Add(openButton);
+            return card;
+        }
+
+        private string FormatFileSize(long bytes)
+        {
+            if (bytes <= 0)
+            {
+                return "0 B";
+            }
+
+            string[] units = { "B", "KB", "MB", "GB" };
+            double size = bytes;
+            var unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.Length - 1)
+            {
+                size /= 1024;
+                unitIndex++;
+            }
+
+            return $"{size:0.#} {units[unitIndex]}";
         }
 
         private TextBlock CreateHighlightedSearchTextBlock(string text, Brush baseForeground, double fontSize, FontWeight fontWeight)
@@ -12953,6 +17558,56 @@ namespace MeuApp
             ShowConversationInMainWindow(user);
             SearchFriendsBox.Clear();
             HideSearchSlidePanel();
+        }
+
+        private async void SearchSlideOpenDiscoveredTeam_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: TeamWorkspaceInfo team })
+            {
+                return;
+            }
+
+            var resolvedTeam = team;
+            if (_teamService != null && !string.IsNullOrWhiteSpace(team.TeamId))
+            {
+                var loadedTeam = await _teamService.GetTeamByIdAsync(team.TeamId);
+                if (loadedTeam != null)
+                {
+                    await EnrichTeamMembersAvatarsAsync(new List<TeamWorkspaceInfo> { loadedTeam });
+                    resolvedTeam = loadedTeam;
+                }
+            }
+
+            TrackTeamWorkspaceLocally(resolvedTeam);
+            OpenTeamWorkspace(resolvedTeam, navigateToTeams: true);
+            HideSearchSlidePanel();
+        }
+
+        private async void SearchSlideClaimProfessorFocus_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button { Tag: TeamWorkspaceInfo team } button)
+            {
+                return;
+            }
+
+            button.IsEnabled = false;
+
+            try
+            {
+                var updatedTeam = await AssignCurrentProfessorAsFocalAsync(team);
+                if (updatedTeam == null)
+                {
+                    return;
+                }
+
+                SearchSlideStatusText.Text = $"{updatedTeam.TeamName} agora está sob sua supervisão focal.";
+                SearchSlideStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                RenderSearchSlideResults(_searchSlideResults);
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
         }
 
         private async void SearchSlideShowProfile_Click(object sender, RoutedEventArgs e)
@@ -13091,6 +17746,9 @@ namespace MeuApp
                     case "Equipes":
                         ShowTeamsSection();
                         break;
+                    case "Professor":
+                        ShowProfessorDashboardSection();
+                        break;
                     case "Calendario":
                         CalendarContent.Visibility = Visibility.Visible;
                         RenderCalendarAgenda();
@@ -13119,6 +17777,7 @@ namespace MeuApp
             ChatsContent.Visibility = Visibility.Collapsed;
             ConnectionsContent.Visibility = Visibility.Collapsed;
             TeamsContent.Visibility = Visibility.Collapsed;
+            ProfessorDashboardContent.Visibility = Visibility.Collapsed;
             CalendarContent.Visibility = Visibility.Collapsed;
             FilesContent.Visibility = Visibility.Collapsed;
             SettingsContent.Visibility = Visibility.Collapsed;
@@ -13370,6 +18029,9 @@ namespace MeuApp
 
             _currentProfile.Nickname = NicknameTextBox.Text?.Trim() ?? string.Empty;
             _currentProfile.ProfessionalTitle = ProfessionalTitleTextBox.Text?.Trim() ?? string.Empty;
+            _currentProfile.AcademicDepartment = AcademicDepartmentTextBox.Text?.Trim() ?? string.Empty;
+            _currentProfile.AcademicFocus = AcademicFocusTextBox.Text?.Trim() ?? string.Empty;
+            _currentProfile.OfficeHours = OfficeHoursTextBox.Text?.Trim() ?? string.Empty;
             _currentProfile.Bio = BioTextBox.Text?.Trim() ?? string.Empty;
             _currentProfile.Skills = SkillsTextBox.Text?.Trim() ?? string.Empty;
             _currentProfile.ProgrammingLanguages = string.Join(", ", _selectedProgrammingLanguages.OrderBy(language => language));
@@ -13377,6 +18039,7 @@ namespace MeuApp
             _currentProfile.LinkedInLink = LinkedInLinkTextBox.Text?.Trim() ?? string.Empty;
             NormalizeProfileAvatarSelection(_currentProfile);
             NormalizeProfileCollections(_currentProfile);
+            UpdateRoleAwareShellState(_currentProfile);
 
             try
             {
@@ -13418,7 +18081,9 @@ namespace MeuApp
 
         private async Task<(bool Success, string? ErrorMessage)> SaveProfessionalProfileAsync(UserProfile profile, string idToken)
         {
-            var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users/{profile.UserId}";
+            profile.Role = TeamPermissionService.NormalizeRole(profile.Role);
+
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{profile.UserId}");
             var body = new
             {
                 fields = new
@@ -13428,6 +18093,11 @@ namespace MeuApp
                     phone = new { stringValue = profile.Phone },
                     course = new { stringValue = profile.Course },
                     registration = new { stringValue = profile.Registration },
+                    role = new { stringValue = profile.Role },
+                    academicDepartment = new { stringValue = profile.AcademicDepartment },
+                    academicFocus = new { stringValue = profile.AcademicFocus },
+                    officeHours = new { stringValue = profile.OfficeHours },
+                    professorAccessLevel = new { stringValue = profile.ProfessorAccessLevel },
                     nickname = new { stringValue = profile.Nickname },
                     professionalTitle = new { stringValue = profile.ProfessionalTitle },
                     bio = new { stringValue = profile.Bio },
@@ -15008,6 +19678,7 @@ namespace MeuApp
                 await EnrichTeamMembersAvatarsAsync(teams);
 
                 _teamWorkspaces.Clear();
+                _userAcademicPortfolioCache.Clear();
                 foreach (var team in teams)
                 {
                     _teamWorkspaces.Add(team);
@@ -15015,6 +19686,14 @@ namespace MeuApp
 
                 UpdateTeamsViewState();
                 RenderTeamsList();
+                if (_activeTeamWorkspace != null)
+                {
+                    _activeTeamWorkspace = _teamWorkspaces.FirstOrDefault(team => string.Equals(team.TeamId, _activeTeamWorkspace.TeamId, StringComparison.OrdinalIgnoreCase));
+                    RenderTeamWorkspace();
+                }
+
+                RenderProfessorDashboard();
+                RenderCalendarAgenda();
 
                 DebugHelper.WriteLine($"[LoadTeamsFromDatabase] {teams.Count} equipes carregadas do banco de dados");
             }

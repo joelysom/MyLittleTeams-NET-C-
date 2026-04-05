@@ -6,6 +6,38 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function requesterProfile() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
+    }
+
+    function requesterRole() {
+      return requesterProfile() == null
+        ? ''
+        : requesterProfile().get('role', '');
+    }
+
+    function requesterIsProfessorLike() {
+      let role = requesterRole();
+      return role == 'professor'
+        || role == 'teacher'
+        || role == 'advisor'
+        || role == 'orientador';
+    }
+
+    function requesterIsCoordinatorLike() {
+      let role = requesterRole();
+      return role == 'coordinator'
+        || role == 'course-coordinator'
+        || role == 'academic-coordinator'
+        || role == 'coordenador';
+    }
+
+    function requesterHasProfessorDiscovery() {
+      return requesterIsProfessorLike() || requesterIsCoordinatorLike();
+    }
+
     function isParticipantById(conversationId) {
       return signedIn()
         && conversationId.matches(
@@ -47,6 +79,13 @@ service cloud.firestore {
 
     function messageIsDeleted(data) {
       return data.get('isDeleted', false) == true || messageTypeOf(data) == 'deleted';
+    }
+
+    function validPermissionScope(scope) {
+      return scope == 'team'
+        || scope == 'course'
+        || scope == 'leadership'
+        || scope == 'private';
     }
 
     function validConversationMessageCreate(data, messageId) {
@@ -110,11 +149,199 @@ service cloud.firestore {
         && newData.get('editedAt', null) == oldData.get('editedAt', null);
     }
 
+    function isTeamCreatorData(data) {
+      return signedIn() && data.createdBy == request.auth.uid;
+    }
+
+    function isTeamLeader(data) {
+      return signedIn()
+        && (data.leaderIds is list && request.auth.uid in data.leaderIds);
+    }
+
+    function isTeamProfessor(data) {
+      return signedIn()
+        && (data.professorIds is list && request.auth.uid in data.professorIds);
+    }
+
+    function isTeamCoordinator(data) {
+      return signedIn()
+        && (data.coordinatorIds is list && request.auth.uid in data.coordinatorIds);
+    }
+
+    function teamRoleOf(data) {
+      return !signedIn()
+        ? ''
+        : isTeamProfessor(data)
+          ? 'professor'
+          : isTeamCoordinator(data)
+            ? 'coordinator'
+            : isTeamLeader(data)
+              ? 'leader'
+              : ((data.memberIds is list && request.auth.uid in data.memberIds) ? 'student' : '');
+    }
+
+    function canAddTeamMembers(data) {
+      return isTeamCreatorData(data)
+        || isTeamLeader(data)
+        || isTeamProfessor(data)
+        || isTeamCoordinator(data);
+    }
+
+    function canManageTeamMembership(data) {
+      return isTeamProfessor(data) || isTeamCoordinator(data);
+    }
+
     function teamVisible(data) {
       return signedIn() && (
         data.createdBy == request.auth.uid ||
-        (data.memberIds is list && request.auth.uid in data.memberIds)
+        (data.memberIds is list && request.auth.uid in data.memberIds) ||
+        teamRoleOf(data) != '' ||
+        requesterHasProfessorDiscovery()
       );
+    }
+
+    function canUpdateTeamStructure(data) {
+      return isTeamCreatorData(data) || isTeamLeader(data) || isTeamProfessor(data) || isTeamCoordinator(data);
+    }
+
+    function canReviewTeamDeliverables(data) {
+      return isTeamLeader(data) || isTeamProfessor(data) || isTeamCoordinator(data);
+    }
+
+    function validExecutionRole(role) {
+      return role == 'student' || role == 'leader';
+    }
+
+    function validTeamRole(role) {
+      return role == 'student'
+        || role == 'leader'
+        || role == 'professor'
+        || role == 'coordinator';
+    }
+
+    function studentSafeTeamUpdate(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+        'assets',
+        'notifications',
+        'chatMessages',
+        'updatedAt',
+        'lastRealtimeSyncAt'
+      ]);
+    }
+
+    function teamGovernanceKeys() {
+      return [
+        'members',
+        'memberIds',
+        'memberRolesByUserId',
+        'leaderIds',
+        'professorIds',
+        'coordinatorIds',
+        'studentIds',
+        'focalProfessorUserId',
+        'focalProfessorName',
+        'professorSupervisorUserIds',
+        'professorSupervisorNames'
+      ];
+    }
+
+    function teamMembershipUpdateKeys() {
+      return [
+        'members',
+        'memberIds',
+        'memberRolesByUserId',
+        'leaderIds',
+        'professorIds',
+        'coordinatorIds',
+        'studentIds',
+        'notifications',
+        'updatedAt',
+        'lastRealtimeSyncAt'
+      ];
+    }
+
+    function professorFocusUpdateKeys() {
+      return [
+        'focalProfessorUserId',
+        'focalProfessorName',
+        'professorSupervisorUserIds',
+        'professorSupervisorNames',
+        'members',
+        'memberIds',
+        'memberRolesByUserId',
+        'leaderIds',
+        'professorIds',
+        'coordinatorIds',
+        'studentIds',
+        'notifications',
+        'updatedAt',
+        'lastRealtimeSyncAt'
+      ];
+    }
+
+    function canAppendTeamMembersUpdate(oldData, newData) {
+      return canAddTeamMembers(oldData)
+        && newData.diff(oldData).affectedKeys().hasOnly(teamMembershipUpdateKeys())
+        && oldData.memberIds is list
+        && newData.memberIds is list
+        && newData.memberIds.hasAll(oldData.memberIds)
+        && newData.memberIds.size() >= oldData.memberIds.size()
+        && oldData.studentIds is list
+        && newData.studentIds is list
+        && newData.studentIds.hasAll(oldData.studentIds)
+        && newData.studentIds.size() == oldData.studentIds.size() + (newData.memberIds.size() - oldData.memberIds.size())
+        && newData.leaderIds == oldData.leaderIds
+        && newData.professorIds == oldData.professorIds
+        && newData.coordinatorIds == oldData.coordinatorIds
+        && newData.memberRolesByUserId.diff(oldData.memberRolesByUserId).changedKeys().size() == 0
+        && newData.memberRolesByUserId.diff(oldData.memberRolesByUserId).removedKeys().size() == 0;
+    }
+
+    function canManageTeamMembershipUpdate(oldData, newData) {
+      return canManageTeamMembership(oldData)
+        && newData.diff(oldData).affectedKeys().hasOnly(teamMembershipUpdateKeys());
+    }
+
+    function canClaimProfessorFocusUpdate(oldData, newData) {
+      return requesterIsProfessorLike()
+        && teamVisible(oldData)
+        && newData.diff(oldData).affectedKeys().hasOnly(professorFocusUpdateKeys())
+        && newData.focalProfessorUserId == request.auth.uid
+        && newData.focalProfessorName is string
+        && newData.professorIds is list
+        && request.auth.uid in newData.professorIds
+        && newData.memberIds is list
+        && request.auth.uid in newData.memberIds;
+    }
+
+    function canEditTeamStructureUpdate(oldData, newData) {
+      return canUpdateTeamStructure(oldData)
+        && !newData.diff(oldData).affectedKeys().hasAny(teamGovernanceKeys());
+    }
+
+    function canDeleteTeamDocument(data) {
+      return isTeamCreatorData(data);
+    }
+
+    function canViewScopedTeamAsset(data, permissionScope, ownerUserId) {
+      return teamVisible(data)
+        && (
+          !validPermissionScope(permissionScope) ||
+          permissionScope == 'team' ||
+          permissionScope == 'course' ||
+          isTeamLeader(data) ||
+          isTeamProfessor(data) ||
+          isTeamCoordinator(data) ||
+          (permissionScope == 'private' && ownerUserId == request.auth.uid)
+        );
+    }
+
+    function validTeamRoleIndexes(data) {
+      return data.memberRolesByUserId is map
+        && data.leaderIds is list
+        && data.professorIds is list
+        && data.coordinatorIds is list
+        && data.studentIds is list;
     }
 
     function validTeamPayload(data) {
@@ -123,19 +350,33 @@ service cloud.firestore {
         && data.course is string
         && data.className is string
         && data.classId is string
+        && data.academicTerm is string
+        && data.templateId is string
+        && data.templateName is string
         && data.createdBy is string
         && data.isActive is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
+        && (data.lastRealtimeSyncAt == null || data.lastRealtimeSyncAt is timestamp)
         && data.projectProgress is int
         && data.projectProgress >= 0
         && data.projectProgress <= 100
         && (data.projectDeadline == null || data.projectDeadline is timestamp)
         && data.projectStatus is string
+        && data.teacherNotes is string
+        && data.focalProfessorUserId is string
+        && data.focalProfessorName is string
+        && data.professorSupervisorUserIds is list
+        && data.professorSupervisorNames is list
+        && data.defaultFilePermissionScope is string
+        && validPermissionScope(data.defaultFilePermissionScope)
         && data.ucs is list
         && data.memberIds is list
         && request.auth.uid in data.memberIds
         && data.members is list
+        && validTeamRoleIndexes(data)
+        && data.semesterTimeline is list
+        && data.accessRules is list
         && data.milestones is list
         && data.assets is list
         && data.taskColumns is list
@@ -173,8 +414,124 @@ service cloud.firestore {
         && data.addedAt is timestamp
         && (
           data.userId == request.auth.uid ||
-          isTeamCreator(data.teamId)
+          (teamExists(data.teamId) && (
+            canAddTeamMembers(teamDocument(data.teamId).data) ||
+            canManageTeamMembership(teamDocument(data.teamId).data)
+          ))
         );
+    }
+
+    function validTeamAssetFilePayload(data) {
+      return data.teamId is string
+        && data.assetId is string
+        && data.versionNumber is int
+        && data.versionNumber > 0
+        && data.fileName is string
+        && data.mimeType is string
+        && data.permissionScope is string
+        && validPermissionScope(data.permissionScope)
+        && data.storageKind is string
+        && data.sizeBytes is int
+        && data.sizeBytes >= 0
+        && data.uploadedByUserId is string
+        && data.uploadedByUserId == request.auth.uid
+        && data.uploadedAt is timestamp
+        && data.contentBase64 is string
+        && data.contentBase64.size() < 900000;
+    }
+
+    function canWriteTeamAssetFile(data) {
+      return signedIn()
+        && teamExists(data.teamId)
+        && teamVisible(teamDocument(data.teamId).data);
+    }
+
+    function canReadTeamAssetFile(data) {
+      return signedIn()
+        && teamExists(data.teamId)
+        && canViewScopedTeamAsset(
+          teamDocument(data.teamId).data,
+          data.permissionScope,
+          data.uploadedByUserId
+        );
+    }
+
+    function validTaskCardPayload(data, teamId, cardId) {
+      return data.teamId is string
+        && data.teamId == teamId
+        && data.id is string
+        && data.id == cardId
+        && data.columnId is string
+        && data.title is string
+        && data.description is string
+        && data.priority is string
+        && (data.dueDate == null || data.dueDate is timestamp)
+        && data.estimatedHours is int
+        && data.estimatedHours >= 0
+        && data.workloadPoints is int
+        && data.workloadPoints >= 0
+        && data.requiredRole is string
+        && validExecutionRole(data.requiredRole)
+        && data.requiresProfessorReview is bool
+        && data.assignedUserIds is list
+        && data.mentionedUserIds is list
+        && data.comments is list
+        && data.attachments is list
+        && data.createdAt is timestamp
+        && data.createdByUserId is string
+        && data.updatedAt is timestamp
+        && data.updatedByUserId is string;
+    }
+
+    function validMilestonePayload(data, teamId, milestoneId) {
+      return data.teamId is string
+        && data.teamId == teamId
+        && data.id is string
+        && data.id == milestoneId
+        && data.title is string
+        && data.notes is string
+        && data.status is string
+        && (data.dueDate == null || data.dueDate is timestamp)
+        && data.createdByUserId is string
+        && data.ownerUserId is string
+        && data.requiresProfessorReview is bool
+        && data.mentionedUserIds is list
+        && data.comments is list
+        && data.attachments is list
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.updatedByUserId is string;
+    }
+
+    function taskCardCollaborativeUpdate(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+          'comments',
+          'attachments',
+          'mentionedUserIds',
+          'updatedAt',
+          'updatedByUserId'
+        ])
+        && newData.updatedByUserId == request.auth.uid;
+    }
+
+    function milestoneCollaborativeUpdate(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+          'comments',
+          'attachments',
+          'mentionedUserIds',
+          'updatedAt',
+          'updatedByUserId'
+        ])
+        && newData.updatedByUserId == request.auth.uid;
+    }
+
+    function milestoneReviewUpdate(newData, oldData) {
+      return newData.diff(oldData).affectedKeys().hasOnly([
+          'status',
+          'updatedAt',
+          'updatedByUserId'
+        ])
+        && newData.updatedByUserId == request.auth.uid;
     }
 
     function connectionVisible(data) {
@@ -290,9 +647,82 @@ service cloud.firestore {
       allow update: if teamVisible(resource.data)
         && validTeamPayload(request.resource.data)
         && request.resource.data.teamId == teamId
-        && request.resource.data.createdBy == resource.data.createdBy;
+        && request.resource.data.createdBy == resource.data.createdBy
+        && (
+          canClaimProfessorFocusUpdate(resource.data, request.resource.data) ||
+          canManageTeamMembershipUpdate(resource.data, request.resource.data) ||
+          canAppendTeamMembersUpdate(resource.data, request.resource.data) ||
+          canEditTeamStructureUpdate(resource.data, request.resource.data) ||
+          studentSafeTeamUpdate(request.resource.data, resource.data)
+        );
 
-      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if canDeleteTeamDocument(resource.data);
+    }
+
+    match /teams/{teamId}/taskCards/{cardId} {
+      allow get: if teamExists(teamId)
+        && teamVisible(teamDocument(teamId).data);
+      allow list: if false;
+
+      allow create: if teamExists(teamId)
+        && validTaskCardPayload(request.resource.data, teamId, cardId)
+        && canUpdateTeamStructure(teamDocument(teamId).data)
+        && request.resource.data.updatedByUserId == request.auth.uid;
+
+      allow update: if teamExists(teamId)
+        && validTaskCardPayload(request.resource.data, teamId, cardId)
+        && (
+          request.resource.data == resource.data ||
+          (canUpdateTeamStructure(teamDocument(teamId).data)
+            && request.resource.data.updatedByUserId == request.auth.uid) ||
+          (teamVisible(teamDocument(teamId).data)
+            && taskCardCollaborativeUpdate(request.resource.data, resource.data))
+        );
+
+      allow delete: if teamExists(teamId)
+        && canUpdateTeamStructure(teamDocument(teamId).data);
+    }
+
+    match /teams/{teamId}/milestones/{milestoneId} {
+      allow get: if teamExists(teamId)
+        && teamVisible(teamDocument(teamId).data);
+      allow list: if false;
+
+      allow create: if teamExists(teamId)
+        && validMilestonePayload(request.resource.data, teamId, milestoneId)
+        && canUpdateTeamStructure(teamDocument(teamId).data)
+        && request.resource.data.updatedByUserId == request.auth.uid;
+
+      allow update: if teamExists(teamId)
+        && validMilestonePayload(request.resource.data, teamId, milestoneId)
+        && (
+          request.resource.data == resource.data ||
+          (canUpdateTeamStructure(teamDocument(teamId).data)
+            && request.resource.data.updatedByUserId == request.auth.uid) ||
+          (canReviewTeamDeliverables(teamDocument(teamId).data)
+            && milestoneReviewUpdate(request.resource.data, resource.data)) ||
+          (teamVisible(teamDocument(teamId).data)
+            && milestoneCollaborativeUpdate(request.resource.data, resource.data))
+        );
+
+      allow delete: if teamExists(teamId)
+        && canUpdateTeamStructure(teamDocument(teamId).data);
+    }
+
+    match /teamAssetFiles/{documentId} {
+      allow get: if canReadTeamAssetFile(resource.data);
+      allow list: if false;
+
+      allow create: if validTeamAssetFilePayload(request.resource.data)
+        && canWriteTeamAssetFile(request.resource.data);
+
+      allow update: if false;
+
+      allow delete: if canReadTeamAssetFile(resource.data)
+        && (
+          resource.data.uploadedByUserId == request.auth.uid ||
+          canManageTeamMembership(teamDocument(resource.data.teamId).data)
+        );
     }
 
     match /connections/{connectionId} {
@@ -326,7 +756,10 @@ service cloud.firestore {
     }
 
     match /userTeams/{documentId} {
-      allow get: if signedIn() && resource.data.userId == request.auth.uid;
+      allow get: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        requesterHasProfessorDiscovery()
+      );
       allow list: if signedIn();
 
       allow create, update: if canWriteUserTeamReference(request.resource.data);
@@ -334,7 +767,7 @@ service cloud.firestore {
       allow delete: if signedIn()
         && (
           resource.data.userId == request.auth.uid ||
-          isTeamCreator(resource.data.teamId)
+          (teamExists(resource.data.teamId) && canManageTeamMembership(teamDocument(resource.data.teamId).data))
         );
     }
   }

@@ -266,11 +266,32 @@
                         <TextBlock Text="Telefone" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <TextBox x:Name="SignupPhone" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="(XX) 9XXXX-XXXX"/>
 
+                        <TextBlock Text="Perfil de acesso" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                        <ComboBox x:Name="SignupRoleComboBox" Height="44" Padding="12,8" Margin="0,8,0,0" SelectionChanged="SignupRoleComboBox_SelectionChanged" SelectedIndex="0">
+                            <ComboBoxItem Content="Aluno" Tag="student"/>
+                            <ComboBoxItem Content="Professor orientador" Tag="professor"/>
+                        </ComboBox>
+
                         <TextBlock Text="Curso" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <TextBox x:Name="SignupCourse" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software"/>
 
                         <TextBlock Text="Matrícula" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <TextBox x:Name="SignupRegistration" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="202400123"/>
+
+                        <StackPanel x:Name="ProfessorSignupFieldsPanel" Visibility="Collapsed">
+                            <Border Margin="0,16,0,0" Padding="14" CornerRadius="12" Background="#FFF7FAFF" BorderBrush="#FFD7E7FF" BorderThickness="1">
+                                <TextBlock Text="O cadastro docente libera dashboard multi-equipes, exportação acadêmica e permissões avançadas de orientação." TextWrapping="Wrap" FontSize="12" Foreground="#FF24507A"/>
+                            </Border>
+
+                            <TextBlock Text="Departamento ou área" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupAcademicDepartment" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software / Coordenação"/>
+
+                            <TextBlock Text="Foco acadêmico" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupAcademicFocus" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Projetos integradores, banca, UX, dados..."/>
+
+                            <TextBlock Text="Janela de atendimento" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupOfficeHours" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seg e Qua, 19h às 21h"/>
+                        </StackPanel>
 
                         <TextBlock Text="Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
                         <PasswordBox x:Name="SignupPassword" Style="{StaticResource LoginPasswordStyle}"/>

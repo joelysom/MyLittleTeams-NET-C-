@@ -21,17 +21,21 @@ namespace MeuApp
         public string Phone { get; set; } = "";
         public string Nickname { get; set; } = "";
         public string ProfessionalTitle { get; set; } = "";
+        public string AcademicDepartment { get; set; } = "";
+        public string AcademicFocus { get; set; } = "";
+        public string OfficeHours { get; set; } = "";
         public string Bio { get; set; } = "";
         public string Skills { get; set; } = "";
         public string ProgrammingLanguages { get; set; } = "";
         public string PortfolioLink { get; set; } = "";
         public string LinkedInLink { get; set; } = "";
-        public string? Role { get; set; } = "member";
+        public string? Role { get; set; } = "student";
         public string AvatarBody { get; set; } = "";
         public string AvatarHair { get; set; } = "";
         public string AvatarHat { get; set; } = "";
         public string AvatarAccessory { get; set; } = "";
         public string AvatarClothing { get; set; } = "";
+        public List<TeamWorkspaceInfo> AcademicProjects { get; set; } = new List<TeamWorkspaceInfo>();
         private bool _isConnecting;
         private bool _isCurrentUser;
         private string _connectionState = "none";
@@ -44,7 +48,8 @@ namespace MeuApp
             {
                 var registration = string.IsNullOrWhiteSpace(Registration) ? "Sem matricula" : Registration;
                 var email = string.IsNullOrWhiteSpace(Email) ? "Sem email" : Email;
-                return $"{Name} | {registration} | {email}";
+                var roleLabel = TeamPermissionService.GetRoleLabel(Role);
+                return $"{Name} | {roleLabel} | {registration} | {email}";
             }
         }
 
@@ -127,7 +132,6 @@ namespace MeuApp
 
     public class UserSearchService
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private readonly string _idToken;
         private static readonly HttpClient httpClient = new HttpClient();
 
@@ -182,7 +186,7 @@ namespace MeuApp
         private async Task<List<UserInfo>> SearchAllUsersAsync(string query)
         {
             var results = new List<UserInfo>();
-            var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users";
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
 
             Debug.WriteLine($"[SearchAllUsersAsync] Iniciando GET em: {endpoint}");
 
@@ -239,9 +243,14 @@ namespace MeuApp
                                     Debug.WriteLine($"[SearchAllUsersAsync] Usuário #{documentCount}: {user.Name} ({user.Registration}) - {user.Email}");
 
                                     // Filtrar por query (nome, matrícula ou email)
-                                    bool matches = user.Name.ToLower().Contains(query) ||
-                                                   user.Email.ToLower().Contains(query) ||
-                                                   user.Registration.ToLower().Contains(query);
+                                    bool matches = user.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.Email.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.Registration.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.Course.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.ProfessionalTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.AcademicDepartment.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   user.AcademicFocus.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                                                   TeamPermissionService.GetRoleLabel(user.Role).Contains(query, StringComparison.OrdinalIgnoreCase);
 
                                     if (matches)
                                     {
@@ -329,6 +338,12 @@ namespace MeuApp
                     user.Course = ExtractField(fields, "course", documentIndex) ?? "";
                     if (!string.IsNullOrEmpty(user.Course))
                         Debug.WriteLine($"  [ExtractUserInfo #{documentIndex}] Curso: {user.Course}");
+
+                    user.Role = TeamPermissionService.NormalizeRole(ExtractField(fields, "role", documentIndex));
+                    user.ProfessionalTitle = ExtractField(fields, "professionalTitle", documentIndex) ?? "";
+                    user.AcademicDepartment = ExtractField(fields, "academicDepartment", documentIndex) ?? "";
+                    user.AcademicFocus = ExtractField(fields, "academicFocus", documentIndex) ?? "";
+                    user.OfficeHours = ExtractField(fields, "officeHours", documentIndex) ?? "";
 
                     user.AvatarBody = ExtractField(fields, "avatarBody", documentIndex) ?? "";
                     user.AvatarHair = ExtractField(fields, "avatarHair", documentIndex) ?? "";

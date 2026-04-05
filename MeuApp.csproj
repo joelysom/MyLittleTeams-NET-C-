@@ -34,6 +34,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="MeuApp.Tests\**\*.cs" />
+    <EmbeddedResource Remove="MeuApp.Tests\**\*" />
+    <Page Remove="MeuApp.Tests\**\*.xaml" />
+    <ApplicationDefinition Remove="MeuApp.Tests\**\*.xaml" />
+    <None Remove="MeuApp.Tests\**\*" />
     <Compile Remove="obj_codex\**\*.cs" />
     <Compile Remove="obj_verify\**\*.cs" />
     <Compile Remove="bin_verify\**\*.cs" />

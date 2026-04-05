@@ -1,6 +1,6 @@
 # Obsseract
 
-Aplicacao desktop WPF para acompanhamento de projetos integradores de alunos, com autenticacao Firebase, busca de usuarios, conexoes academicas, chat, workspaces de equipe, agenda consolidada, perfil profissional e central local de arquivos.
+Aplicacao desktop WPF para acompanhamento de projetos integradores de alunos e professores orientadores, com autenticacao Firebase, busca global, conexoes academicas, chat, workspaces de equipe, agenda consolidada, dashboard docente, perfil profissional e central local de arquivos.
 
 O projeto roda em Windows com .NET 8 e usa uma shell principal em `MainWindow` para concentrar os modulos operacionais do aluno. Hoje ele cobre tanto fluxo individual de apresentacao profissional quanto colaboracao academica entre equipes.
 
@@ -39,10 +39,12 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 ## Estado Atual do Projeto
 
 - Plataforma: `net8.0-windows` com `UseWPF=true`.
-- Interface principal: shell lateral em `MainWindow` com modulos de Chats, Conexoes, Equipes, Calendario, Arquivos e Configuracoes.
+- Interface principal: shell lateral em `MainWindow` com modulos de Chats, Conexoes, Equipes, Docencia, Calendario, Arquivos e Configuracoes.
 - Persistencia remota: Firebase Authentication + Firestore via chamadas HTTP diretas.
 - Persistencia local adicional: area de Arquivos em `%LocalAppData%\Obsseract\FilesHub\{userId}`.
+- Configuracao remota: `AppConfig.cs` centraliza `FirebaseApiKey`, `FirebaseProjectId` e URLs do Firestore com suporte a `appsettings.local.json` e variaveis de ambiente.
 - Status de compilacao desta base: `dotnet build MeuApp.csproj` concluido com `0 Warning(s)` e `0 Error(s)`.
+- Status de testes automatizados: `dotnet test MeuApp.Tests/MeuApp.Tests.csproj` concluido com `6` testes aprovados.
 - Regras de seguranca do Firestore: arquivo raiz `firestore.rules`.
 - Logs de debug: `logs\AppDebug.log` sob a pasta de saida da aplicacao.
 - Log de erros de startup/UI: `MeuApp_Errors.log` na pasta de saida.
@@ -52,13 +54,15 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 ### 1. Autenticacao e onboarding
 
 - Login e cadastro com Firebase Authentication.
+- Cadastro com papel explicito de aluno ou professor orientador.
 - Bootstrap de perfil local logo apos autenticacao, com hidratacao posterior via Firestore.
+- Persistencia de papel, departamento academico, foco de orientacao e janela de atendimento no documento `users/{userId}`.
 - Suporte a recuperacao de fluxo quando perfil remoto ainda nao foi totalmente carregado.
 - Handlers globais de excecao na app para evitar falhas silenciosas de startup/UI.
 
 ### 2. Busca de usuarios e conexoes
 
-- Busca por nome, matricula ou email na colecao `users`.
+- Busca global por nome, matricula, email, equipe, conversa e materiais do hub local.
 - Cria solicitacoes de conexao entre alunos.
 - Mantem estados de conexao como `pendingIncoming`, `pendingOutgoing` e `connected`.
 - Mostra uma aba dedicada para solicitacoes recebidas, convites enviados, notificacoes e rede ativa.
@@ -74,33 +78,48 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 ### 4. Equipes e workspace de projeto
 
 - Criacao de equipes com curso, turma, UCs e membros.
+- Criacao de equipes com semestre letivo, template academico e papel de cada participante.
 - Persistencia em `teams` com referencias auxiliares em `userTeams` para carregamento por usuario.
 - Workspace com indicadores de membros, tarefas, progresso, atrasos e entregas.
+- Templates por curso/disciplina via `AcademicProjectTemplateCatalog` para preencher milestones, timeline e orientacao inicial.
+- Camada de permissoes por papel via `TeamPermissionService` com diferenca entre aluno, lider e professor orientador.
 - Views de board em tres estilos:
   - Trello
   - Kanban
   - CSD (Certainties, Assumptions, Doubts)
-- Gestao de tarefas com prioridade, vencimento e responsaveis.
-- Gestao de milestones/entregas do projeto.
+- Gestao de tarefas com prioridade, vencimento, responsaveis, horas estimadas, pontos de carga, papel recomendado e revisao docente.
+- Gestao de milestones/entregas do projeto com mencoes, comentarios, anexos e sinalizacao de revisao do professor.
 - Gestao de prazo principal e status do projeto.
+- Timeline academica por semestre, leitura de carga por membro e brief automatico de apoio ao contexto academico.
 - Notificacoes internas da equipe para movimentacoes relevantes.
-- Upload de materiais da equipe, incluindo logo, imagens, documentos e planos.
+- Upload de materiais da equipe, incluindo logo, imagens, documentos e planos, com escopo de permissao, versao e metadados de sincronizacao.
 
-### 5. Agenda integradora
+### 5. Dashboard docente
+
+- Painel dedicado para professor orientador acompanhar varias equipes ao mesmo tempo.
+- Agrupa equipes por curso e turma.
+- Usa `AcademicRiskEngine` para medir risco, carga, atrasos, marcos pendentes e recomendacao automatica.
+- Permite saltar direto para agenda filtrada ou abrir o workspace da equipe em foco.
+
+### 6. Agenda integradora
 
 - Painel consolidado no modulo `Calendario`.
 - Junta prazo principal do projeto, milestones abertas e tarefas com vencimento.
+- Junta tambem itens da timeline academica do semestre.
 - Exibe foco imediato, janela dos proximos 7 dias, radar por equipe, atividade recente e leitura rapida do semestre.
+- Filtros por equipe, tipo, status e janela de datas.
+- Exportacao semanal em Excel (`.xlsx`) e PDF direto da agenda filtrada.
 - Acoes rapidas da agenda permitem, sem sair do calendario:
   - criar nova entrega;
   - ajustar prazo principal do projeto;
   - criar nova tarefa do board.
 - Cards da agenda podem abrir a equipe correspondente diretamente.
 
-### 6. Perfil profissional do aluno
+### 7. Perfil profissional do aluno
 
 - Avatar por camadas com corpo, cabelo, acessorio e roupas.
 - Nickname, titulo profissional, bio, habilidades e linguagens.
+- Papel academico, departamento, foco academico e janela de atendimento.
 - Links externos como portfolio e LinkedIn.
 - Galeria profissional com dois modos:
   - imagens independentes;
@@ -109,7 +128,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 - Projetos em destaque carregados a partir das equipes visiveis ao usuario.
 - Tela publica de perfil com viewer somente leitura.
 
-### 7. Viewer de imagens e galeria
+### 8. Viewer de imagens e galeria
 
 - Janela dedicada para visualizar imagem ou sequencia de slides.
 - Modo proprietario com ajuste de enquadramento.
@@ -117,7 +136,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 - Painel lateral com contexto, descricao, zoom, contador e trilha de navegacao da galeria.
 - Suporte a albuns/eventos dentro da galeria profissional.
 
-### 8. Arquivos e CHOAS
+### 9. Arquivos e CHOAS
 
 - Hub local de arquivos com classificacao por contexto: projeto, sessao, trabalho e atividade.
 - Persistencia local por usuario em `%LocalAppData%\Obsseract\FilesHub\{userId}`.
@@ -131,11 +150,12 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
   - documentos Word, planilhas e apresentacoes via OpenXML.
 - Mascote/assistente visual CHOAS dentro da experiencia de arquivos.
 
-### 9. Debug, teste e apoio operacional
+### 10. Debug, teste e apoio operacional
 
 - Botao `🧪` no topo da app para diagnostico de conexao com Firebase.
 - Atalho `Ctrl+D` para ativar logging e abrir o arquivo de log.
 - Guias internos no repositorio para busca, equipes, Firebase e persistencia.
+- Projeto `MeuApp.Tests` com cobertura automatizada da base academica nova: permissoes, risco, templates e helpers de configuracao.
 
 ## Arquitetura Tecnica
 
@@ -150,7 +170,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 **Dominio / modelos**
 
 - `UserProfile`, `UserInfo`, `Conversation`, `ChatMessage`, `TeamWorkspaceInfo` e modelos associados.
-- O dominio de equipes cobre board, milestones, materiais, notificacoes e chat de projeto.
+- O dominio de equipes cobre board, milestones, timeline do semestre, comentarios, anexos, materiais versionados, notificacoes e chat de projeto.
 
 **Servicos de integracao**
 
@@ -159,6 +179,10 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 - `TeamService`: persistencia de equipes e referencias por usuario.
 - `UserSearchService`: leitura e filtro de usuarios no Firestore.
 - `FirebaseConnectionTester`: diagnostico operacional.
+- `AcademicRiskEngine`: leitura executiva de risco, atraso e carga por membro/equipe.
+- `AcademicProjectTemplateCatalog`: modelos academicos por curso/disciplina.
+- `TeamPermissionService`: normalizacao de papeis e permissoes do workspace.
+- `AppConfig`: configuracao central do Firebase e construcao das URLs do Firestore.
 
 **Persistencia**
 
@@ -206,7 +230,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 |---|---|
 | `ChatMessage.cs` | Modelo de mensagem com suporte a edicao, exclusao logica e stickers. |
 | `Conversation.cs` | Modelo de conversa privada com preview e status de leitura. |
-| `TeamModels.cs` | Modelos publicos de equipe, milestones, assets, board, notificacoes e chat do projeto. |
+| `TeamModels.cs` | Modelos publicos de equipe, milestones, timeline, permissoes, comentarios, anexos, assets, board, notificacoes e chat do projeto. |
 
 ### Servicos
 
@@ -217,6 +241,10 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 | `TeamService.cs` | Criacao, atualizacao, carga e exclusao de equipes; sincroniza `teams` e `userTeams`. |
 | `UserSearchService.cs` | Busca usuarios na colecao `users` e filtra localmente os matches. |
 | `FirebaseConnectionTester.cs` | Testa token, conexao Firestore, contagem de documentos e amostra de dados. |
+| `AcademicRiskEngine.cs` | Gera snapshots de risco, carga de membros e resumo para dashboard docente. |
+| `AcademicProjectTemplateCatalog.cs` | Catalogo de templates de projeto por curso/disciplina. |
+| `TeamPermissionService.cs` | Regras de papel e acesso dentro das equipes. |
+| `AppConfig.cs` | Leitura de configuracao Firebase via arquivo local ou variavel de ambiente. |
 
 ### Utilitarios e suporte
 
@@ -231,6 +259,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 | Arquivo | Responsabilidade |
 |---|---|
 | `firestore.rules` | Regras atuais de seguranca para `users`, `conversations`, `teams`, `connections`, `userTeams` e `userConnections`. |
+| `appsettings.sample.json` | Exemplo de configuracao local do Firebase para desenvolvimento. |
 | `FIREBASE_SECURITY_RULES.md` | Guia para publicar e validar as regras no Firestore. |
 
 ### Guias internos
@@ -260,7 +289,7 @@ Colecoes e caminhos relevantes:
 
 | Colecao | Uso principal |
 |---|---|
-| `users/{userId}` | Perfil profissional do aluno, galeria e projetos destacados. |
+| `users/{userId}` | Perfil profissional, papel academico, dados de orientacao, galeria e projetos destacados. |
 | `conversations/{conversationId}` | Metadata da conversa privada. |
 | `conversations/{conversationId}/messages/{messageId}` | Mensagens individuais. |
 | `teams/{teamId}` | Workspace completo da equipe. |
@@ -276,8 +305,11 @@ Uma equipe guarda, entre outros campos:
 - metadados de controle (`createdBy`, `createdAt`, `updatedAt`, `isActive`);
 - progresso (`projectProgress`, `projectDeadline`, `projectStatus`);
 - membros e UCs;
-- milestones;
-- assets;
+- semestre, template e timestamp de sincronizacao;
+- access rules por papel;
+- timeline academica do semestre;
+- milestones com comentarios, mencoes e anexos;
+- assets com escopo, versao e historico;
 - colunas e cards do board;
 - notificacoes e chat do projeto;
 - quadro CSD.
@@ -308,7 +340,7 @@ Esse modulo e local ao dispositivo atual. Ele nao sincroniza automaticamente com
 - Windows 10 ou 11.
 - .NET 8 SDK instalado.
 - Runtime do WebView2 instalado para preview interno de PDF.
-- Acesso ao projeto Firebase configurado no codigo.
+- Acesso ao projeto Firebase configurado via arquivo local ou variavel de ambiente.
 - Firestore ativo e com regras publicadas a partir de `firestore.rules`.
 
 ### Passos recomendados
@@ -316,9 +348,9 @@ Esse modulo e local ao dispositivo atual. Ele nao sincroniza automaticamente com
 1. Clone o repositorio.
 2. Entre na pasta do projeto.
 3. Publique as regras do arquivo `firestore.rules` no projeto Firebase correto.
-4. Revise os identificadores de Firebase no codigo, especialmente constantes como:
-   - `FirebaseProjectId`
-   - `FirebaseApiKey`
+4. Crie `appsettings.local.json` a partir de `appsettings.sample.json` ou configure:
+  - `OBSSERACT_FIREBASE_API_KEY`
+  - `OBSSERACT_FIREBASE_PROJECT_ID`
 5. Restaure os pacotes:
 
 ```powershell
@@ -337,11 +369,17 @@ dotnet build "MeuApp.csproj"
 dotnet run
 ```
 
+8. Execute os testes automatizados quando alterar a fundacao academica:
+
+```powershell
+dotnet test "MeuApp.Tests/MeuApp.Tests.csproj"
+```
+
 ### Observacoes importantes de configuracao
 
 - O projeto define `RestorePackagesPath` para `.nuget\packages` dentro do proprio repositorio.
 - Imagens em `img\Archives\**\*` sao copiadas para a saida como `Content`.
-- Pastas de artefato alternativas como `obj_codex`, `obj_verify` e `bin_verify` sao excluidas explicitamente para evitar duplicacao de compilacao WPF.
+- Pastas de artefato alternativas como `obj_codex`, `obj_verify`, `bin_verify` e projetos auxiliares como `MeuApp.Tests` sao excluidos explicitamente do projeto WPF principal para evitar duplicacao de compilacao.
 
 ## Fluxos Principais
 

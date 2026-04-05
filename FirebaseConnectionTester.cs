@@ -13,7 +13,6 @@ namespace MeuApp
     /// </summary>
     public class FirebaseConnectionTester
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
         private readonly string _idToken;
 
@@ -105,7 +104,7 @@ namespace MeuApp
 
             try
             {
-                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users";
+                var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
                 
                 Debug.WriteLine($"  Endpoint: {endpoint}");
                 DebugHelper.WriteLine($"  Endpoint: {endpoint}");
@@ -165,7 +164,7 @@ namespace MeuApp
 
             try
             {
-                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users";
+                var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
                 var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -215,7 +214,7 @@ namespace MeuApp
 
             try
             {
-                var endpoint = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/users";
+                var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
                 var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 

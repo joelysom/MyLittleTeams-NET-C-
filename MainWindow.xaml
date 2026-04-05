@@ -194,6 +194,12 @@
                             <TextBlock Text="Equipes" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
+                    <Button x:Name="ProfessorNavButton" Click="NavButton_Click" Tag="Professor" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal">
+                            <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="16" Height="16" Foreground="#FF7C3AED" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Docência" Style="{StaticResource SidebarNavLabelStyle}"/>
+                        </StackPanel>
+                    </Button>
                     <Button Click="NavButton_Click" Tag="Calendario" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" Padding="12,10" Margin="8,2" BorderThickness="0" Cursor="Hand" HorizontalContentAlignment="Left">
                         <StackPanel Orientation="Horizontal">
                             <iconPacks:PackIconMaterial Kind="CalendarMonthOutline" Width="16" Height="16" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
@@ -255,7 +261,7 @@
                     
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                         <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource AccentMutedBrush}" Margin="0,0,12,0">
-                            <iconPacks:PackIconMaterial Kind="AutoFix" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial Kind="CloudCheckOutline" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock x:Name="WelcomeText"
                                    Text="Bem-vindo"
@@ -273,7 +279,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="Pesquisar conexões..." KeyDown="SearchFriendsBox_KeyDown" TextChanged="SearchFriendsBox_TextChanged"/>
+                            <TextBox x:Name="SearchFriendsBox" Grid.Column="0" Background="Transparent" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" BorderThickness="0" VerticalAlignment="Center" Padding="8,0,0,0" mah:TextBoxHelper.Watermark="Pesquisar pessoas, equipes, chats ou arquivos..." KeyDown="SearchFriendsBox_KeyDown" TextChanged="SearchFriendsBox_TextChanged"/>
                             <Button Grid.Column="1" Background="Transparent" Foreground="{DynamicResource AccentBrush}" Padding="8" Width="40" Cursor="Hand" BorderThickness="0" Click="SearchFriends_Click">
                                 <iconPacks:PackIconMaterial Kind="Magnify" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Button>
@@ -520,6 +526,23 @@
                                         </StackPanel>
                                     </Grid>
 
+                                    <Grid Margin="0,0,0,12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Margin="0,0,10,0">
+                                            <TextBlock Text="Semestre letivo" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <TextBox x:Name="TeamAcademicTermTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                            <TextBlock Text="Modelo acadêmico" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                            <ComboBox x:Name="TeamTemplateComboBox" Height="44" Padding="12,8" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" DisplayMemberPath="Title"/>
+                                        </StackPanel>
+                                    </Grid>
+
                                     <StackPanel Margin="0,0,0,12">
                                         <TextBlock Text="UCs" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
                                         <Grid>
@@ -559,6 +582,23 @@
 
                                     <StackPanel Margin="0,0,0,18">
                                         <TextBlock Text="Adicionar alunos" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Margin="0,0,10,0">
+                                                <TextBlock Text="Entrada inicial" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                                <ComboBox x:Name="TeamMemberRoleComboBox" Height="40" Padding="12,8" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="12" IsEnabled="False">
+                                                    <ComboBoxItem Content="Aluno" Tag="student"/>
+                                                </ComboBox>
+                                            </StackPanel>
+
+                                            <Border Grid.Column="1" Margin="10,20,0,0" Padding="12" Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="12">
+                                                <TextBlock x:Name="TeamMemberRoleHintText" Text="Toda nova entrada começa como aluno. A liderança discente é definida depois pelo professor focal." FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                            </Border>
+                                        </Grid>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*"/>
@@ -579,7 +619,7 @@
                                                       SelectionChanged="TeamMemberInput_SelectionChanged"
                                                       KeyDown="TeamMemberInput_KeyDown"/>
                                             <Button Grid.Column="1"
-                                                    Content="Adicionar aluno"
+                                                    Content="Adicionar participante"
                                                     Margin="10,0,0,0"
                                                     Padding="16,10"
                                                     MinWidth="126"
@@ -590,7 +630,7 @@
                                                     Cursor="Hand"
                                                     Click="AddTeamMember_Click"/>
                                         </Grid>
-                                        <TextBlock Text="Digite o nome ou selecione um colega para incluir na equipe." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Digite o nome e confirme a entrada do aluno. Depois, se necessário, o professor focal define a liderança discente da equipe." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
                                         <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="12" MinHeight="58">
                                             <WrapPanel x:Name="TeamMembersPanel" ItemHeight="34" ItemWidth="Auto"/>
                                         </Border>
@@ -621,6 +661,21 @@
                                 <StackPanel>
                                     <TextBlock Text="Equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                     <TextBlock Text="Selecione uma equipe para abrir os detalhes, materiais e painéis de gestão." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
+                                    <TextBox x:Name="TeamListSearchBox"
+                                             Height="42"
+                                             Padding="12,10"
+                                             Margin="0,0,0,8"
+                                             Background="{DynamicResource SearchBackgroundBrush}"
+                                             BorderBrush="{DynamicResource SearchBorderBrush}"
+                                             Foreground="{DynamicResource PrimaryTextBrush}"
+                                             FontSize="13"
+                                             TextChanged="TeamListSearchBox_TextChanged"/>
+                                    <TextBlock x:Name="TeamListSearchStatusText"
+                                               Text=""
+                                               FontSize="11"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               Margin="0,0,0,12"
+                                               TextWrapping="Wrap"/>
                                     <StackPanel x:Name="TeamListPanel"/>
                                 </StackPanel>
                             </Border>
@@ -665,6 +720,27 @@
                             <StackPanel x:Name="ConnectionsSectionsHost" Orientation="Vertical"/>
                         </StackPanel>
                     </ScrollViewer>
+
+                    <!-- Professor Dashboard -->
+                    <Grid x:Name="ProfessorDashboardContent" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Orientation="Vertical" Margin="0,0,0,18">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="20" Height="20" Foreground="#FF7C3AED" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Dashboard docente" Style="{StaticResource DisplaySectionTitleStyle}"/>
+                            </StackPanel>
+                            <TextBlock Text="Leia risco, atrasos, checkpoints, carga dos membros e síntese do semestre por turma." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="ProfessorDashboardStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <ScrollViewer Grid.Row="1" VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="ProfessorDashboardHost" Orientation="Vertical" Margin="0,0,0,24"/>
+                        </ScrollViewer>
+                    </Grid>
 
                     <!-- Calendar -->
                     <Grid x:Name="CalendarContent" Visibility="Collapsed">
@@ -855,6 +931,45 @@
                                         <TextBlock Text="Digite ou selecione uma linguagem e pressione Enter. Ela aparecerá como tag removível logo abaixo." FontSize="11" Foreground="{DynamicResource TertiaryTextBrush}" Margin="0,8,0,8" TextWrapping="Wrap"/>
                                         <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="12" MinHeight="58">
                                             <WrapPanel x:Name="ProgrammingLanguagesTagsPanel" ItemHeight="34" ItemWidth="Auto"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Área acadêmica" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="AcademicDepartmentTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                        <TextBlock Text="Foco acadêmico" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="AcademicFocusTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,0,0,12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Margin="0,0,10,0">
+                                        <TextBlock Text="Janela de atendimento" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <TextBox x:Name="OfficeHoursTextBox" Height="44" Padding="12,10" Background="{DynamicResource SearchBackgroundBrush}" BorderBrush="{DynamicResource SearchBorderBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                        <TextBlock Text="Perfil e acesso" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,6"/>
+                                        <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="14,12">
+                                            <StackPanel>
+                                                <TextBlock x:Name="AccountRoleText" Text="Aluno" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="13" FontWeight="SemiBold"/>
+                                                <TextBlock x:Name="ProfessorAccessText" Text="student-workspace" Margin="0,4,0,0" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" TextWrapping="Wrap"/>
+                                            </StackPanel>
                                         </Border>
                                     </StackPanel>
                                 </Grid>

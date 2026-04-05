@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using System.IO;
+using System.Text;
 
 namespace MeuApp;
 
@@ -19,7 +20,7 @@ public partial class App : Application
             // Handler para exceções não tratadas do AppDomain
             AppDomain.CurrentDomain.UnhandledException += (s, ex) =>
             {
-                string errorMsg = $"[UNHANDLED] {ex.ExceptionObject}\n{ex.ToString()}";
+                string errorMsg = $"[UNHANDLED]\n{FormatExceptionDetails(ex.ExceptionObject as Exception) ?? ex.ExceptionObject?.ToString() ?? "Unknown unhandled exception"}";
                 LogToFile(errorMsg);
                 MessageBox.Show($"Erro não capturado:\n\n{ex.ExceptionObject}", "Erro Crítico");
                 Environment.Exit(1);
@@ -28,9 +29,9 @@ public partial class App : Application
             // Handler para exceções da UI
             this.DispatcherUnhandledException += (s, ex) =>
             {
-                string errorMsg = $"[UI_ERROR] {ex.Exception.Message}\n{ex.Exception.StackTrace}";
+                string errorMsg = $"[UI_ERROR]\n{FormatExceptionDetails(ex.Exception)}";
                 LogToFile(errorMsg);
-                MessageBox.Show($"Erro na interface:\n\n{ex.Exception.Message}\n\nVerifique {_logFile}", "Erro na Tela");
+                MessageBox.Show($"Erro na interface:\n\n{BuildUserFacingErrorSummary(ex.Exception)}\n\nVerifique {_logFile}", "Erro na Tela");
                 ex.Handled = true;
             };
 
@@ -38,11 +39,61 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            string errorMsg = $"[STARTUP_ERROR] {ex.Message}\n{ex.StackTrace}";
+            string errorMsg = $"[STARTUP_ERROR]\n{FormatExceptionDetails(ex)}";
             LogToFile(errorMsg);
-            MessageBox.Show($"Erro ao iniciar:\n\n{ex.Message}\n\nLog salvo em: {_logFile}", "Erro na Inicialização");
+            MessageBox.Show($"Erro ao iniciar:\n\n{BuildUserFacingErrorSummary(ex)}\n\nLog salvo em: {_logFile}", "Erro na Inicialização");
             Environment.Exit(1);
         }
+    }
+
+    private static string BuildUserFacingErrorSummary(Exception? exception)
+    {
+        if (exception is null)
+        {
+            return "Erro desconhecido.";
+        }
+
+        var root = exception;
+        while (root.InnerException is not null)
+        {
+            root = root.InnerException;
+        }
+
+        return root == exception
+            ? $"{exception.GetType().Name}: {exception.Message}"
+            : $"{exception.GetType().Name}: {exception.Message}\n\nCausa raiz: {root.GetType().Name}: {root.Message}";
+    }
+
+    private static string FormatExceptionDetails(Exception? exception)
+    {
+        if (exception is null)
+        {
+            return "Unknown exception.";
+        }
+
+        var builder = new StringBuilder();
+        var current = exception;
+        var depth = 0;
+
+        while (current is not null)
+        {
+            if (depth > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.AppendLine($"[{depth}] {current.GetType().FullName}: {current.Message}");
+
+            if (!string.IsNullOrWhiteSpace(current.StackTrace))
+            {
+                builder.AppendLine(current.StackTrace);
+            }
+
+            current = current.InnerException;
+            depth++;
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
     private static void LogToFile(string message)

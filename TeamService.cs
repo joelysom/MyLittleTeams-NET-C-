@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace MeuApp
 {
@@ -13,7 +14,6 @@ namespace MeuApp
     /// </summary>
     public class TeamService
     {
-        private const string FirebaseProjectId = "obsseractpi";
         private static readonly HttpClient httpClient = new HttpClient();
         private readonly string _idToken;
         private readonly string _currentUserId;
@@ -58,8 +58,13 @@ namespace MeuApp
                 var updatedAt = DateTime.UtcNow;
                 team.CreatedAt = createdAt;
                 team.UpdatedAt = updatedAt;
+                team.LastRealtimeSyncAt = updatedAt;
+                NormalizeTeamWorkItems(team);
                 var createdAtValue = ToFirestoreTimestamp(createdAt);
                 var updatedAtValue = ToFirestoreTimestamp(updatedAt);
+                var accessRules = TeamPermissionService.NormalizeAccessRules(team.AccessRules);
+                team.AccessRules = accessRules;
+                var memberRoleMap = BuildMemberRoleMap(team.Members);
 
                 var teamData = new
                 {
@@ -70,18 +75,35 @@ namespace MeuApp
                         course = new { stringValue = team.Course ?? "" },
                         className = new { stringValue = team.ClassName ?? "" },
                         classId = new { stringValue = team.ClassId },
+                        academicTerm = new { stringValue = team.AcademicTerm ?? "" },
+                        templateId = new { stringValue = team.TemplateId ?? "" },
+                        templateName = new { stringValue = team.TemplateName ?? "" },
                         createdBy = new { stringValue = team.CreatedBy },
                         createdAt = new { timestampValue = createdAtValue },
                         updatedAt = new { timestampValue = updatedAtValue },
+                        lastRealtimeSyncAt = CreateTimestampOrNullValue(team.LastRealtimeSyncAt),
                         projectProgress = new { integerValue = team.ProjectProgress.ToString() },
                         projectDeadline = CreateTimestampOrNullValue(team.ProjectDeadline),
                         projectStatus = new { stringValue = team.ProjectStatus ?? "Planejamento" },
-                        milestones = new { arrayValue = new { values = ConvertMilestonesToFirestoreArray(team.Milestones) } },
+                        teacherNotes = new { stringValue = team.TeacherNotes ?? "" },
+                        focalProfessorUserId = new { stringValue = team.FocalProfessorUserId ?? "" },
+                        focalProfessorName = new { stringValue = team.FocalProfessorName ?? "" },
+                        professorSupervisorUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorUserIds) } },
+                        professorSupervisorNames = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorNames) } },
+                        defaultFilePermissionScope = new { stringValue = team.DefaultFilePermissionScope ?? "team" },
+                        milestones = new { arrayValue = new { values = Array.Empty<object>() } },
                         members = new { arrayValue = new { values = ConvertMembersToFirestoreArray(team.Members) } },
                         memberIds = new { arrayValue = new { values = ConvertMemberIdsToFirestoreArray(team.Members) } },
+                        memberRolesByUserId = ConvertStringMapToFirestoreMap(memberRoleMap),
+                        leaderIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "leader") } },
+                        professorIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "professor") } },
+                        coordinatorIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "coordinator") } },
+                        studentIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "student") } },
                         ucs = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.Ucs) } },
+                        semesterTimeline = new { arrayValue = new { values = ConvertTimelineToFirestoreArray(team.SemesterTimeline) } },
+                        accessRules = new { arrayValue = new { values = ConvertAccessRulesToFirestoreArray(accessRules) } },
                         assets = new { arrayValue = new { values = ConvertAssetsToFirestoreArray(team.Assets) } },
-                        taskColumns = new { arrayValue = new { values = ConvertTaskColumnsToFirestoreArray(team.TaskColumns) } },
+                        taskColumns = new { arrayValue = new { values = ConvertTaskColumnsToFirestoreArray(team.TaskColumns, includeCards: false) } },
                         notifications = new { arrayValue = new { values = ConvertNotificationsToFirestoreArray(team.Notifications) } },
                         chatMessages = new { arrayValue = new { values = ConvertChatMessagesToFirestoreArray(team.ChatMessages) } },
                         csdBoard = ConvertCsdBoardToFirestoreMap(team.CsdBoard),
@@ -90,7 +112,7 @@ namespace MeuApp
                 };
 
                 // URL para salvar no Firestore - usando POST com documento específico
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/teams/{teamId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"teams/{teamId}");
 
                 var requestBody = JsonSerializer.Serialize(teamData);
                 DebugHelper.WriteLine($"[TeamService.SaveTeam] URL: {url}");
@@ -112,6 +134,13 @@ namespace MeuApp
                     var errorMsg = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
                     DebugHelper.WriteLine($"[TeamService.SaveTeam] ❌ ERRO AO SALVAR: {errorMsg}");
                     return TeamOperationResult.Fail(errorMsg);
+                }
+
+                var workItemsResult = await SyncTeamWorkItemsAsync(teamId, team);
+                if (!workItemsResult.Success)
+                {
+                    DebugHelper.WriteLine($"[TeamService.SaveTeam] ❌ ERRO AO SALVAR SUBCOLEÇÕES: {workItemsResult.ErrorMessage}");
+                    return workItemsResult;
                 }
 
                 // Salvar referência em userTeams para carregamento rápido
@@ -208,7 +237,7 @@ namespace MeuApp
                     }
                 };
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/userTeams/{docId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"userTeams/{docId}");
                 var requestBody = JsonSerializer.Serialize(referenceData);
 
                 var request = new HttpRequestMessage(new HttpMethod("PATCH"), url);
@@ -314,6 +343,197 @@ namespace MeuApp
             }
         }
 
+        public async Task<List<TeamWorkspaceInfo>> LoadTeamsForUserAsync(string userId, int? maxTeams = null)
+        {
+            var teams = new List<TeamWorkspaceInfo>();
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return teams;
+            }
+
+            try
+            {
+                var teamIds = await GetUserTeamIdsAsync(userId);
+                var normalizedIds = teamIds
+                    .Where(teamId => !string.IsNullOrWhiteSpace(teamId))
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+
+                if (maxTeams.HasValue && maxTeams.Value > 0)
+                {
+                    normalizedIds = normalizedIds.Take(maxTeams.Value);
+                }
+
+                var loadTasks = normalizedIds
+                    .Select(LoadTeamByIdAsync)
+                    .ToArray();
+
+                var loadedTeams = loadTasks.Length > 0
+                    ? await Task.WhenAll(loadTasks)
+                    : Array.Empty<TeamWorkspaceInfo?>();
+
+                foreach (var team in loadedTeams)
+                {
+                    if (team != null)
+                    {
+                        teams.Add(team);
+                    }
+                }
+
+                return teams
+                    .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(team => team.UpdatedAt)
+                    .ThenBy(team => team.TeamName)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.LoadTeamsForUser] Erro para '{userId}': {ex.Message}");
+                return teams;
+            }
+        }
+
+        public async Task<List<TeamWorkspaceInfo>> SearchTeamsAsync(string query, int maxResults = 12)
+        {
+            var results = new List<TeamWorkspaceInfo>();
+            var normalizedQuery = (query ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return results;
+            }
+
+            try
+            {
+                DebugHelper.WriteLine($"[TeamService.SearchTeams] Buscando equipes com query '{normalizedQuery}'...");
+
+                var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl("teams"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    DebugHelper.WriteLine($"[TeamService.SearchTeams] Erro HTTP: {response.StatusCode}");
+                    return results;
+                }
+
+                using var doc = JsonDocument.Parse(jsonContent);
+                if (!doc.RootElement.TryGetProperty("documents", out var documentsArray))
+                {
+                    return results;
+                }
+
+                foreach (var teamDoc in documentsArray.EnumerateArray())
+                {
+                    if (!teamDoc.TryGetProperty("fields", out var fields))
+                    {
+                        continue;
+                    }
+
+                    var team = ParseTeamFromFirestore(fields);
+                    if (team == null || !TeamMatchesQuery(team, normalizedQuery))
+                    {
+                        continue;
+                    }
+
+                    results.Add(team);
+                }
+
+                return results
+                    .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .OrderByDescending(team => team.UpdatedAt)
+                    .ThenBy(team => team.TeamName)
+                    .Take(Math.Max(1, maxResults))
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.SearchTeams] Erro: {ex.Message}");
+                return results;
+            }
+        }
+
+        public async Task<TeamOperationResult> UpdateProfessorFocusAsync(TeamWorkspaceInfo team)
+        {
+            try
+            {
+                DebugHelper.WriteLine($"\n[TeamService.UpdateProfessorFocus] ===== INICIANDO =====");
+
+                if (team == null || string.IsNullOrWhiteSpace(team.ClassId) || string.IsNullOrWhiteSpace(team.TeamName))
+                {
+                    return TeamOperationResult.Fail("Equipe inválida para atualizar supervisão focal.");
+                }
+
+                var teamId = string.IsNullOrWhiteSpace(team.TeamId)
+                    ? GenerateTeamId(team.ClassId, team.TeamName)
+                    : NormalizeTeamCode(team.TeamId);
+                team.TeamId = teamId;
+                team.CreatedBy = string.IsNullOrWhiteSpace(team.CreatedBy) ? _currentUserId : team.CreatedBy;
+
+                var updatedAt = DateTime.UtcNow;
+                team.UpdatedAt = updatedAt;
+                team.LastRealtimeSyncAt = updatedAt;
+                NormalizeTeamWorkItems(team);
+
+                var memberRoleMap = BuildMemberRoleMap(team.Members);
+                var requestBody = JsonSerializer.Serialize(new
+                {
+                    fields = new
+                    {
+                        updatedAt = new { timestampValue = ToFirestoreTimestamp(updatedAt) },
+                        lastRealtimeSyncAt = CreateTimestampOrNullValue(team.LastRealtimeSyncAt),
+                        focalProfessorUserId = new { stringValue = team.FocalProfessorUserId ?? string.Empty },
+                        focalProfessorName = new { stringValue = team.FocalProfessorName ?? string.Empty },
+                        professorSupervisorUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorUserIds) } },
+                        professorSupervisorNames = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorNames) } },
+                        members = new { arrayValue = new { values = ConvertMembersToFirestoreArray(team.Members) } },
+                        memberIds = new { arrayValue = new { values = ConvertMemberIdsToFirestoreArray(team.Members) } },
+                        memberRolesByUserId = ConvertStringMapToFirestoreMap(memberRoleMap),
+                        leaderIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "leader") } },
+                        professorIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "professor") } },
+                        coordinatorIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "coordinator") } },
+                        studentIds = new { arrayValue = new { values = ConvertRoleMemberIdsToFirestoreArray(team.Members, "student") } },
+                        notifications = new { arrayValue = new { values = ConvertNotificationsToFirestoreArray(team.Notifications) } }
+                    }
+                });
+
+                var request = new HttpRequestMessage(new HttpMethod("PATCH"), AppConfig.BuildFirestoreDocumentUrl($"teams/{teamId}"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                DebugHelper.WriteLine($"[TeamService.UpdateProfessorFocus] Status Code: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorMsg = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                    DebugHelper.WriteLine($"[TeamService.UpdateProfessorFocus] ❌ ERRO AO SALVAR DOC PRINCIPAL: {errorMsg}");
+                    return TeamOperationResult.Fail(errorMsg);
+                }
+
+                var referenceResult = await SaveTeamReferenceForUserAsync(_currentUserId, teamId, team.TeamName);
+                if (!referenceResult.Success)
+                {
+                    DebugHelper.WriteLine($"[TeamService.UpdateProfessorFocus] ⚠️ Supervisão focal salva, mas a referência rápida falhou: {referenceResult.ErrorMessage}");
+                    return new TeamOperationResult
+                    {
+                        Success = true,
+                        Message = referenceResult.ErrorMessage ?? string.Empty
+                    };
+                }
+
+                DebugHelper.WriteLine($"[TeamService.UpdateProfessorFocus] ✅ Supervisão focal atualizada para '{team.TeamName}'.");
+                return TeamOperationResult.Ok();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.UpdateProfessorFocus] ❌ EXCEÇÃO: {ex.Message}");
+                return TeamOperationResult.Fail(ex.Message);
+            }
+        }
+
         /// <summary>
         /// Obtém os IDs das equipes de um usuário
         /// </summary>
@@ -325,7 +545,7 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[TeamService.GetUserTeamIds] Buscando equipes para '{userId}'...");
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents:runQuery";
+                var url = AppConfig.BuildFirestoreRunQueryUrl();
                 var requestBody = JsonSerializer.Serialize(new
                 {
                     structuredQuery = new
@@ -410,7 +630,7 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[TeamService.LoadTeamById] Carregando '{teamId}'...");
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/teams/{teamId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"teams/{teamId}");
 
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
@@ -431,6 +651,10 @@ namespace MeuApp
                     if (root.TryGetProperty("fields", out var fields))
                     {
                         var team = ParseTeamFromFirestore(fields);
+                        if (team != null)
+                        {
+                            await PopulateTeamWorkItemsFromSubcollectionsAsync(team);
+                        }
                         return team;
                     }
                 }
@@ -490,13 +714,25 @@ namespace MeuApp
                     ? GenerateTeamId(team.ClassId, team.TeamName)
                     : NormalizeTeamCode(team.TeamId);
 
+                var workItemCleanupResult = await DeleteTeamWorkItemDocumentsAsync(teamId);
+                if (!workItemCleanupResult.Success)
+                {
+                    return workItemCleanupResult;
+                }
+
+                var assetCleanupResult = await DeleteAssetContentDocumentsAsync(team);
+                if (!assetCleanupResult.Success)
+                {
+                    return assetCleanupResult;
+                }
+
                 var cleanupResult = await DeleteTeamReferencesByTeamIdAsync(teamId);
                 if (!cleanupResult.Success)
                 {
                     return cleanupResult;
                 }
 
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/teams/{teamId}";
+                var url = AppConfig.BuildFirestoreDocumentUrl($"teams/{teamId}");
 
                 var request = new HttpRequestMessage(HttpMethod.Delete, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
@@ -550,9 +786,15 @@ namespace MeuApp
                             userId = new { stringValue = member.UserId ?? "" },
                             name = new { stringValue = member.Name ?? "" },
                             email = new { stringValue = member.Email ?? "" },
+                            phone = new { stringValue = member.Phone ?? "" },
                             registration = new { stringValue = member.Registration ?? "" },
                             course = new { stringValue = member.Course ?? "" },
-                            role = new { stringValue = member.Role ?? "member" },
+                            role = new { stringValue = TeamPermissionService.NormalizeRole(member.Role) },
+                            nickname = new { stringValue = member.Nickname ?? "" },
+                            professionalTitle = new { stringValue = member.ProfessionalTitle ?? "" },
+                            academicDepartment = new { stringValue = member.AcademicDepartment ?? "" },
+                            academicFocus = new { stringValue = member.AcademicFocus ?? "" },
+                            officeHours = new { stringValue = member.OfficeHours ?? "" },
                             avatarBody = new { stringValue = member.AvatarBody ?? "" },
                             avatarHair = new { stringValue = member.AvatarHair ?? "" },
                             avatarHat = new { stringValue = member.AvatarHat ?? "" },
@@ -589,6 +831,102 @@ namespace MeuApp
                 .ToArray();
         }
 
+        private Dictionary<string, string> BuildMemberRoleMap(List<UserInfo> members)
+        {
+            return (members ?? new List<UserInfo>())
+                .Where(member => !string.IsNullOrWhiteSpace(member.UserId))
+                .GroupBy(member => member.UserId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => TeamPermissionService.NormalizeRole(group.First().Role),
+                    StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void NormalizeTeamWorkItems(TeamWorkspaceInfo team)
+        {
+            var fallbackOwnerId = string.IsNullOrWhiteSpace(team.CreatedBy) ? _currentUserId : team.CreatedBy;
+
+            team.FocalProfessorUserId = team.FocalProfessorUserId?.Trim() ?? string.Empty;
+            team.FocalProfessorName = team.FocalProfessorName?.Trim() ?? string.Empty;
+            team.ProfessorSupervisorUserIds = (team.ProfessorSupervisorUserIds ?? new List<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Select(userId => userId.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            team.ProfessorSupervisorNames = (team.ProfessorSupervisorNames ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name)
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorUserId) &&
+                !team.ProfessorSupervisorUserIds.Contains(team.FocalProfessorUserId, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorUserIds.Add(team.FocalProfessorUserId);
+            }
+
+            if (!string.IsNullOrWhiteSpace(team.FocalProfessorName) &&
+                !team.ProfessorSupervisorNames.Contains(team.FocalProfessorName, StringComparer.OrdinalIgnoreCase))
+            {
+                team.ProfessorSupervisorNames.Add(team.FocalProfessorName);
+            }
+
+            foreach (var milestone in team.Milestones ?? new List<TeamMilestoneInfo>())
+            {
+                milestone.Id = string.IsNullOrWhiteSpace(milestone.Id) ? Guid.NewGuid().ToString("N") : milestone.Id;
+                milestone.CreatedByUserId = string.IsNullOrWhiteSpace(milestone.CreatedByUserId) ? fallbackOwnerId : milestone.CreatedByUserId;
+                milestone.OwnerUserId = string.IsNullOrWhiteSpace(milestone.OwnerUserId) ? milestone.CreatedByUserId : milestone.OwnerUserId;
+                milestone.CreatedAt = milestone.CreatedAt == default ? DateTime.UtcNow : milestone.CreatedAt;
+                milestone.UpdatedAt = milestone.UpdatedAt == default ? DateTime.UtcNow : milestone.UpdatedAt;
+                milestone.UpdatedByUserId = string.IsNullOrWhiteSpace(milestone.UpdatedByUserId) ? _currentUserId : milestone.UpdatedByUserId;
+                milestone.MentionedUserIds ??= new List<string>();
+                milestone.Comments ??= new List<TeamCommentInfo>();
+                milestone.Attachments ??= new List<TeamAttachmentInfo>();
+            }
+
+            foreach (var column in team.TaskColumns ?? new List<TeamTaskColumnInfo>())
+            {
+                column.Id = string.IsNullOrWhiteSpace(column.Id) ? Guid.NewGuid().ToString("N") : column.Id;
+                foreach (var card in column.Cards ?? new List<TeamTaskCardInfo>())
+                {
+                    card.Id = string.IsNullOrWhiteSpace(card.Id) ? Guid.NewGuid().ToString("N") : card.Id;
+                    card.ColumnId = string.IsNullOrWhiteSpace(card.ColumnId) ? column.Id : card.ColumnId;
+                    card.RequiredRole = TeamPermissionService.NormalizeExecutionRole(card.RequiredRole);
+                    card.CreatedByUserId = string.IsNullOrWhiteSpace(card.CreatedByUserId) ? fallbackOwnerId : card.CreatedByUserId;
+                    card.CreatedAt = card.CreatedAt == default ? DateTime.UtcNow : card.CreatedAt;
+                    card.UpdatedAt = card.UpdatedAt == default ? DateTime.UtcNow : card.UpdatedAt;
+                    card.UpdatedByUserId = string.IsNullOrWhiteSpace(card.UpdatedByUserId) ? _currentUserId : card.UpdatedByUserId;
+                    card.MentionedUserIds ??= new List<string>();
+                    card.Comments ??= new List<TeamCommentInfo>();
+                    card.Attachments ??= new List<TeamAttachmentInfo>();
+                }
+            }
+        }
+
+        private object ConvertStringMapToFirestoreMap(Dictionary<string, string> values)
+        {
+            var fields = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in values)
+            {
+                fields[pair.Key] = new { stringValue = pair.Value ?? string.Empty };
+            }
+
+            return new { mapValue = new { fields } };
+        }
+
+        private object[] ConvertRoleMemberIdsToFirestoreArray(List<UserInfo> members, string role)
+        {
+            return (members ?? new List<UserInfo>())
+                .Where(member => !string.IsNullOrWhiteSpace(member.UserId))
+                .Where(member => string.Equals(TeamPermissionService.NormalizeRole(member.Role), role, StringComparison.OrdinalIgnoreCase))
+                .Select(member => member.UserId)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(userId => new { stringValue = userId })
+                .Cast<object>()
+                .ToArray();
+        }
+
         private object[] ConvertMilestonesToFirestoreArray(List<TeamMilestoneInfo> milestones)
         {
             return milestones.Select(milestone => new
@@ -601,8 +939,16 @@ namespace MeuApp
                         title = new { stringValue = milestone.Title ?? "" },
                         notes = new { stringValue = milestone.Notes ?? "" },
                         status = new { stringValue = milestone.Status ?? "Planejada" },
+                        createdByUserId = new { stringValue = milestone.CreatedByUserId ?? "" },
+                        ownerUserId = new { stringValue = milestone.OwnerUserId ?? "" },
+                        requiresProfessorReview = new { booleanValue = milestone.RequiresProfessorReview },
+                        mentionedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(milestone.MentionedUserIds) } },
+                        comments = new { arrayValue = new { values = ConvertCommentsToFirestoreArray(milestone.Comments) } },
+                        attachments = new { arrayValue = new { values = ConvertAttachmentsToFirestoreArray(milestone.Attachments) } },
                         dueDate = CreateTimestampOrNullValue(milestone.DueDate),
-                        createdAt = new { timestampValue = ToFirestoreTimestamp(milestone.CreatedAt == default ? DateTime.UtcNow : milestone.CreatedAt) }
+                        createdAt = new { timestampValue = ToFirestoreTimestamp(milestone.CreatedAt == default ? DateTime.UtcNow : milestone.CreatedAt) },
+                        updatedAt = new { timestampValue = ToFirestoreTimestamp(milestone.UpdatedAt == default ? DateTime.UtcNow : milestone.UpdatedAt) },
+                        updatedByUserId = new { stringValue = milestone.UpdatedByUserId ?? "" }
                     }
                 }
             }).Cast<object>().ToArray();
@@ -620,14 +966,24 @@ namespace MeuApp
                         category = new { stringValue = asset.Category ?? "" },
                         fileName = new { stringValue = asset.FileName ?? "" },
                         previewImageDataUri = new { stringValue = asset.PreviewImageDataUri ?? "" },
+                        description = new { stringValue = asset.Description ?? "" },
+                        mimeType = new { stringValue = asset.MimeType ?? "" },
+                        folderPath = new { stringValue = asset.FolderPath ?? "" },
+                        permissionScope = new { stringValue = asset.PermissionScope ?? "team" },
+                        storageKind = new { stringValue = asset.StorageKind ?? "firestore-preview" },
+                        storageReference = new { stringValue = asset.StorageReference ?? "" },
+                        sizeBytes = new { integerValue = asset.SizeBytes.ToString() },
+                        version = new { integerValue = asset.Version.ToString() },
                         addedByUserId = new { stringValue = asset.AddedByUserId ?? "" },
-                        addedAt = new { timestampValue = ToFirestoreTimestamp(asset.AddedAt == default ? DateTime.UtcNow : asset.AddedAt) }
+                        addedAt = new { timestampValue = ToFirestoreTimestamp(asset.AddedAt == default ? DateTime.UtcNow : asset.AddedAt) },
+                        lastSyncedAt = CreateTimestampOrNullValue(asset.LastSyncedAt),
+                        versionHistory = new { arrayValue = new { values = ConvertAssetVersionsToFirestoreArray(asset.VersionHistory) } }
                     }
                 }
             }).Cast<object>().ToArray();
         }
 
-        private object[] ConvertTaskColumnsToFirestoreArray(List<TeamTaskColumnInfo> columns)
+        private object[] ConvertTaskColumnsToFirestoreArray(List<TeamTaskColumnInfo> columns, bool includeCards = true)
         {
             return columns.Select(column => new
             {
@@ -638,7 +994,7 @@ namespace MeuApp
                         id = new { stringValue = column.Id ?? Guid.NewGuid().ToString() },
                         title = new { stringValue = column.Title ?? "" },
                         accentColor = new { stringValue = ColorToHex(column.AccentColor) },
-                        cards = new { arrayValue = new { values = ConvertTaskCardsToFirestoreArray(column.Cards) } }
+                        cards = new { arrayValue = new { values = includeCards ? ConvertTaskCardsToFirestoreArray(column.Cards) : Array.Empty<object>() } }
                     }
                 }
             }).Cast<object>().ToArray();
@@ -658,12 +1014,23 @@ namespace MeuApp
                     fields = new
                     {
                         id = new { stringValue = card.Id ?? Guid.NewGuid().ToString() },
+                        columnId = new { stringValue = card.ColumnId ?? "" },
                         title = new { stringValue = card.Title ?? "" },
                         description = new { stringValue = card.Description ?? "" },
                         priority = new { stringValue = card.Priority ?? "Media" },
+                        estimatedHours = new { integerValue = card.EstimatedHours.ToString() },
+                        workloadPoints = new { integerValue = card.WorkloadPoints.ToString() },
+                        requiredRole = new { stringValue = TeamPermissionService.NormalizeRole(card.RequiredRole) },
+                        requiresProfessorReview = new { booleanValue = card.RequiresProfessorReview },
                         dueDate = CreateTimestampOrNullValue(card.DueDate),
                         assignedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(card.AssignedUserIds) } },
-                        createdAt = new { timestampValue = ToFirestoreTimestamp(card.CreatedAt == default ? DateTime.UtcNow : card.CreatedAt) }
+                        mentionedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(card.MentionedUserIds) } },
+                        comments = new { arrayValue = new { values = ConvertCommentsToFirestoreArray(card.Comments) } },
+                        attachments = new { arrayValue = new { values = ConvertAttachmentsToFirestoreArray(card.Attachments) } },
+                        createdAt = new { timestampValue = ToFirestoreTimestamp(card.CreatedAt == default ? DateTime.UtcNow : card.CreatedAt) },
+                        createdByUserId = new { stringValue = card.CreatedByUserId ?? "" },
+                        updatedAt = new { timestampValue = ToFirestoreTimestamp(card.UpdatedAt == default ? DateTime.UtcNow : card.UpdatedAt) },
+                        updatedByUserId = new { stringValue = card.UpdatedByUserId ?? "" }
                     }
                 }
             }).Cast<object>().ToArray();
@@ -677,11 +1044,584 @@ namespace MeuApp
                 {
                     fields = new
                     {
+                        id = new { stringValue = notification.Id ?? Guid.NewGuid().ToString() },
                         message = new { stringValue = notification.Message ?? "" },
+                        type = new { stringValue = notification.Type ?? "info" },
+                        audience = new { stringValue = notification.Audience ?? "team" },
+                        relatedEntityId = new { stringValue = notification.RelatedEntityId ?? "" },
                         createdAt = new { timestampValue = ToFirestoreTimestamp(notification.CreatedAt == default ? DateTime.UtcNow : notification.CreatedAt) }
                     }
                 }
             }).Cast<object>().ToArray();
+        }
+
+        private object[] ConvertTimelineToFirestoreArray(List<TeamTimelineItemInfo> timeline)
+        {
+            return (timeline ?? new List<TeamTimelineItemInfo>())
+                .Select(item => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            id = new { stringValue = item.Id ?? Guid.NewGuid().ToString() },
+                            title = new { stringValue = item.Title ?? "" },
+                            description = new { stringValue = item.Description ?? "" },
+                            category = new { stringValue = item.Category ?? "" },
+                            status = new { stringValue = item.Status ?? "Planejado" },
+                            ownerUserId = new { stringValue = item.OwnerUserId ?? "" },
+                            startsAt = CreateTimestampOrNullValue(item.StartsAt),
+                            endsAt = CreateTimestampOrNullValue(item.EndsAt)
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertAccessRulesToFirestoreArray(List<TeamAccessRuleInfo> accessRules)
+        {
+            return (accessRules ?? new List<TeamAccessRuleInfo>())
+                .Select(rule => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            role = new { stringValue = TeamPermissionService.NormalizeRole(rule.Role) },
+                            canAddMembers = new { booleanValue = rule.CanAddMembers },
+                            canManageMembers = new { booleanValue = rule.CanManageMembers },
+                            canAssignLeadership = new { booleanValue = rule.CanAssignLeadership },
+                            canEditProjectSettings = new { booleanValue = rule.CanEditProjectSettings },
+                            canDeleteTeam = new { booleanValue = rule.CanDeleteTeam },
+                            canComment = new { booleanValue = rule.CanComment },
+                            canUploadFiles = new { booleanValue = rule.CanUploadFiles },
+                            canExportAgenda = new { booleanValue = rule.CanExportAgenda },
+                            canViewProfessorDashboard = new { booleanValue = rule.CanViewProfessorDashboard },
+                            canReviewDeliverables = new { booleanValue = rule.CanReviewDeliverables }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertCommentsToFirestoreArray(List<TeamCommentInfo> comments)
+        {
+            return (comments ?? new List<TeamCommentInfo>())
+                .Select(comment => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            commentId = new { stringValue = comment.CommentId ?? Guid.NewGuid().ToString() },
+                            authorUserId = new { stringValue = comment.AuthorUserId ?? "" },
+                            authorName = new { stringValue = comment.AuthorName ?? "" },
+                            content = new { stringValue = comment.Content ?? "" },
+                            mentionedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(comment.MentionedUserIds) } },
+                            attachmentFileNames = new { arrayValue = new { values = ConvertStringsToFirestoreArray(comment.AttachmentFileNames) } },
+                            createdAt = new { timestampValue = ToFirestoreTimestamp(comment.CreatedAt == default ? DateTime.UtcNow : comment.CreatedAt) }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertAttachmentsToFirestoreArray(List<TeamAttachmentInfo> attachments)
+        {
+            return (attachments ?? new List<TeamAttachmentInfo>())
+                .Select(attachment => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            attachmentId = new { stringValue = attachment.AttachmentId ?? Guid.NewGuid().ToString() },
+                            assetId = new { stringValue = attachment.AssetId ?? "" },
+                            fileName = new { stringValue = attachment.FileName ?? "" },
+                            previewImageDataUri = new { stringValue = attachment.PreviewImageDataUri ?? "" },
+                            permissionScope = new { stringValue = attachment.PermissionScope ?? "team" },
+                            version = new { integerValue = attachment.Version.ToString() },
+                            addedByUserId = new { stringValue = attachment.AddedByUserId ?? "" },
+                            addedAt = new { timestampValue = ToFirestoreTimestamp(attachment.AddedAt == default ? DateTime.UtcNow : attachment.AddedAt) }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertAssetVersionsToFirestoreArray(List<TeamAssetVersionInfo> versions)
+        {
+            return (versions ?? new List<TeamAssetVersionInfo>())
+                .Select(version => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            versionNumber = new { integerValue = version.VersionNumber.ToString() },
+                            changedByUserId = new { stringValue = version.ChangedByUserId ?? "" },
+                            changeSummary = new { stringValue = version.ChangeSummary ?? "" },
+                            fileName = new { stringValue = version.FileName ?? "" },
+                            mimeType = new { stringValue = version.MimeType ?? "" },
+                            permissionScope = new { stringValue = version.PermissionScope ?? "team" },
+                            storageKind = new { stringValue = version.StorageKind ?? "firestore-document" },
+                            storageReference = new { stringValue = version.StorageReference ?? "" },
+                            sizeBytes = new { integerValue = version.SizeBytes.ToString() },
+                            changedAt = new { timestampValue = ToFirestoreTimestamp(version.ChangedAt == default ? DateTime.UtcNow : version.ChangedAt) }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private async Task<TeamOperationResult> SyncTeamWorkItemsAsync(string teamId, TeamWorkspaceInfo team)
+        {
+            var milestoneResult = await SyncMilestonesSubcollectionAsync(teamId, team, team.Milestones ?? new List<TeamMilestoneInfo>());
+            if (!milestoneResult.Success)
+            {
+                return milestoneResult;
+            }
+
+            return await SyncTaskCardsSubcollectionAsync(teamId, team, team.TaskColumns ?? new List<TeamTaskColumnInfo>());
+        }
+
+        private async Task<TeamOperationResult> SyncMilestonesSubcollectionAsync(string teamId, TeamWorkspaceInfo team, List<TeamMilestoneInfo> milestones)
+        {
+            var collectionPath = $"teams/{teamId}/milestones";
+            var existingDocuments = await GetSubcollectionDocumentsAsync(collectionPath);
+            if (existingDocuments.Count == 0 && !CanCurrentUserManageStructuredWorkItems(team))
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var existingIds = new HashSet<string>(existingDocuments.Select(document => document.DocumentId), StringComparer.OrdinalIgnoreCase);
+            var currentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var milestone in milestones ?? new List<TeamMilestoneInfo>())
+            {
+                var documentId = string.IsNullOrWhiteSpace(milestone.Id) ? Guid.NewGuid().ToString("N") : milestone.Id;
+                milestone.Id = documentId;
+                currentIds.Add(documentId);
+
+                var payload = BuildMilestoneDocumentPayload(teamId, milestone);
+                var saveResult = await UpsertSubcollectionDocumentAsync($"{collectionPath}/{documentId}", payload);
+                if (!saveResult.Success)
+                {
+                    return saveResult;
+                }
+            }
+
+            foreach (var staleId in existingIds.Except(currentIds, StringComparer.OrdinalIgnoreCase))
+            {
+                var deleteResult = await DeleteSubcollectionDocumentAsync($"{collectionPath}/{staleId}");
+                if (!deleteResult.Success)
+                {
+                    return deleteResult;
+                }
+            }
+
+            return TeamOperationResult.Ok();
+        }
+
+        private async Task<TeamOperationResult> SyncTaskCardsSubcollectionAsync(string teamId, TeamWorkspaceInfo team, List<TeamTaskColumnInfo> columns)
+        {
+            var collectionPath = $"teams/{teamId}/taskCards";
+            var existingDocuments = await GetSubcollectionDocumentsAsync(collectionPath);
+            if (existingDocuments.Count == 0 && !CanCurrentUserManageStructuredWorkItems(team))
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var existingIds = new HashSet<string>(existingDocuments.Select(document => document.DocumentId), StringComparer.OrdinalIgnoreCase);
+            var currentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var column in columns ?? new List<TeamTaskColumnInfo>())
+            {
+                foreach (var card in column.Cards ?? new List<TeamTaskCardInfo>())
+                {
+                    var documentId = string.IsNullOrWhiteSpace(card.Id) ? Guid.NewGuid().ToString("N") : card.Id;
+                    card.Id = documentId;
+                    card.ColumnId = string.IsNullOrWhiteSpace(card.ColumnId) ? column.Id : card.ColumnId;
+                    currentIds.Add(documentId);
+
+                    var payload = BuildTaskCardDocumentPayload(teamId, card);
+                    var saveResult = await UpsertSubcollectionDocumentAsync($"{collectionPath}/{documentId}", payload);
+                    if (!saveResult.Success)
+                    {
+                        return saveResult;
+                    }
+                }
+            }
+
+            foreach (var staleId in existingIds.Except(currentIds, StringComparer.OrdinalIgnoreCase))
+            {
+                var deleteResult = await DeleteSubcollectionDocumentAsync($"{collectionPath}/{staleId}");
+                if (!deleteResult.Success)
+                {
+                    return deleteResult;
+                }
+            }
+
+            return TeamOperationResult.Ok();
+        }
+
+        private bool CanCurrentUserManageStructuredWorkItems(TeamWorkspaceInfo team)
+        {
+            var currentRole = team.Members
+                .FirstOrDefault(member => string.Equals(member.UserId, _currentUserId, StringComparison.OrdinalIgnoreCase))
+                ?.Role;
+
+            return TeamPermissionService.CanEditProjectSettings(team, currentRole)
+                || TeamPermissionService.CanReviewDeliverables(team, currentRole);
+        }
+
+        private object BuildMilestoneDocumentPayload(string teamId, TeamMilestoneInfo milestone)
+        {
+            return new
+            {
+                fields = new
+                {
+                    teamId = new { stringValue = teamId },
+                    id = new { stringValue = milestone.Id ?? string.Empty },
+                    title = new { stringValue = milestone.Title ?? string.Empty },
+                    notes = new { stringValue = milestone.Notes ?? string.Empty },
+                    status = new { stringValue = milestone.Status ?? "Planejada" },
+                    createdByUserId = new { stringValue = milestone.CreatedByUserId ?? string.Empty },
+                    ownerUserId = new { stringValue = milestone.OwnerUserId ?? string.Empty },
+                    requiresProfessorReview = new { booleanValue = milestone.RequiresProfessorReview },
+                    mentionedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(milestone.MentionedUserIds) } },
+                    comments = new { arrayValue = new { values = ConvertCommentsToFirestoreArray(milestone.Comments) } },
+                    attachments = new { arrayValue = new { values = ConvertAttachmentsToFirestoreArray(milestone.Attachments) } },
+                    dueDate = CreateTimestampOrNullValue(milestone.DueDate),
+                    createdAt = new { timestampValue = ToFirestoreTimestamp(milestone.CreatedAt == default ? DateTime.UtcNow : milestone.CreatedAt) },
+                    updatedAt = new { timestampValue = ToFirestoreTimestamp(milestone.UpdatedAt == default ? DateTime.UtcNow : milestone.UpdatedAt) },
+                    updatedByUserId = new { stringValue = milestone.UpdatedByUserId ?? string.Empty }
+                }
+            };
+        }
+
+        private object BuildTaskCardDocumentPayload(string teamId, TeamTaskCardInfo card)
+        {
+            return new
+            {
+                fields = new
+                {
+                    teamId = new { stringValue = teamId },
+                    id = new { stringValue = card.Id ?? string.Empty },
+                    columnId = new { stringValue = card.ColumnId ?? string.Empty },
+                    title = new { stringValue = card.Title ?? string.Empty },
+                    description = new { stringValue = card.Description ?? string.Empty },
+                    priority = new { stringValue = card.Priority ?? "Media" },
+                    dueDate = CreateTimestampOrNullValue(card.DueDate),
+                    estimatedHours = new { integerValue = card.EstimatedHours.ToString() },
+                    workloadPoints = new { integerValue = card.WorkloadPoints.ToString() },
+                    requiredRole = new { stringValue = TeamPermissionService.NormalizeRole(card.RequiredRole) },
+                    requiresProfessorReview = new { booleanValue = card.RequiresProfessorReview },
+                    assignedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(card.AssignedUserIds) } },
+                    mentionedUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(card.MentionedUserIds) } },
+                    comments = new { arrayValue = new { values = ConvertCommentsToFirestoreArray(card.Comments) } },
+                    attachments = new { arrayValue = new { values = ConvertAttachmentsToFirestoreArray(card.Attachments) } },
+                    createdAt = new { timestampValue = ToFirestoreTimestamp(card.CreatedAt == default ? DateTime.UtcNow : card.CreatedAt) },
+                    createdByUserId = new { stringValue = card.CreatedByUserId ?? string.Empty },
+                    updatedAt = new { timestampValue = ToFirestoreTimestamp(card.UpdatedAt == default ? DateTime.UtcNow : card.UpdatedAt) },
+                    updatedByUserId = new { stringValue = card.UpdatedByUserId ?? string.Empty }
+                }
+            };
+        }
+
+        private async Task<TeamOperationResult> UpsertSubcollectionDocumentAsync(string documentPath, object payload)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(new HttpMethod("PATCH"), AppConfig.BuildFirestoreDocumentUrl(documentPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    return TeamOperationResult.Ok();
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                DebugHelper.WriteLine($"[TeamService.UpsertSubcollection] ❌ {documentPath} -> HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
+                return TeamOperationResult.Fail($"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.UpsertSubcollection] ❌ {documentPath} -> {ex.Message}");
+                return TeamOperationResult.Fail(ex.Message);
+            }
+        }
+
+        private async Task<TeamOperationResult> DeleteSubcollectionDocumentAsync(string documentPath)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirestoreDocumentUrl(documentPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return TeamOperationResult.Ok();
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                return TeamOperationResult.Fail($"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
+            }
+            catch (Exception ex)
+            {
+                return TeamOperationResult.Fail(ex.Message);
+            }
+        }
+
+        private async Task<List<FirestoreDocumentSnapshot>> GetSubcollectionDocumentsAsync(string collectionPath)
+        {
+            var snapshots = new List<FirestoreDocumentSnapshot>();
+
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl(collectionPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    return snapshots;
+                }
+
+                using var doc = JsonDocument.Parse(jsonContent);
+                if (!doc.RootElement.TryGetProperty("documents", out var documentsArray))
+                {
+                    return snapshots;
+                }
+
+                foreach (var document in documentsArray.EnumerateArray())
+                {
+                    if (!document.TryGetProperty("fields", out var fields))
+                    {
+                        continue;
+                    }
+
+                    snapshots.Add(new FirestoreDocumentSnapshot
+                    {
+                        DocumentId = GetDocumentId(document),
+                        Fields = fields.Clone()
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.GetSubcollectionDocuments] Erro em {collectionPath}: {ex.Message}");
+            }
+
+            return snapshots;
+        }
+
+        public async Task<TeamAssetStorageResult> SaveTeamAssetContentAsync(string teamId, string assetId, TeamAssetVersionInfo version, byte[] fileBytes)
+        {
+            try
+            {
+                if (fileBytes == null || fileBytes.Length == 0)
+                {
+                    return TeamAssetStorageResult.Fail("Arquivo vazio ou indisponível para sincronização remota.");
+                }
+
+                var normalizedTeamId = NormalizeTeamCode(teamId);
+                var safeAssetId = string.IsNullOrWhiteSpace(assetId) ? Guid.NewGuid().ToString("N") : assetId.Trim();
+                var versionNumber = Math.Max(1, version.VersionNumber);
+                var documentId = $"{normalizedTeamId}_{safeAssetId}_v{versionNumber}";
+                var documentPath = $"teamAssetFiles/{documentId}";
+                var payload = new
+                {
+                    fields = new
+                    {
+                        teamId = new { stringValue = normalizedTeamId },
+                        assetId = new { stringValue = safeAssetId },
+                        versionNumber = new { integerValue = versionNumber.ToString() },
+                        fileName = new { stringValue = version.FileName ?? string.Empty },
+                        mimeType = new { stringValue = version.MimeType ?? string.Empty },
+                        permissionScope = new { stringValue = TeamPermissionService.NormalizePermissionScope(version.PermissionScope) },
+                        storageKind = new { stringValue = string.IsNullOrWhiteSpace(version.StorageKind) ? "firestore-document" : version.StorageKind },
+                        sizeBytes = new { integerValue = fileBytes.Length.ToString() },
+                        uploadedByUserId = new { stringValue = version.ChangedByUserId ?? string.Empty },
+                        uploadedAt = new { timestampValue = ToFirestoreTimestamp(version.ChangedAt == default ? DateTime.UtcNow : version.ChangedAt) },
+                        contentBase64 = new { stringValue = Convert.ToBase64String(fileBytes) }
+                    }
+                };
+
+                var request = new HttpRequestMessage(new HttpMethod("PATCH"), AppConfig.BuildFirestoreDocumentUrl(documentPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                    DebugHelper.WriteLine($"[TeamService.SaveTeamAssetContent] Erro: {errorMessage}");
+                    return TeamAssetStorageResult.Fail(errorMessage);
+                }
+
+                return TeamAssetStorageResult.Ok(documentPath, documentId);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.SaveTeamAssetContent] Exceção: {ex.Message}");
+                return TeamAssetStorageResult.Fail(ex.Message);
+            }
+        }
+
+        public async Task<TeamAssetDownloadResult> LoadTeamAssetContentAsync(string storageReference)
+        {
+            try
+            {
+                var documentPath = NormalizeFirestoreDocumentPath(storageReference);
+                if (string.IsNullOrWhiteSpace(documentPath))
+                {
+                    return TeamAssetDownloadResult.Fail("Referência remota do arquivo está vazia.");
+                }
+
+                var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl(documentPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                    DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContent] Erro: {errorMessage}");
+                    return TeamAssetDownloadResult.Fail(errorMessage);
+                }
+
+                using var doc = JsonDocument.Parse(responseBody);
+                if (!doc.RootElement.TryGetProperty("fields", out var fields))
+                {
+                    return TeamAssetDownloadResult.Fail("Documento remoto do arquivo retornou sem campos legíveis.");
+                }
+
+                var contentBase64 = GetString(fields, "contentBase64");
+                if (string.IsNullOrWhiteSpace(contentBase64))
+                {
+                    return TeamAssetDownloadResult.Fail("Conteúdo remoto do arquivo está vazio.");
+                }
+
+                return TeamAssetDownloadResult.Ok(new TeamAssetContentPayload
+                {
+                    TeamId = GetString(fields, "teamId"),
+                    AssetId = GetString(fields, "assetId"),
+                    FileName = GetString(fields, "fileName"),
+                    MimeType = GetString(fields, "mimeType"),
+                    PermissionScope = GetString(fields, "permissionScope"),
+                    StorageKind = GetString(fields, "storageKind"),
+                    VersionNumber = Math.Max(1, GetInt(fields, "versionNumber")),
+                    SizeBytes = GetLong(fields, "sizeBytes"),
+                    UploadedByUserId = GetString(fields, "uploadedByUserId"),
+                    UploadedAt = GetTimestamp(fields, "uploadedAt"),
+                    Bytes = Convert.FromBase64String(contentBase64),
+                    StorageReference = documentPath
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContent] Exceção: {ex.Message}");
+                return TeamAssetDownloadResult.Fail(ex.Message);
+            }
+        }
+
+        public async Task<TeamOperationResult> DeleteTeamAssetContentAsync(string storageReference)
+        {
+            try
+            {
+                var documentPath = NormalizeFirestoreDocumentPath(storageReference);
+                if (string.IsNullOrWhiteSpace(documentPath))
+                {
+                    return TeamOperationResult.Ok();
+                }
+
+                var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirestoreDocumentUrl(documentPath));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return TeamOperationResult.Ok();
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContent] Erro: {errorMessage}");
+                return TeamOperationResult.Fail(errorMessage);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContent] Exceção: {ex.Message}");
+                return TeamOperationResult.Fail(ex.Message);
+            }
+        }
+
+        private async Task<TeamOperationResult> DeleteAssetContentDocumentsAsync(TeamWorkspaceInfo team)
+        {
+            var storageReferences = (team.Assets ?? new List<TeamAssetInfo>())
+                .SelectMany(asset => new[] { asset.StorageReference }
+                    .Concat((asset.VersionHistory ?? new List<TeamAssetVersionInfo>()).Select(version => version.StorageReference)))
+                .Where(reference => !string.IsNullOrWhiteSpace(reference))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var storageReference in storageReferences)
+            {
+                var deleteResult = await DeleteTeamAssetContentAsync(storageReference);
+                if (!deleteResult.Success)
+                {
+                    return deleteResult;
+                }
+            }
+
+            return TeamOperationResult.Ok();
+        }
+
+        private static string NormalizeFirestoreDocumentPath(string? documentPath)
+        {
+            var normalized = (documentPath ?? string.Empty).Trim().Trim('/');
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return string.Empty;
+            }
+
+            var documentsMarker = "/documents/";
+            var markerIndex = normalized.IndexOf(documentsMarker, StringComparison.OrdinalIgnoreCase);
+            if (markerIndex >= 0)
+            {
+                normalized = normalized.Substring(markerIndex + documentsMarker.Length);
+            }
+
+            if (normalized.StartsWith("documents/", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring("documents/".Length);
+            }
+
+            return normalized.Trim('/');
+        }
+
+        private static bool TeamMatchesQuery(TeamWorkspaceInfo team, string query)
+        {
+            return (team.TeamName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.Course?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.ClassName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.ClassId?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.TeamId?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.TemplateName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.FocalProfessorName?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false)
+                || (team.ProfessorSupervisorNames?.Any(name => name.Contains(query, StringComparison.OrdinalIgnoreCase)) ?? false)
+                || (team.Ucs?.Any(uc => uc.Contains(query, StringComparison.OrdinalIgnoreCase)) ?? false);
         }
 
         private object[] ConvertChatMessagesToFirestoreArray(List<TeamChatMessageInfo> messages)
@@ -725,7 +1665,7 @@ namespace MeuApp
 
             try
             {
-                var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/teams";
+                var url = AppConfig.BuildFirestoreDocumentUrl("teams");
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -788,15 +1728,27 @@ namespace MeuApp
                     Course = GetString(fields, "course"),
                     ClassName = GetString(fields, "className"),
                     ClassId = GetString(fields, "classId"),
+                    AcademicTerm = GetString(fields, "academicTerm"),
+                    TemplateId = GetString(fields, "templateId"),
+                    TemplateName = GetString(fields, "templateName"),
                     CreatedBy = GetString(fields, "createdBy"),
                     CreatedAt = GetTimestamp(fields, "createdAt"),
                     UpdatedAt = GetTimestamp(fields, "updatedAt"),
+                    LastRealtimeSyncAt = GetNullableTimestamp(fields, "lastRealtimeSyncAt"),
                     ProjectProgress = GetInt(fields, "projectProgress"),
                     ProjectDeadline = GetNullableTimestamp(fields, "projectDeadline"),
                     ProjectStatus = GetString(fields, "projectStatus"),
+                    TeacherNotes = GetString(fields, "teacherNotes"),
+                    FocalProfessorUserId = GetString(fields, "focalProfessorUserId"),
+                    FocalProfessorName = GetString(fields, "focalProfessorName"),
+                    ProfessorSupervisorUserIds = ParseStringsFromFirestore(fields, "professorSupervisorUserIds"),
+                    ProfessorSupervisorNames = ParseStringsFromFirestore(fields, "professorSupervisorNames"),
+                    DefaultFilePermissionScope = GetString(fields, "defaultFilePermissionScope"),
                     Milestones = ParseMilestonesFromFirestore(fields),
                     Members = ParseMembersFromFirestore(fields),
                     Ucs = ParseStringsFromFirestore(fields, "ucs"),
+                    SemesterTimeline = ParseTimelineFromFirestore(fields),
+                    AccessRules = ParseAccessRulesFromFirestore(fields),
                     Assets = ParseAssetsFromFirestore(fields),
                     TaskColumns = ParseTaskColumnsFromFirestore(fields),
                     Notifications = ParseNotificationsFromFirestore(fields),
@@ -833,9 +1785,15 @@ namespace MeuApp
                                 UserId = GetString(memberFields, "userId"),
                                 Name = GetString(memberFields, "name"),
                                 Email = GetString(memberFields, "email"),
+                                Phone = GetString(memberFields, "phone"),
                                 Registration = GetString(memberFields, "registration"),
                                 Course = GetString(memberFields, "course"),
-                                Role = GetString(memberFields, "role"),
+                                Role = TeamPermissionService.NormalizeRole(GetString(memberFields, "role")),
+                                Nickname = GetString(memberFields, "nickname"),
+                                ProfessionalTitle = GetString(memberFields, "professionalTitle"),
+                                AcademicDepartment = GetString(memberFields, "academicDepartment"),
+                                AcademicFocus = GetString(memberFields, "academicFocus"),
+                                OfficeHours = GetString(memberFields, "officeHours"),
                                 AvatarBody = GetString(memberFields, "avatarBody"),
                                 AvatarHair = GetString(memberFields, "avatarHair"),
                                 AvatarHat = GetString(memberFields, "avatarHat"),
@@ -909,8 +1867,16 @@ namespace MeuApp
                         Title = GetString(milestoneFields, "title"),
                         Notes = GetString(milestoneFields, "notes"),
                         Status = GetString(milestoneFields, "status"),
+                        CreatedByUserId = GetString(milestoneFields, "createdByUserId"),
+                        OwnerUserId = GetString(milestoneFields, "ownerUserId"),
+                        RequiresProfessorReview = GetBool(milestoneFields, "requiresProfessorReview"),
+                        MentionedUserIds = ParseStringsFromFirestore(milestoneFields, "mentionedUserIds"),
+                        Comments = ParseCommentsFromFirestore(milestoneFields),
+                        Attachments = ParseAttachmentsFromFirestore(milestoneFields),
                         DueDate = GetNullableTimestamp(milestoneFields, "dueDate"),
-                        CreatedAt = GetTimestamp(milestoneFields, "createdAt")
+                        CreatedAt = GetTimestamp(milestoneFields, "createdAt"),
+                        UpdatedAt = GetTimestamp(milestoneFields, "updatedAt"),
+                        UpdatedByUserId = GetString(milestoneFields, "updatedByUserId")
                     });
                 }
             }
@@ -941,8 +1907,18 @@ namespace MeuApp
                         Category = GetString(assetFields, "category"),
                         FileName = GetString(assetFields, "fileName"),
                         PreviewImageDataUri = GetString(assetFields, "previewImageDataUri"),
+                        Description = GetString(assetFields, "description"),
+                        MimeType = GetString(assetFields, "mimeType"),
+                        FolderPath = GetString(assetFields, "folderPath"),
+                        PermissionScope = GetString(assetFields, "permissionScope"),
+                        StorageKind = GetString(assetFields, "storageKind"),
+                        StorageReference = GetString(assetFields, "storageReference"),
+                        SizeBytes = GetLong(assetFields, "sizeBytes"),
+                        Version = Math.Max(1, GetInt(assetFields, "version")),
                         AddedByUserId = GetString(assetFields, "addedByUserId"),
-                        AddedAt = GetTimestamp(assetFields, "addedAt")
+                        AddedAt = GetTimestamp(assetFields, "addedAt"),
+                        LastSyncedAt = GetNullableTimestamp(assetFields, "lastSyncedAt"),
+                        VersionHistory = ParseAssetVersionsFromFirestore(assetFields)
                     });
                 }
             }
@@ -998,16 +1974,156 @@ namespace MeuApp
                 cards.Add(new TeamTaskCardInfo
                 {
                     Id = GetString(cardFields, "id"),
+                    ColumnId = GetString(cardFields, "columnId"),
                     Title = GetString(cardFields, "title"),
                     Description = GetString(cardFields, "description"),
                     Priority = GetString(cardFields, "priority"),
+                    EstimatedHours = GetInt(cardFields, "estimatedHours"),
+                    WorkloadPoints = GetInt(cardFields, "workloadPoints"),
+                    RequiredRole = TeamPermissionService.NormalizeRole(GetString(cardFields, "requiredRole")),
+                    RequiresProfessorReview = GetBool(cardFields, "requiresProfessorReview"),
                     DueDate = GetNullableTimestamp(cardFields, "dueDate"),
                     AssignedUserIds = ParseStringsFromFirestore(cardFields, "assignedUserIds"),
-                    CreatedAt = GetTimestamp(cardFields, "createdAt")
+                    MentionedUserIds = ParseStringsFromFirestore(cardFields, "mentionedUserIds"),
+                    Comments = ParseCommentsFromFirestore(cardFields),
+                    Attachments = ParseAttachmentsFromFirestore(cardFields),
+                    CreatedAt = GetTimestamp(cardFields, "createdAt"),
+                    CreatedByUserId = GetString(cardFields, "createdByUserId"),
+                    UpdatedAt = GetTimestamp(cardFields, "updatedAt"),
+                    UpdatedByUserId = GetString(cardFields, "updatedByUserId")
                 });
             }
 
             return cards;
+        }
+
+        private async Task PopulateTeamWorkItemsFromSubcollectionsAsync(TeamWorkspaceInfo team)
+        {
+            if (team == null || string.IsNullOrWhiteSpace(team.TeamId))
+            {
+                return;
+            }
+
+            var milestoneDocuments = await GetSubcollectionDocumentsAsync($"teams/{team.TeamId}/milestones");
+            if (milestoneDocuments.Count > 0)
+            {
+                team.Milestones = ParseMilestonesFromSubcollectionDocuments(milestoneDocuments);
+            }
+
+            var taskCardDocuments = await GetSubcollectionDocumentsAsync($"teams/{team.TeamId}/taskCards");
+            if (taskCardDocuments.Count > 0)
+            {
+                ApplyTaskCardsFromSubcollectionDocuments(team, taskCardDocuments);
+            }
+        }
+
+        private List<TeamMilestoneInfo> ParseMilestonesFromSubcollectionDocuments(List<FirestoreDocumentSnapshot> documents)
+        {
+            var milestones = new List<TeamMilestoneInfo>();
+
+            foreach (var document in documents)
+            {
+                var milestoneFields = document.Fields;
+                milestones.Add(new TeamMilestoneInfo
+                {
+                    Id = string.IsNullOrWhiteSpace(GetString(milestoneFields, "id")) ? document.DocumentId : GetString(milestoneFields, "id"),
+                    Title = GetString(milestoneFields, "title"),
+                    Notes = GetString(milestoneFields, "notes"),
+                    Status = GetString(milestoneFields, "status"),
+                    DueDate = GetNullableTimestamp(milestoneFields, "dueDate"),
+                    CreatedByUserId = GetString(milestoneFields, "createdByUserId"),
+                    OwnerUserId = GetString(milestoneFields, "ownerUserId"),
+                    RequiresProfessorReview = GetBool(milestoneFields, "requiresProfessorReview"),
+                    MentionedUserIds = ParseStringsFromFirestore(milestoneFields, "mentionedUserIds"),
+                    Comments = ParseCommentsFromFirestore(milestoneFields),
+                    Attachments = ParseAttachmentsFromFirestore(milestoneFields),
+                    CreatedAt = GetTimestamp(milestoneFields, "createdAt"),
+                    UpdatedAt = GetTimestamp(milestoneFields, "updatedAt"),
+                    UpdatedByUserId = GetString(milestoneFields, "updatedByUserId")
+                });
+            }
+
+            return milestones;
+        }
+
+        private void ApplyTaskCardsFromSubcollectionDocuments(TeamWorkspaceInfo team, List<FirestoreDocumentSnapshot> documents)
+        {
+            foreach (var column in team.TaskColumns ?? new List<TeamTaskColumnInfo>())
+            {
+                column.Cards = new List<TeamTaskCardInfo>();
+            }
+
+            if (team.TaskColumns == null)
+            {
+                team.TaskColumns = new List<TeamTaskColumnInfo>();
+            }
+
+            foreach (var document in documents)
+            {
+                var cardFields = document.Fields;
+                var card = new TeamTaskCardInfo
+                {
+                    Id = string.IsNullOrWhiteSpace(GetString(cardFields, "id")) ? document.DocumentId : GetString(cardFields, "id"),
+                    ColumnId = GetString(cardFields, "columnId"),
+                    Title = GetString(cardFields, "title"),
+                    Description = GetString(cardFields, "description"),
+                    Priority = GetString(cardFields, "priority"),
+                    DueDate = GetNullableTimestamp(cardFields, "dueDate"),
+                    EstimatedHours = GetInt(cardFields, "estimatedHours"),
+                    WorkloadPoints = GetInt(cardFields, "workloadPoints"),
+                    RequiredRole = TeamPermissionService.NormalizeRole(GetString(cardFields, "requiredRole")),
+                    RequiresProfessorReview = GetBool(cardFields, "requiresProfessorReview"),
+                    AssignedUserIds = ParseStringsFromFirestore(cardFields, "assignedUserIds"),
+                    MentionedUserIds = ParseStringsFromFirestore(cardFields, "mentionedUserIds"),
+                    Comments = ParseCommentsFromFirestore(cardFields),
+                    Attachments = ParseAttachmentsFromFirestore(cardFields),
+                    CreatedAt = GetTimestamp(cardFields, "createdAt"),
+                    CreatedByUserId = GetString(cardFields, "createdByUserId"),
+                    UpdatedAt = GetTimestamp(cardFields, "updatedAt"),
+                    UpdatedByUserId = GetString(cardFields, "updatedByUserId")
+                };
+
+                var targetColumn = team.TaskColumns.FirstOrDefault(column => string.Equals(column.Id, card.ColumnId, StringComparison.OrdinalIgnoreCase));
+                if (targetColumn == null)
+                {
+                    targetColumn = new TeamTaskColumnInfo
+                    {
+                        Id = string.IsNullOrWhiteSpace(card.ColumnId) ? Guid.NewGuid().ToString("N") : card.ColumnId,
+                        Title = "Coluna migrada",
+                        AccentColor = System.Windows.Media.Color.FromRgb(37, 99, 235),
+                        Cards = new List<TeamTaskCardInfo>()
+                    };
+                    team.TaskColumns.Add(targetColumn);
+                }
+
+                targetColumn.Cards.Add(card);
+            }
+        }
+
+        private async Task<TeamOperationResult> DeleteTeamWorkItemDocumentsAsync(string teamId)
+        {
+            var milestoneDeleteResult = await DeleteSubcollectionDocumentsAsync($"teams/{teamId}/milestones");
+            if (!milestoneDeleteResult.Success)
+            {
+                return milestoneDeleteResult;
+            }
+
+            return await DeleteSubcollectionDocumentsAsync($"teams/{teamId}/taskCards");
+        }
+
+        private async Task<TeamOperationResult> DeleteSubcollectionDocumentsAsync(string collectionPath)
+        {
+            var documents = await GetSubcollectionDocumentsAsync(collectionPath);
+            foreach (var document in documents)
+            {
+                var deleteResult = await DeleteSubcollectionDocumentAsync($"{collectionPath}/{document.DocumentId}");
+                if (!deleteResult.Success)
+                {
+                    return deleteResult;
+                }
+            }
+
+            return TeamOperationResult.Ok();
         }
 
         private List<TeamNotificationInfo> ParseNotificationsFromFirestore(JsonElement fields)
@@ -1025,7 +2141,11 @@ namespace MeuApp
 
                     notifications.Add(new TeamNotificationInfo
                     {
+                        Id = GetString(notificationFields, "id"),
                         Message = GetString(notificationFields, "message"),
+                        Type = GetString(notificationFields, "type"),
+                        Audience = GetString(notificationFields, "audience"),
+                        RelatedEntityId = GetString(notificationFields, "relatedEntityId"),
                         CreatedAt = GetTimestamp(notificationFields, "createdAt")
                     });
                 }
@@ -1067,6 +2187,182 @@ namespace MeuApp
             }
 
             return messages;
+        }
+
+        private List<TeamTimelineItemInfo> ParseTimelineFromFirestore(JsonElement fields)
+        {
+            var timeline = new List<TeamTimelineItemInfo>();
+
+            try
+            {
+                foreach (var value in EnumerateArrayField(fields, "semesterTimeline"))
+                {
+                    if (!TryGetMapFields(value, out var timelineFields))
+                    {
+                        continue;
+                    }
+
+                    timeline.Add(new TeamTimelineItemInfo
+                    {
+                        Id = GetString(timelineFields, "id"),
+                        Title = GetString(timelineFields, "title"),
+                        Description = GetString(timelineFields, "description"),
+                        Category = GetString(timelineFields, "category"),
+                        Status = GetString(timelineFields, "status"),
+                        OwnerUserId = GetString(timelineFields, "ownerUserId"),
+                        StartsAt = GetNullableTimestamp(timelineFields, "startsAt"),
+                        EndsAt = GetNullableTimestamp(timelineFields, "endsAt")
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.ParseTimeline] Erro: {ex.Message}");
+            }
+
+            return timeline;
+        }
+
+        private List<TeamAccessRuleInfo> ParseAccessRulesFromFirestore(JsonElement fields)
+        {
+            var accessRules = new List<TeamAccessRuleInfo>();
+
+            try
+            {
+                foreach (var value in EnumerateArrayField(fields, "accessRules"))
+                {
+                    if (!TryGetMapFields(value, out var ruleFields))
+                    {
+                        continue;
+                    }
+
+                    accessRules.Add(new TeamAccessRuleInfo
+                    {
+                        Role = TeamPermissionService.NormalizeRole(GetString(ruleFields, "role")),
+                        CanAddMembers = !ruleFields.TryGetProperty("canAddMembers", out _)
+                            ? GetBool(ruleFields, "canManageMembers")
+                            : GetBool(ruleFields, "canAddMembers"),
+                        CanManageMembers = GetBool(ruleFields, "canManageMembers"),
+                        CanAssignLeadership = GetBool(ruleFields, "canAssignLeadership"),
+                        CanEditProjectSettings = GetBool(ruleFields, "canEditProjectSettings"),
+                        CanDeleteTeam = GetBool(ruleFields, "canDeleteTeam"),
+                        CanComment = !ruleFields.TryGetProperty("canComment", out _) || GetBool(ruleFields, "canComment"),
+                        CanUploadFiles = !ruleFields.TryGetProperty("canUploadFiles", out _) || GetBool(ruleFields, "canUploadFiles"),
+                        CanExportAgenda = GetBool(ruleFields, "canExportAgenda"),
+                        CanViewProfessorDashboard = GetBool(ruleFields, "canViewProfessorDashboard"),
+                        CanReviewDeliverables = GetBool(ruleFields, "canReviewDeliverables")
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.ParseAccessRules] Erro: {ex.Message}");
+            }
+
+            return TeamPermissionService.NormalizeAccessRules(accessRules.Count == 0 ? TeamPermissionService.CreateDefaultAccessRules() : accessRules);
+        }
+
+        private List<TeamCommentInfo> ParseCommentsFromFirestore(JsonElement fields)
+        {
+            var comments = new List<TeamCommentInfo>();
+
+            try
+            {
+                foreach (var value in EnumerateArrayField(fields, "comments"))
+                {
+                    if (!TryGetMapFields(value, out var commentFields))
+                    {
+                        continue;
+                    }
+
+                    comments.Add(new TeamCommentInfo
+                    {
+                        CommentId = GetString(commentFields, "commentId"),
+                        AuthorUserId = GetString(commentFields, "authorUserId"),
+                        AuthorName = GetString(commentFields, "authorName"),
+                        Content = GetString(commentFields, "content"),
+                        MentionedUserIds = ParseStringsFromFirestore(commentFields, "mentionedUserIds"),
+                        AttachmentFileNames = ParseStringsFromFirestore(commentFields, "attachmentFileNames"),
+                        CreatedAt = GetTimestamp(commentFields, "createdAt")
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.ParseComments] Erro: {ex.Message}");
+            }
+
+            return comments;
+        }
+
+        private List<TeamAttachmentInfo> ParseAttachmentsFromFirestore(JsonElement fields)
+        {
+            var attachments = new List<TeamAttachmentInfo>();
+
+            try
+            {
+                foreach (var value in EnumerateArrayField(fields, "attachments"))
+                {
+                    if (!TryGetMapFields(value, out var attachmentFields))
+                    {
+                        continue;
+                    }
+
+                    attachments.Add(new TeamAttachmentInfo
+                    {
+                        AttachmentId = GetString(attachmentFields, "attachmentId"),
+                        AssetId = GetString(attachmentFields, "assetId"),
+                        FileName = GetString(attachmentFields, "fileName"),
+                        PreviewImageDataUri = GetString(attachmentFields, "previewImageDataUri"),
+                        PermissionScope = GetString(attachmentFields, "permissionScope"),
+                        Version = Math.Max(1, GetInt(attachmentFields, "version")),
+                        AddedByUserId = GetString(attachmentFields, "addedByUserId"),
+                        AddedAt = GetTimestamp(attachmentFields, "addedAt")
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.ParseAttachments] Erro: {ex.Message}");
+            }
+
+            return attachments;
+        }
+
+        private List<TeamAssetVersionInfo> ParseAssetVersionsFromFirestore(JsonElement fields)
+        {
+            var versions = new List<TeamAssetVersionInfo>();
+
+            try
+            {
+                foreach (var value in EnumerateArrayField(fields, "versionHistory"))
+                {
+                    if (!TryGetMapFields(value, out var versionFields))
+                    {
+                        continue;
+                    }
+
+                    versions.Add(new TeamAssetVersionInfo
+                    {
+                        VersionNumber = Math.Max(1, GetInt(versionFields, "versionNumber")),
+                        ChangedByUserId = GetString(versionFields, "changedByUserId"),
+                        ChangeSummary = GetString(versionFields, "changeSummary"),
+                        FileName = GetString(versionFields, "fileName"),
+                        MimeType = GetString(versionFields, "mimeType"),
+                        PermissionScope = GetString(versionFields, "permissionScope"),
+                        StorageKind = GetString(versionFields, "storageKind"),
+                        StorageReference = GetString(versionFields, "storageReference"),
+                        SizeBytes = GetLong(versionFields, "sizeBytes"),
+                        ChangedAt = GetTimestamp(versionFields, "changedAt")
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.ParseAssetVersions] Erro: {ex.Message}");
+            }
+
+            return versions;
         }
 
         private TeamCsdBoardInfo ParseCsdBoardFromFirestore(JsonElement fields)
@@ -1132,7 +2428,7 @@ namespace MeuApp
 
         private async Task<List<TeamReferenceDocument>> GetTeamReferenceDocumentsAsync(string teamId)
         {
-            var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/userTeams";
+            var url = AppConfig.BuildFirestoreDocumentUrl("userTeams");
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -1153,7 +2449,7 @@ namespace MeuApp
                 return TeamOperationResult.Ok();
             }
 
-            var url = $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)/documents/userTeams/{documentId}";
+            var url = AppConfig.BuildFirestoreDocumentUrl($"userTeams/{documentId}");
             var request = new HttpRequestMessage(HttpMethod.Delete, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
 
@@ -1217,6 +2513,33 @@ namespace MeuApp
             }
 
             return 0;
+        }
+
+        private long GetLong(JsonElement element, string propertyName)
+        {
+            if (element.TryGetProperty(propertyName, out var prop))
+            {
+                if (prop.TryGetProperty("integerValue", out var integerValue) &&
+                    long.TryParse(integerValue.GetString(), out var parsedLong))
+                {
+                    return parsedLong;
+                }
+
+                if (prop.TryGetProperty("stringValue", out var stringValue) &&
+                    long.TryParse(stringValue.GetString(), out parsedLong))
+                {
+                    return parsedLong;
+                }
+            }
+
+            return 0;
+        }
+
+        private bool GetBool(JsonElement element, string propertyName)
+        {
+            return element.TryGetProperty(propertyName, out var prop) &&
+                prop.TryGetProperty("booleanValue", out var booleanValue) &&
+                booleanValue.GetBoolean();
         }
 
         private DateTime? GetNullableTimestamp(JsonElement element, string propertyName)
@@ -1309,6 +2632,12 @@ namespace MeuApp
         public string UserId { get; set; } = string.Empty;
     }
 
+    internal sealed class FirestoreDocumentSnapshot
+    {
+        public string DocumentId { get; set; } = string.Empty;
+        public JsonElement Fields { get; set; }
+    }
+
     /// <summary>
     /// Resultado de operações com equipes
     /// </summary>
@@ -1344,5 +2673,61 @@ namespace MeuApp
         {
             return new TeamJoinResult { Success = false, ErrorMessage = errorMessage };
         }
+    }
+
+    public class TeamAssetStorageResult
+    {
+        public bool Success { get; set; }
+        public string StorageReference { get; set; } = string.Empty;
+        public string DocumentId { get; set; } = string.Empty;
+        public string? ErrorMessage { get; set; }
+
+        public static TeamAssetStorageResult Ok(string storageReference, string documentId)
+        {
+            return new TeamAssetStorageResult
+            {
+                Success = true,
+                StorageReference = storageReference,
+                DocumentId = documentId
+            };
+        }
+
+        public static TeamAssetStorageResult Fail(string errorMessage)
+        {
+            return new TeamAssetStorageResult { Success = false, ErrorMessage = errorMessage };
+        }
+    }
+
+    public class TeamAssetDownloadResult
+    {
+        public bool Success { get; set; }
+        public TeamAssetContentPayload? Payload { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public static TeamAssetDownloadResult Ok(TeamAssetContentPayload payload)
+        {
+            return new TeamAssetDownloadResult { Success = true, Payload = payload };
+        }
+
+        public static TeamAssetDownloadResult Fail(string errorMessage)
+        {
+            return new TeamAssetDownloadResult { Success = false, ErrorMessage = errorMessage };
+        }
+    }
+
+    public class TeamAssetContentPayload
+    {
+        public string TeamId { get; set; } = string.Empty;
+        public string AssetId { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public string MimeType { get; set; } = string.Empty;
+        public string PermissionScope { get; set; } = "team";
+        public string StorageKind { get; set; } = "firestore-document";
+        public string StorageReference { get; set; } = string.Empty;
+        public int VersionNumber { get; set; } = 1;
+        public long SizeBytes { get; set; }
+        public string UploadedByUserId { get; set; } = string.Empty;
+        public DateTime UploadedAt { get; set; }
+        public byte[] Bytes { get; set; } = Array.Empty<byte>();
     }
 }
