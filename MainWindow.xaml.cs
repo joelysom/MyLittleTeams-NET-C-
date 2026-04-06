@@ -359,6 +359,7 @@ namespace MeuApp
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             DebugHelper.WriteLine("MainWindow carregada");
+            DebugConsoleManager.EnsureVisible(this);
 
             if (!string.IsNullOrWhiteSpace(_idToken) && _currentProfile != null)
             {
@@ -416,6 +417,13 @@ namespace MeuApp
             if (e.Key == Key.Escape && SearchSlidePanel.Visibility == Visibility.Visible)
             {
                 HideSearchSlidePanel();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key == Key.D && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+            {
+                DebugConsoleManager.Toggle(this);
                 e.Handled = true;
                 return;
             }

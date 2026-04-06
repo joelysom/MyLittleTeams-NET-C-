@@ -1,6 +1,7 @@
-﻿using System.Windows;
+﻿using System;
 using System.IO;
 using System.Text;
+using System.Windows;
 
 namespace MeuApp;
 
@@ -12,10 +13,15 @@ public partial class App : Application
     {
         try
         {
+            DebugHelper.InitializeSilent();
+            DebugConsoleManager.Configure(e.Args);
+
             // Log de inicialização
             LogToFile($"=== App started at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} ===");
             
             base.OnStartup(e);
+
+            Activated += (_, __) => DebugConsoleManager.HandleApplicationActivated();
             
             // Handler para exceções não tratadas do AppDomain
             AppDomain.CurrentDomain.UnhandledException += (s, ex) =>
@@ -44,6 +50,13 @@ public partial class App : Application
             MessageBox.Show($"Erro ao iniciar:\n\n{BuildUserFacingErrorSummary(ex)}\n\nLog salvo em: {_logFile}", "Erro na Inicialização");
             Environment.Exit(1);
         }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        DebugConsoleManager.Shutdown();
+        DebugHelper.Shutdown();
+        base.OnExit(e);
     }
 
     private static string BuildUserFacingErrorSummary(Exception? exception)
@@ -100,6 +113,11 @@ public partial class App : Application
     {
         try
         {
+            if (DebugHelper.IsInitialized)
+            {
+                DebugHelper.WriteLine($"[App] {message}");
+            }
+
             string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, _logFile);
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
             string logEntry = $"[{timestamp}] {message}";

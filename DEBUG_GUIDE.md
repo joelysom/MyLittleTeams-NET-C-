@@ -6,20 +6,38 @@ Foi implementado um **sistema de logging detalhado** que permite diagnosticar ex
 
 ## Como Usar o Modo Debug
 
-### Ativar Modo Debug
+### Mini-tela lateral em tempo real
 
-1. **Abra a aplicação** e faça login normalmente
-2. **Pressione Ctrl+D** para ativar o modo de diagnóstico
-3. Uma janela de confirmação aparecerá mostrando o caminho do arquivo de log
-4. **O caminho padrão é**: `C:\Users\[SeuUsuário]\Desktop\AppDebug.log`
+Agora o projeto suporta uma **mini-tela lateral de debug** que abre ao lado da janela principal e mostra logs em tempo real de UI, Firebase, Firestore, sincronização, filas e erros.
 
-### Usar o Modo Debug
+### Ativar ao executar com `dotnet run`
 
-1. Escreva algo na caixa de busca (ex: "joelyson" ou "2025.32.4217")
-2. Clique em **Pesquisar** ou pressione Enter
-3. Aguarde a busca completar
-4. **Pressione Ctrl+D novamente** para abrir o arquivo de log
-5. O arquivo se abrirá no Bloco de Notas
+1. Execute: `dotnet run -- --debug-console`
+2. A aplicação abrirá normalmente.
+3. A mini-tela de debug abrirá ao lado da janela ativa.
+
+Alternativa por variável de ambiente:
+
+1. Defina `MEUAPP_DEBUG_CONSOLE=1`
+2. Execute `dotnet run`
+
+### Desativar
+
+- Para rodar sem a mini-tela: `dotnet run -- --no-debug-console`
+- Durante a execução: `Ctrl+Shift+D` alterna a mini-tela ligada/desligada
+
+### Ações rápidas
+
+- `Ctrl+D`: abre o arquivo de log bruto
+- Campo de filtro: localiza endpoint, método, status ou texto específico
+- `Pausar`: congela a tela e acumula eventos em buffer
+- `Auto-scroll`: acompanha a última linha automaticamente
+- `Copiar`: copia o conteúdo visível da console
+
+### Caminhos de log
+
+- Log principal em tempo real: `logs\AppDebug.log` dentro da pasta de saída
+- Log de erros de startup/UI: `MeuApp_Errors.log` dentro da pasta de saída
 
 ## O Que Procurar nos Logs
 

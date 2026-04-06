@@ -369,6 +369,12 @@ dotnet build "MeuApp.csproj"
 dotnet run
 ```
 
+7. Execute(DEBUG):
+
+```powershell
+dotnet run -- --debug-console
+```
+
 8. Execute os testes automatizados quando alterar a fundacao academica:
 
 ```powershell
