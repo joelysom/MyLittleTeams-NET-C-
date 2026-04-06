@@ -235,14 +235,20 @@ namespace MeuApp
         private string _searchSlideQuery = string.Empty;
         private int _searchSlideTypingVersion = 0;
         private int _searchSlideRequestVersion = 0;
-        private int _teamSyncSequence = 0;
+        private readonly Dictionary<string, TeamWorkspaceInfo> _queuedTeamPersistence = new Dictionary<string, TeamWorkspaceInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, TeamWorkspaceInfo> _dirtyTeamPersistenceState = new Dictionary<string, TeamWorkspaceInfo>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _teamPersistenceInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private int _chatRenderSequence = 0;
         private int _teamWorkspaceRenderSequence = 0;
         private bool _realtimeSyncInFlight = false;
         private string _calendarFilterTeamId = string.Empty;
         private string _calendarFilterKind = "Todos";
         private string _calendarFilterStatus = "Todos";
-        private int _calendarFilterWindowDays = 14;
+        private DateTime _calendarDisplayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        private Task<List<UserProfile>>? _globalCalendarFacultyProfilesTask = null;
+        private DateTime _globalCalendarFacultyProfilesLoadedAt = DateTime.MinValue;
+        private bool _globalCalendarFacultyProfilesRefreshInFlight = false;
+        private static readonly TimeSpan CalendarFacultyProfilesCacheTtl = TimeSpan.FromMinutes(5);
         private FilesHubState _filesHubState = new FilesHubState();
         private bool _filesHubStateLoaded = false;
         private bool _showChoasIntroBubble = false;
@@ -323,6 +329,7 @@ namespace MeuApp
         {
             public TeamWorkspaceInfo Team { get; init; } = new TeamWorkspaceInfo();
             public string KindLabel { get; init; } = string.Empty;
+            public string ContextLabel { get; init; } = string.Empty;
             public string Title { get; init; } = string.Empty;
             public string Subtitle { get; init; } = string.Empty;
             public string Notes { get; init; } = string.Empty;
@@ -331,6 +338,7 @@ namespace MeuApp
             public Color AccentColor { get; init; }
             public PackIconMaterialKind IconKind { get; init; }
             public bool IsOverdue { get; init; }
+            public bool CanOpenTeam { get; init; } = true;
         }
 
         [DllImport("user32.dll")]
@@ -354,7 +362,7 @@ namespace MeuApp
 
             if (!string.IsNullOrWhiteSpace(_idToken) && _currentProfile != null)
             {
-                _teamService = new TeamService(_idToken, _currentProfile.UserId ?? "");
+                _teamService = new TeamService(_idToken, _currentProfile.UserId ?? "", TeamPermissionService.NormalizeRole(_currentProfile.Role));
                 _connectionService = new ConnectionService(_idToken, _currentProfile);
 
                 RenderChatsLoadingState();
@@ -4846,6 +4854,234 @@ namespace MeuApp
             return string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase);
         }
 
+        private static bool CalendarTextContainsAny(string value, params string[] tokens)
+        {
+            if (string.IsNullOrWhiteSpace(value) || tokens == null || tokens.Length == 0)
+            {
+                return false;
+            }
+
+            return tokens.Any(token => !string.IsNullOrWhiteSpace(token)
+                && value.Contains(token, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string ResolveCalendarContextLabel(
+            TeamWorkspaceInfo team,
+            string title,
+            string subtitle,
+            string notes,
+            string category,
+            bool requiresProfessorReview,
+            string requiredRole = "")
+        {
+            var haystack = string.Join(" ", new[]
+            {
+                title ?? string.Empty,
+                subtitle ?? string.Empty,
+                notes ?? string.Empty,
+                category ?? string.Empty,
+                team.FocalProfessorName ?? string.Empty,
+                string.Join(" ", team.ProfessorSupervisorNames ?? new List<string>())
+            });
+
+            if (CalendarTextContainsAny(haystack, "reunião", "reuniao", "meeting", "orientação", "orientacao", "daily", "alinhamento", "banca"))
+            {
+                return "Reunião";
+            }
+
+            if (string.Equals(requiredRole, "coordinator", StringComparison.OrdinalIgnoreCase)
+                || CalendarTextContainsAny(haystack, "coordenação", "coordenacao", "coordenador", "coordenação de curso", "coord"))
+            {
+                return "Coordenação";
+            }
+
+            if (requiresProfessorReview
+                || string.Equals(requiredRole, "professor", StringComparison.OrdinalIgnoreCase)
+                || CalendarTextContainsAny(haystack, "professor", "orientador", "docente"))
+            {
+                return "Professor";
+            }
+
+            return "Equipe";
+        }
+
+        private string GetCalendarMonthTitle(DateTime month)
+        {
+            var culture = CultureInfo.GetCultureInfo("pt-BR");
+            return culture.TextInfo.ToTitleCase(month.ToString("MMMM yyyy", culture));
+        }
+
+        private string NormalizeProfileCalendarEntryType(string entryType)
+        {
+            return (entryType ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "atividade" => "Atividade",
+                "prazo" => "Prazo",
+                "evento" => "Evento",
+                "reunião" => "Reunião",
+                "reuniao" => "Reunião",
+                "sem aula" => "Sem aula",
+                _ => "Aviso"
+            };
+        }
+
+        private string NormalizeProfileCalendarContextLabel(string contextLabel)
+        {
+            return (contextLabel ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "coordenação" => "Coordenação",
+                "coordenacao" => "Coordenação",
+                "equipe" => "Equipe",
+                "reunião" => "Reunião",
+                "reuniao" => "Reunião",
+                _ => "Professor"
+            };
+        }
+
+        private Color GetProfileCalendarEntryAccentColor(string entryType)
+        {
+            return NormalizeProfileCalendarEntryType(entryType) switch
+            {
+                "Atividade" => Color.FromRgb(37, 99, 235),
+                "Prazo" => Color.FromRgb(249, 115, 22),
+                "Evento" => Color.FromRgb(16, 185, 129),
+                "Reunião" => Color.FromRgb(99, 102, 241),
+                "Sem aula" => Color.FromRgb(220, 38, 38),
+                _ => Color.FromRgb(124, 58, 237)
+            };
+        }
+
+        private PackIconMaterialKind GetProfileCalendarEntryIconKind(string entryType)
+        {
+            return NormalizeProfileCalendarEntryType(entryType) switch
+            {
+                "Atividade" => PackIconMaterialKind.ClipboardTextOutline,
+                "Prazo" => PackIconMaterialKind.FlagCheckered,
+                "Evento" => PackIconMaterialKind.CalendarMonthOutline,
+                "Reunião" => PackIconMaterialKind.AccountGroupOutline,
+                "Sem aula" => PackIconMaterialKind.AlertCircleOutline,
+                _ => PackIconMaterialKind.MessageTextOutline
+            };
+        }
+
+        private IReadOnlyList<CalendarAgendaItem> BuildProfileCalendarAgendaItems(UserProfile? profile)
+        {
+            if (profile == null)
+            {
+                return Array.Empty<CalendarAgendaItem>();
+            }
+
+            NormalizeProfileCollections(profile);
+
+            var syntheticTeam = new TeamWorkspaceInfo
+            {
+                TeamId = $"profile:{profile.UserId}",
+                TeamName = "Calendário docente",
+                Course = profile.AcademicDepartment,
+                ClassName = profile.Name,
+                AcademicTerm = profile.ProfessorAccessLevel,
+                TemplateName = "Agenda independente"
+            };
+
+            return (profile.CalendarEntries ?? new List<ProfileCalendarEntry>())
+                .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.Title))
+                .Select(entry =>
+                {
+                    var normalizedType = NormalizeProfileCalendarEntryType(entry.EntryType);
+                    var normalizedContext = NormalizeProfileCalendarContextLabel(entry.ContextLabel);
+                    var accent = GetProfileCalendarEntryAccentColor(normalizedType);
+                    var isOverdue = (normalizedType == "Prazo" || normalizedType == "Atividade" || normalizedType == "Reunião")
+                        && entry.Date.Date < DateTime.Today;
+
+                    return new CalendarAgendaItem
+                    {
+                        Team = syntheticTeam,
+                        KindLabel = normalizedType,
+                        ContextLabel = normalizedContext,
+                        Title = entry.Title.Trim(),
+                        Subtitle = $"{normalizedContext} • Calendário independente",
+                        Notes = entry.Notes?.Trim() ?? string.Empty,
+                        StatusLabel = normalizedType == "Sem aula" ? "Dia sem aula" : normalizedContext,
+                        DueDate = entry.Date,
+                        AccentColor = accent,
+                        IconKind = GetProfileCalendarEntryIconKind(normalizedType),
+                        IsOverdue = isOverdue,
+                        CanOpenTeam = false
+                    };
+                })
+                .OrderBy(item => item.DueDate.Date)
+                .ThenBy(item => item.Title)
+                .ToList();
+        }
+
+        private List<string> GetCalendarRelatedProfileIds(IReadOnlyList<TeamWorkspaceInfo> teams)
+        {
+            var currentUserId = GetCurrentUserId();
+
+            return (teams ?? Array.Empty<TeamWorkspaceInfo>())
+                .SelectMany(team =>
+                    new[] { team.FocalProfessorUserId }
+                        .Concat(team.ProfessorSupervisorUserIds ?? new List<string>())
+                        .Concat((team.Members ?? new List<UserInfo>())
+                            .Where(member => TeamPermissionService.IsFacultyRole(member.Role))
+                            .Select(member => member.UserId)))
+                .Where(userId => !string.IsNullOrWhiteSpace(userId)
+                    && !string.Equals(userId, currentUserId, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private List<UserProfile> GetCachedCalendarRelatedProfiles(IReadOnlyList<TeamWorkspaceInfo> teams, out List<string> missingProfileIds)
+        {
+            var profiles = new List<UserProfile>();
+            missingProfileIds = new List<string>();
+
+            foreach (var userId in GetCalendarRelatedProfileIds(teams))
+            {
+                var task = LoadUserProfileCachedAsync(userId);
+                if (task.IsCompletedSuccessfully)
+                {
+                    if (task.Result != null)
+                    {
+                        profiles.Add(task.Result);
+                    }
+
+                    continue;
+                }
+
+                missingProfileIds.Add(userId);
+            }
+
+            return profiles
+                .GroupBy(profile => profile.UserId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+        }
+
+        private async Task WarmCalendarRelatedProfilesAsync(IEnumerable<string> userIds)
+        {
+            var targets = (userIds ?? Enumerable.Empty<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (targets.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.WhenAll(targets.Select(LoadUserProfileCachedAsync));
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[CalendarProfileWarmup] Falha ao aquecer perfis relacionados: {ex.Message}");
+            }
+
+            await Dispatcher.InvokeAsync(RenderCalendarAgenda, DispatcherPriority.Background);
+        }
+
         private List<CalendarAgendaItem> BuildCalendarAgendaItems(IReadOnlyList<TeamWorkspaceInfo> teams)
         {
             var items = new List<CalendarAgendaItem>();
@@ -4857,7 +5093,8 @@ namespace MeuApp
                     items.Add(new CalendarAgendaItem
                     {
                         Team = team,
-                        KindLabel = "Projeto",
+                        KindLabel = "Prazo",
+                        ContextLabel = "Equipe",
                         Title = "Prazo principal do projeto",
                         Subtitle = $"{team.TeamName} • {team.ProjectStatus}",
                         Notes = string.IsNullOrWhiteSpace(team.Course)
@@ -4879,6 +5116,13 @@ namespace MeuApp
                     {
                         Team = team,
                         KindLabel = "Marco",
+                        ContextLabel = ResolveCalendarContextLabel(
+                            team,
+                            milestone.Title,
+                            team.TeamName,
+                            milestone.Notes,
+                            "milestone",
+                            milestone.RequiresProfessorReview),
                         Title = milestone.Title,
                         Subtitle = $"{team.TeamName} • Entrega planejada",
                         Notes = milestone.Notes,
@@ -4900,6 +5144,14 @@ namespace MeuApp
                     {
                         Team = team,
                         KindLabel = "Tarefa",
+                        ContextLabel = ResolveCalendarContextLabel(
+                            team,
+                            item.Card.Title,
+                            item.Column.Title,
+                            item.Card.Description,
+                            string.Empty,
+                            item.Card.RequiresProfessorReview,
+                            item.Card.RequiredRole),
                         Title = item.Card.Title,
                         Subtitle = $"{team.TeamName} • {item.Column.Title}",
                         Notes = item.Card.Description,
@@ -4918,7 +5170,14 @@ namespace MeuApp
                     items.Add(new CalendarAgendaItem
                     {
                         Team = team,
-                        KindLabel = "Timeline",
+                        KindLabel = "Evento",
+                        ContextLabel = ResolveCalendarContextLabel(
+                            team,
+                            timelineItem.Title,
+                            timelineItem.Category,
+                            timelineItem.Description,
+                            timelineItem.Category,
+                            false),
                         Title = timelineItem.Title,
                         Subtitle = $"{team.TeamName} • {timelineItem.Category}",
                         Notes = timelineItem.Description,
@@ -4940,12 +5199,9 @@ namespace MeuApp
 
         private List<CalendarAgendaItem> ApplyCalendarAgendaFilters(IReadOnlyList<CalendarAgendaItem> agendaItems)
         {
-            var endDate = DateTime.Today.AddDays(Math.Max(1, _calendarFilterWindowDays));
-
             return agendaItems
                 .Where(item => string.IsNullOrWhiteSpace(_calendarFilterTeamId) || string.Equals(item.Team.TeamId, _calendarFilterTeamId, StringComparison.OrdinalIgnoreCase))
                 .Where(item => string.Equals(_calendarFilterKind, "Todos", StringComparison.OrdinalIgnoreCase) || string.Equals(item.KindLabel, _calendarFilterKind, StringComparison.OrdinalIgnoreCase))
-                .Where(item => item.DueDate.Date <= endDate)
                 .Where(CalendarAgendaStatusMatches)
                 .OrderBy(item => item.DueDate)
                 .ThenBy(item => item.Team.TeamName)
@@ -4960,7 +5216,8 @@ namespace MeuApp
                 "Em risco" => item.IsOverdue,
                 "Hoje" => item.DueDate.Date == DateTime.Today,
                 "Proximos 7 dias" => !item.IsOverdue && item.DueDate.Date <= DateTime.Today.AddDays(7),
-                "Com revisão" => item.StatusLabel.Contains("Revis", StringComparison.OrdinalIgnoreCase),
+                "Com revisão" => item.StatusLabel.Contains("Revis", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(item.ContextLabel, "Professor", StringComparison.OrdinalIgnoreCase),
                 _ => true
             };
         }
@@ -5007,7 +5264,18 @@ namespace MeuApp
                 }));
             selectors.Children.Add(CreateCalendarFilterSelector(
                 "Tipo",
-                new[] { ("Todos", "Todos"), ("Projeto", "Projeto"), ("Marco", "Marco"), ("Tarefa", "Tarefa"), ("Timeline", "Timeline") },
+                new[]
+                {
+                    ("Todos", "Todos"),
+                    ("Aviso", "Aviso"),
+                    ("Atividade", "Atividade"),
+                    ("Prazo", "Prazo"),
+                    ("Marco", "Marco"),
+                    ("Tarefa", "Tarefa"),
+                    ("Evento", "Evento"),
+                    ("Reunião", "Reunião"),
+                    ("Sem aula", "Sem aula")
+                },
                 _calendarFilterKind,
                 value =>
                 {
@@ -5023,18 +5291,13 @@ namespace MeuApp
                     _calendarFilterStatus = string.IsNullOrWhiteSpace(value) ? "Todos" : value;
                     RenderCalendarAgenda();
                 }));
-            selectors.Children.Add(CreateCalendarFilterSelector(
-                "Janela",
-                new[] { ("7 dias", "7"), ("14 dias", "14"), ("30 dias", "30"), ("90 dias", "90") },
-                _calendarFilterWindowDays.ToString(CultureInfo.InvariantCulture),
-                value =>
-                {
-                    _calendarFilterWindowDays = int.TryParse(value, out var days) ? days : 14;
-                    RenderCalendarAgenda();
-                }));
             stack.Children.Add(selectors);
 
             var actions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            if (TeamPermissionService.CanUseProfessorDashboard(_currentProfile))
+            {
+                actions.Children.Add(CreateSidebarButton("Novo aviso/data", Color.FromRgb(124, 58, 237), (s, e) => OpenIndependentCalendarEntryDialog(), PackIconMaterialKind.CalendarEdit));
+            }
             actions.Children.Add(CreateSidebarButton("Exportar Excel", Color.FromRgb(16, 185, 129), (s, e) => ExportCalendarAgendaToExcel(), PackIconMaterialKind.FileDocumentOutline));
             actions.Children.Add(CreateSidebarButton("Exportar PDF", Color.FromRgb(220, 38, 38), (s, e) => ExportCalendarAgendaToPdf(), PackIconMaterialKind.FilePdfBox));
             actions.Children.Add(CreateSidebarButton("Limpar filtros", Color.FromRgb(100, 116, 139), (s, e) =>
@@ -5042,7 +5305,7 @@ namespace MeuApp
                 _calendarFilterTeamId = string.Empty;
                 _calendarFilterKind = "Todos";
                 _calendarFilterStatus = "Todos";
-                _calendarFilterWindowDays = 14;
+                _calendarDisplayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
                 RenderCalendarAgenda();
             }, PackIconMaterialKind.FilterOffOutline));
             stack.Children.Add(actions);
@@ -5094,6 +5357,620 @@ namespace MeuApp
             stack.Children.Add(combo);
             container.Child = stack;
             return container;
+        }
+
+        private Button CreateCalendarMonthNavigationButton(PackIconMaterialKind iconKind, string tooltip, Action onClick, bool filled = false)
+        {
+            var foreground = filled ? Brushes.White : GetThemeBrush("PrimaryTextBrush");
+            var button = new Button
+            {
+                Width = 42,
+                Height = 42,
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = filled ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBackgroundBrush"),
+                Foreground = foreground,
+                BorderBrush = filled ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = filled ? new Thickness(0) : new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip,
+                Content = CreateMaterialIcon(iconKind, foreground, 18)
+            };
+            button.Click += (_, __) => onClick();
+            return button;
+        }
+
+        private Border CreateCalendarMonthNavigatorCard(IReadOnlyList<CalendarAgendaItem> agendaItems)
+        {
+            var monthItems = agendaItems
+                .Where(item => item.DueDate.Year == _calendarDisplayMonth.Year && item.DueDate.Month == _calendarDisplayMonth.Month)
+                .ToList();
+            var occupiedDays = monthItems.Select(item => item.DueDate.Date).Distinct().Count();
+            var overdueCount = monthItems.Count(item => item.IsOverdue);
+
+            var card = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 18)
+            };
+
+            var root = new Grid();
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var leftActions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            leftActions.Children.Add(CreateCalendarMonthNavigationButton(PackIconMaterialKind.ChevronLeft, "Mês anterior", () =>
+            {
+                _calendarDisplayMonth = _calendarDisplayMonth.AddMonths(-1);
+                RenderCalendarAgenda();
+            }));
+            leftActions.Children.Add(CreateCalendarMonthNavigationButton(PackIconMaterialKind.CalendarToday, "Voltar para o mês atual", () =>
+            {
+                _calendarDisplayMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+                RenderCalendarAgenda();
+            }, filled: true));
+            root.Children.Add(leftActions);
+
+            var centerStack = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            centerStack.Children.Add(new TextBlock
+            {
+                Text = GetCalendarMonthTitle(_calendarDisplayMonth),
+                FontSize = 26,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextAlignment = TextAlignment.Center
+            });
+            centerStack.Children.Add(new TextBlock
+            {
+                Text = monthItems.Count == 0
+                    ? "Nenhuma marcação neste mês com os filtros atuais."
+                    : $"{monthItems.Count} marcação(ões) espalhadas por {occupiedDays} dia(s) deste mês.",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var chips = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            chips.Children.Add(CreateStaticTeamChip($"{occupiedDays} dia(s) ocupados", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+            chips.Children.Add(CreateStaticTeamChip($"{monthItems.Count} item(ns)", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip(
+                overdueCount == 0 ? "Sem atraso no mês" : $"{overdueCount} em atraso",
+                overdueCount == 0 ? CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(16, 185, 129)), 28) : CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(220, 38, 38)), 28),
+                overdueCount == 0 ? new SolidColorBrush(Color.FromRgb(16, 185, 129)) : new SolidColorBrush(Color.FromRgb(220, 38, 38))));
+            centerStack.Children.Add(chips);
+
+            Grid.SetColumn(centerStack, 1);
+            root.Children.Add(centerStack);
+
+            var rightActions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            rightActions.Children.Add(CreateCalendarMonthNavigationButton(PackIconMaterialKind.ChevronRight, "Próximo mês", () =>
+            {
+                _calendarDisplayMonth = _calendarDisplayMonth.AddMonths(1);
+                RenderCalendarAgenda();
+            }));
+            Grid.SetColumn(rightActions, 2);
+            root.Children.Add(rightActions);
+
+            card.Child = root;
+            return card;
+        }
+
+        private string BuildCalendarDaySummaryText(IReadOnlyList<CalendarAgendaItem> dayItems)
+        {
+            if (dayItems.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var firstTitle = TruncateAgendaText(dayItems[0].Title, 26);
+            return dayItems.Count == 1
+                ? firstTitle
+                : $"{firstTitle} +{dayItems.Count - 1}";
+        }
+
+        private Border CreateCalendarDayMarker(CalendarAgendaItem item)
+        {
+            var color = item.IsOverdue ? Color.FromRgb(220, 38, 38) : item.AccentColor;
+            return new Border
+            {
+                Width = 8,
+                Height = 8,
+                Margin = new Thickness(0, 0, 6, 0),
+                CornerRadius = new CornerRadius(999),
+                Background = new SolidColorBrush(color)
+            };
+        }
+
+        private Border CreateCalendarDayCell(DateTime date, bool isCurrentMonth, IReadOnlyList<CalendarAgendaItem> dayItems)
+        {
+            var hasItems = isCurrentMonth && dayItems.Count > 0;
+            var isToday = date.Date == DateTime.Today;
+            var accentColor = hasItems
+                ? (dayItems.Any(item => item.IsOverdue) ? Color.FromRgb(220, 38, 38) : dayItems[0].AccentColor)
+                : Color.FromRgb(203, 213, 225);
+            var accentBrush = new SolidColorBrush(accentColor);
+
+            Brush background;
+            if (!isCurrentMonth)
+            {
+                background = CreateSoftAccentBrush(GetThemeBrush("CardBorderBrush"), 14);
+            }
+            else if (hasItems)
+            {
+                background = dayItems.Any(item => item.IsOverdue)
+                    ? new SolidColorBrush(Color.FromRgb(255, 244, 244))
+                    : CreateSoftAccentBrush(accentBrush, 26);
+            }
+            else
+            {
+                background = GetThemeBrush("CardBackgroundBrush");
+            }
+
+            var card = new Border
+            {
+                Background = background,
+                BorderBrush = isToday ? GetThemeBrush("AccentBrush") : (hasItems ? accentBrush : GetThemeBrush("CardBorderBrush")),
+                BorderThickness = isToday ? new Thickness(1.6) : new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(10),
+                Margin = new Thickness(4),
+                MinHeight = 112,
+                Opacity = isCurrentMonth ? 1 : 0.46,
+                Cursor = hasItems ? Cursors.Hand : Cursors.Arrow,
+                ToolTip = hasItems ? $"{dayItems.Count} item(ns) em {date:dd/MM}" : null
+            };
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.Children.Add(new TextBlock
+            {
+                Text = date.Day.ToString(CultureInfo.InvariantCulture),
+                FontSize = 15,
+                FontWeight = isToday || hasItems ? FontWeights.Bold : FontWeights.SemiBold,
+                Foreground = isCurrentMonth ? GetThemeBrush("PrimaryTextBrush") : GetThemeBrush("SecondaryTextBrush")
+            });
+
+            if (hasItems)
+            {
+                var badge = new Border
+                {
+                    Background = accentBrush,
+                    CornerRadius = new CornerRadius(999),
+                    Padding = new Thickness(7, 2, 7, 2),
+                    Child = new TextBlock
+                    {
+                        Text = dayItems.Count.ToString(CultureInfo.InvariantCulture),
+                        FontSize = 10,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White,
+                        TextAlignment = TextAlignment.Center
+                    }
+                };
+                Grid.SetColumn(badge, 1);
+                header.Children.Add(badge);
+            }
+
+            layout.Children.Add(header);
+
+            if (hasItems)
+            {
+                var summary = new StackPanel
+                {
+                    Margin = new Thickness(0, 10, 0, 8),
+                    VerticalAlignment = VerticalAlignment.Top
+                };
+                summary.Children.Add(new TextBlock
+                {
+                    Text = BuildCalendarDaySummaryText(dayItems),
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxHeight = 34,
+                    LineHeight = 16
+                });
+                summary.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" • ", dayItems.Select(item => item.ContextLabel).Distinct()),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    FontSize = 10,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                Grid.SetRow(summary, 1);
+                layout.Children.Add(summary);
+
+                var markers = new WrapPanel { VerticalAlignment = VerticalAlignment.Bottom };
+                foreach (var item in dayItems.Take(3))
+                {
+                    markers.Children.Add(CreateCalendarDayMarker(item));
+                }
+
+                if (dayItems.Count > 3)
+                {
+                    markers.Children.Add(new TextBlock
+                    {
+                        Text = $"+{dayItems.Count - 3}",
+                        FontSize = 10,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                }
+
+                Grid.SetRow(markers, 2);
+                layout.Children.Add(markers);
+
+                card.MouseLeftButtonUp += (_, __) => OpenCalendarDayDetailsDialog(date, dayItems);
+            }
+
+            card.Child = layout;
+            return card;
+        }
+
+        private Border CreateCalendarMonthGridCard(IReadOnlyList<CalendarAgendaItem> agendaItems)
+        {
+            var monthStart = new DateTime(_calendarDisplayMonth.Year, _calendarDisplayMonth.Month, 1);
+            var monthItems = agendaItems
+                .Where(item => item.DueDate.Year == monthStart.Year && item.DueDate.Month == monthStart.Month)
+                .GroupBy(item => item.DueDate.Date)
+                .ToDictionary(group => group.Key, group => (IReadOnlyList<CalendarAgendaItem>)group.OrderBy(item => item.DueDate).ThenBy(item => item.Title).ToList());
+
+            var card = new Border
+            {
+                Background = GetThemeBrush("SurfaceBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(28),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 18)
+            };
+
+            var stack = new StackPanel();
+            var weekdayHeader = new UniformGrid { Columns = 7, Margin = new Thickness(0, 0, 0, 12) };
+            foreach (var label in new[] { "DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SAB" })
+            {
+                weekdayHeader.Children.Add(new Border
+                {
+                    Padding = new Thickness(6, 0, 6, 0),
+                    Child = new TextBlock
+                    {
+                        Text = label,
+                        FontSize = 11,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        TextAlignment = TextAlignment.Center
+                    }
+                });
+            }
+            stack.Children.Add(weekdayHeader);
+
+            var grid = new UniformGrid { Columns = 7, Rows = 6 };
+            var leadingSlots = (int)monthStart.DayOfWeek;
+            for (var index = 0; index < 42; index++)
+            {
+                var date = monthStart.AddDays(index - leadingSlots);
+                var isCurrentMonth = date.Month == monthStart.Month;
+                var dayItems = isCurrentMonth && monthItems.TryGetValue(date.Date, out var itemsForDay)
+                    ? itemsForDay
+                    : Array.Empty<CalendarAgendaItem>();
+                grid.Children.Add(CreateCalendarDayCell(date, isCurrentMonth, dayItems));
+            }
+
+            stack.Children.Add(grid);
+            card.Child = stack;
+            return card;
+        }
+
+        private void OpenCalendarDayDetailsDialog(DateTime date, IReadOnlyList<CalendarAgendaItem> dayItems)
+        {
+            if (dayItems == null || dayItems.Count == 0)
+            {
+                return;
+            }
+
+            var accentColor = dayItems.Any(item => item.IsOverdue) ? Color.FromRgb(220, 38, 38) : dayItems[0].AccentColor;
+            var accentBrush = new SolidColorBrush(accentColor);
+            var dialog = CreateStyledDialogWindow($"Agenda • {date:dd/MM/yyyy}", 920, 760, 640, true);
+
+            var root = new DockPanel();
+            var header = CreateDialogHeader(
+                "CALENDÁRIO",
+                GetAgendaDateHeading(date),
+                $"Abra os detalhes de prazo, evento, reunião ou revisão marcados neste dia. Só os quadrados com conteúdo ficam clicáveis.",
+                accentBrush);
+            DockPanel.SetDock(header, Dock.Top);
+            root.Children.Add(header);
+
+            var summaryChips = new WrapPanel { Margin = new Thickness(0, 0, 0, 16) };
+            summaryChips.Children.Add(CreateStaticTeamChip($"{dayItems.Count} item(ns)", CreateSoftAccentBrush(accentBrush, 28), accentBrush));
+            foreach (var kind in dayItems.Select(item => item.KindLabel).Distinct())
+            {
+                summaryChips.Children.Add(CreateStaticTeamChip(kind, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            foreach (var context in dayItems.Select(item => item.ContextLabel).Distinct())
+            {
+                summaryChips.Children.Add(CreateStaticTeamChip(context, GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            DockPanel.SetDock(summaryChips, Dock.Top);
+            root.Children.Add(summaryChips);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new StackPanel()
+            };
+            var itemsHost = (StackPanel)scrollViewer.Content;
+            foreach (var item in dayItems.OrderBy(item => item.DueDate).ThenBy(item => item.Title))
+            {
+                itemsHost.Children.Add(CreateCalendarAgendaItemCard(item, emphasize: item.IsOverdue));
+            }
+            root.Children.Add(scrollViewer);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0)
+            };
+            var closeButton = CreateDialogActionButton("Fechar", GetThemeBrush("AccentBrush"), Brushes.White, Brushes.Transparent);
+            closeButton.Click += (_, __) => dialog.Close();
+            footer.Children.Add(closeButton);
+            DockPanel.SetDock(footer, Dock.Bottom);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root, new Thickness(24));
+            dialog.ShowDialog();
+        }
+
+        private void OpenIndependentCalendarEntryDialog()
+        {
+            if (_currentProfile == null || !TeamPermissionService.CanUseProfessorDashboard(_currentProfile))
+            {
+                ShowStyledAlertDialog("CALENDÁRIO", "Ação indisponível", "Somente perfis docentes e de coordenação podem publicar avisos e datas independentes no calendário.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var dialog = CreateStyledDialogWindow("Nova data independente", 680, 760, 640, true);
+            var accentBrush = GetThemeBrush("AccentBrush");
+
+            var titleBox = new TextBox { Height = 40, Margin = new Thickness(0, 6, 0, 14) };
+            var typeBox = new ComboBox
+            {
+                ItemsSource = new[] { "Aviso", "Atividade", "Prazo", "Evento", "Reunião", "Sem aula" },
+                SelectedItem = "Aviso",
+                Height = 40,
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+            var contextBox = new ComboBox
+            {
+                ItemsSource = new[] { "Professor", "Equipe", "Coordenação", "Reunião" },
+                SelectedItem = "Professor",
+                Height = 40,
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+            var datePicker = new DatePicker { Height = 40, Margin = new Thickness(0, 6, 0, 14), SelectedDate = DateTime.Today };
+            var notesBox = new TextBox
+            {
+                Height = 140,
+                TextWrapping = TextWrapping.Wrap,
+                AcceptsReturn = true,
+                Margin = new Thickness(0, 6, 0, 14)
+            };
+
+            ApplyDialogInputStyle(titleBox);
+            ApplyDialogInputStyle(typeBox);
+            ApplyDialogInputStyle(contextBox);
+            ApplyDialogInputStyle(datePicker);
+            ApplyDialogInputStyle(notesBox);
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = CreateDialogHeader(
+                "CALENDÁRIO",
+                "Nova data independente",
+                "Publique avisos, atividades, prazos, reuniões e dias sem aula sem depender de uma equipe. O rodapé fica fixo para não sumir durante o preenchimento.",
+                accentBrush);
+            layout.Children.Add(header);
+
+            var formScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(0, 18, 0, 18)
+            };
+            Grid.SetRow(formScroll, 1);
+
+            var formRoot = new StackPanel();
+
+            var identityCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(18),
+                Margin = new Thickness(0, 0, 0, 14)
+            };
+            var identityStack = new StackPanel();
+            identityStack.Children.Add(CreateDialogFieldLabel("Título"));
+            identityStack.Children.Add(titleBox);
+            identityStack.Children.Add(CreateDialogFieldLabel("Descrição"));
+            identityStack.Children.Add(notesBox);
+            identityCard.Child = identityStack;
+            formRoot.Children.Add(identityCard);
+
+            var planningCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(18)
+            };
+            var planningGrid = new Grid();
+            planningGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            planningGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+            planningGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var leftStack = new StackPanel();
+            leftStack.Children.Add(CreateDialogFieldLabel("Tipo"));
+            leftStack.Children.Add(typeBox);
+            leftStack.Children.Add(CreateDialogFieldLabel("Data"));
+            leftStack.Children.Add(datePicker);
+            planningGrid.Children.Add(leftStack);
+
+            var rightStack = new StackPanel();
+            rightStack.Children.Add(CreateDialogFieldLabel("Contexto"));
+            rightStack.Children.Add(contextBox);
+            rightStack.Children.Add(new TextBlock
+            {
+                Text = "Use 'Sem aula' para bloquear o dia em vermelho. Avisos, atividades, prazos e reuniões entram no calendário mesmo sem equipe vinculada.",
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18,
+                Margin = new Thickness(0, 18, 0, 0)
+            });
+            Grid.SetColumn(rightStack, 2);
+            planningGrid.Children.Add(rightStack);
+            planningCard.Child = planningGrid;
+            formRoot.Children.Add(planningCard);
+
+            formScroll.Content = formRoot;
+            layout.Children.Add(formScroll);
+
+            var footerShell = new Border
+            {
+                Background = GetThemeBrush("SurfaceBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(0, 16, 0, 0)
+            };
+            Grid.SetRow(footerShell, 2);
+
+            var footer = new Grid();
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            footer.Children.Add(new TextBlock
+            {
+                Text = "Dica: em telas menores, o conteúdo rola e os botões continuam presos no rodapé.",
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 18, 0)
+            });
+
+            var actionWrap = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Publicar data", accentBrush, Brushes.White, Brushes.Transparent, 140);
+            actionWrap.Children.Add(cancelButton);
+            actionWrap.Children.Add(saveButton);
+            Grid.SetColumn(actionWrap, 1);
+            footer.Children.Add(actionWrap);
+            footerShell.Child = footer;
+            layout.Children.Add(footerShell);
+
+            dialog.Content = CreateStyledDialogShell(layout, new Thickness(24));
+
+            cancelButton.Click += (_, __) => dialog.Close();
+            saveButton.Click += async (_, __) =>
+            {
+                if (_currentProfile == null)
+                {
+                    dialog.Close();
+                    return;
+                }
+
+                var title = titleBox.Text?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    ShowStyledAlertDialog("CALENDÁRIO", "Título obrigatório", "Informe um título antes de publicar a data no calendário.", "Continuar", GetThemeBrush("AccentBrush"));
+                    return;
+                }
+
+                if (!datePicker.SelectedDate.HasValue)
+                {
+                    ShowStyledAlertDialog("CALENDÁRIO", "Data obrigatória", "Escolha a data que deve aparecer no calendário.", "Continuar", GetThemeBrush("AccentBrush"));
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(_idToken) || string.IsNullOrWhiteSpace(_currentProfile.UserId))
+                {
+                    ShowStyledAlertDialog("CALENDÁRIO", "Sessão indisponível", "A sessão atual não possui credenciais para salvar a data no Firebase.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
+
+                var currentProfile = _currentProfile;
+
+                saveButton.IsEnabled = false;
+                cancelButton.IsEnabled = false;
+
+                var entry = new ProfileCalendarEntry
+                {
+                    EntryId = Guid.NewGuid().ToString("N"),
+                    Date = datePicker.SelectedDate.Value,
+                    EntryType = NormalizeProfileCalendarEntryType(typeBox.SelectedItem?.ToString() ?? "Aviso"),
+                    ContextLabel = NormalizeProfileCalendarContextLabel(contextBox.SelectedItem?.ToString() ?? "Professor"),
+                    Title = title,
+                    Notes = notesBox.Text?.Trim() ?? string.Empty,
+                    CreatedAt = DateTime.Now
+                };
+
+                currentProfile.CalendarEntries ??= new List<ProfileCalendarEntry>();
+                var backupEntries = currentProfile.CalendarEntries.ToList();
+                currentProfile.CalendarEntries.Add(entry);
+                NormalizeProfileCollections(currentProfile);
+
+                try
+                {
+                    var result = await SaveProfessionalProfileAsync(currentProfile, _idToken);
+                    if (!result.Success)
+                    {
+                        currentProfile.CalendarEntries = backupEntries;
+                        NormalizeProfileCollections(currentProfile);
+                        ShowStyledAlertDialog("CALENDÁRIO", "Falha ao publicar", result.ErrorMessage ?? "Não foi possível salvar a data independente no perfil do professor.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                        return;
+                    }
+
+                    _userProfileCache[currentProfile.UserId] = Task.FromResult<UserProfile?>(currentProfile);
+                    RenderCalendarAgenda();
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                }
+                finally
+                {
+                    saveButton.IsEnabled = true;
+                    cancelButton.IsEnabled = true;
+                }
+            };
+
+            dialog.ShowDialog();
         }
 
         private Border CreateCalendarFilteredEmptyState()
@@ -5470,24 +6347,58 @@ namespace MeuApp
                 .Select(EnsureTeamWorkspaceDefaults)
                 .OrderBy(team => team.TeamName)
                 .ToList();
-            var agendaItems = BuildCalendarAgendaItems(teams);
+            var relatedProfiles = GetCachedCalendarRelatedProfiles(teams, out var missingProfileIds);
+            if (missingProfileIds.Count > 0)
+            {
+                _ = WarmCalendarRelatedProfilesAsync(missingProfileIds);
+            }
+
+            var globalFacultyProfiles = GetCachedGlobalCalendarFacultyProfiles(out var shouldWarmGlobalFacultyProfiles);
+            if (shouldWarmGlobalFacultyProfiles)
+            {
+                _ = WarmGlobalCalendarFacultyProfilesAsync();
+            }
+
+            var facultyProfiles = relatedProfiles
+                .Concat(globalFacultyProfiles)
+                .Where(profile => profile != null && !string.Equals(profile.UserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+                .GroupBy(profile => profile.UserId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+            var agendaItems = BuildCalendarAgendaItems(teams)
+                .Concat(BuildProfileCalendarAgendaItems(_currentProfile))
+                .Concat(facultyProfiles.SelectMany(BuildProfileCalendarAgendaItems))
+                .OrderBy(item => item.DueDate.Date)
+                .ThenBy(item => item.Team.TeamName)
+                .ThenBy(item => item.Title)
+                .ToList();
             var filteredAgendaItems = ApplyCalendarAgendaFilters(agendaItems);
-            var overdueCount = filteredAgendaItems.Count(item => item.IsOverdue);
+            var monthItems = filteredAgendaItems
+                .Where(item => item.DueDate.Year == _calendarDisplayMonth.Year && item.DueDate.Month == _calendarDisplayMonth.Month)
+                .ToList();
+            var overdueCount = monthItems.Count(item => item.IsOverdue);
+            var occupiedDays = monthItems.Select(item => item.DueDate.Date).Distinct().Count();
             _lastCalendarAgendaTeams = teams;
             _lastCalendarAgendaItems = filteredAgendaItems;
 
             CalendarStatusText.Text = teams.Count == 0
-                ? "Crie ou entre em uma equipe para acompanhar prazos, marcos e tarefas em uma agenda consolidada."
-                : $"{teams.Count} equipe(s) monitorada(s), {filteredAgendaItems.Count} compromisso(s) na visão atual e {overdueCount} ponto(s) em risco imediato.";
+                ? TeamPermissionService.CanUseProfessorDashboard(_currentProfile)
+                    ? $"Calendário independente habilitado. {monthItems.Count} marcação(ões) no mês atual e publicação docente disponível mesmo sem equipe vinculada."
+                    : "Crie ou entre em uma equipe para acompanhar prazos, marcos e tarefas em uma agenda consolidada."
+                : monthItems.Count == 0
+                    ? $"{teams.Count} equipe(s) monitorada(s). {GetCalendarMonthTitle(_calendarDisplayMonth)} está sem marcações na visão atual."
+                    : $"{teams.Count} equipe(s) monitorada(s). {GetCalendarMonthTitle(_calendarDisplayMonth)} tem {monthItems.Count} marcação(ões) em {occupiedDays} dia(s), com {overdueCount} ponto(s) em risco imediato.";
 
-            if (teams.Count == 0)
+            if (teams.Count == 0 && filteredAgendaItems.Count == 0 && !TeamPermissionService.CanUseProfessorDashboard(_currentProfile))
             {
                 CalendarAgendaHost.Children.Add(CreateCalendarEmptyState());
                 return;
             }
 
-            CalendarAgendaHost.Children.Add(CreateCalendarHeroCard(teams, filteredAgendaItems));
             CalendarAgendaHost.Children.Add(CreateCalendarFiltersCard(teams, filteredAgendaItems, agendaItems.Count));
+            CalendarAgendaHost.Children.Add(CreateCalendarMonthNavigatorCard(filteredAgendaItems));
+            CalendarAgendaHost.Children.Add(CreateCalendarMonthGridCard(filteredAgendaItems));
 
             if (filteredAgendaItems.Count == 0)
             {
@@ -5495,26 +6406,12 @@ namespace MeuApp
                 return;
             }
 
-            CalendarAgendaHost.Children.Add(CreateCalendarWeekStripCard(filteredAgendaItems));
-
-            var mainGrid = new Grid { Margin = new Thickness(0, 0, 0, 18) };
-            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
-            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            var leftStack = new StackPanel();
-            leftStack.Children.Add(CreateCalendarPrioritySection(filteredAgendaItems));
-            leftStack.Children.Add(CreateCalendarTimelineSection(filteredAgendaItems));
-            mainGrid.Children.Add(leftStack);
-
-            var rightStack = new StackPanel();
-            rightStack.Children.Add(CreateCalendarTeamRadarSection(teams, filteredAgendaItems));
-            rightStack.Children.Add(CreateCalendarRecentActivitySection(teams));
-            rightStack.Children.Add(CreateCalendarGuidanceSection(teams, filteredAgendaItems));
-            Grid.SetColumn(rightStack, 2);
-            mainGrid.Children.Add(rightStack);
-
-            CalendarAgendaHost.Children.Add(mainGrid);
+            if (monthItems.Count == 0)
+            {
+                CalendarAgendaHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Mês sem marcações",
+                    "Troque o mês ou ajuste os filtros para localizar prazos, eventos, reuniões e revisões do período."));
+            }
         }
 
         private Border CreateCalendarEmptyState()
@@ -6265,6 +7162,10 @@ namespace MeuApp
             var chips = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
             chips.Children.Add(CreateStaticTeamChip(item.KindLabel, CreateSoftAccentBrush(accentBrush, 24), accentBrush));
             chips.Children.Add(CreateStaticTeamChip($"{GetAgendaDueCountdownText(item.DueDate)} • {item.DueDate:dd/MM}", item.IsOverdue ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : GetThemeBrush("CardBackgroundBrush"), item.IsOverdue ? Brushes.White : GetThemeBrush("PrimaryTextBrush")));
+            if (!string.IsNullOrWhiteSpace(item.ContextLabel))
+            {
+                chips.Children.Add(CreateStaticTeamChip(item.ContextLabel, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
             if (!string.IsNullOrWhiteSpace(item.StatusLabel))
             {
                 chips.Children.Add(CreateStaticTeamChip(item.StatusLabel, GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
@@ -6274,10 +7175,13 @@ namespace MeuApp
             Grid.SetColumn(content, 2);
             layout.Children.Add(content);
 
-            var openButton = CreateCalendarOpenTeamButton(item.Team, emphasize ? "Abrir equipe" : "Abrir");
-            openButton.Margin = new Thickness(14, 0, 0, 0);
-            Grid.SetColumn(openButton, 3);
-            layout.Children.Add(openButton);
+            if (item.CanOpenTeam)
+            {
+                var openButton = CreateCalendarOpenTeamButton(item.Team, emphasize ? "Abrir equipe" : "Abrir");
+                openButton.Margin = new Thickness(14, 0, 0, 0);
+                Grid.SetColumn(openButton, 3);
+                layout.Children.Add(openButton);
+            }
 
             card.Child = layout;
             return card;
@@ -8872,9 +9776,8 @@ namespace MeuApp
 
             if (persistInBackground)
             {
-                var syncSequence = ++_teamSyncSequence;
                 SetTeamSyncStatus("Sincronizando alterações da equipe no Firebase...", GetThemeBrush("SecondaryTextBrush"));
-                _ = PersistTeamWorkspaceInBackgroundAsync(team, syncSequence);
+                QueueTeamWorkspacePersistence(team);
             }
 
             if (_activeTeamWorkspace != null && string.Equals(_activeTeamWorkspace.TeamId, team.TeamId, StringComparison.OrdinalIgnoreCase))
@@ -8884,6 +9787,34 @@ namespace MeuApp
 
             RenderProfessorDashboard();
             RenderCalendarAgenda();
+        }
+
+        private string GetTeamPersistenceKey(TeamWorkspaceInfo team)
+        {
+            var teamId = team.TeamId?.Trim();
+            if (!string.IsNullOrWhiteSpace(teamId))
+            {
+                return teamId;
+            }
+
+            return $"{team.ClassId?.Trim()}::{team.TeamName?.Trim()}".ToLowerInvariant();
+        }
+
+        private void QueueTeamWorkspacePersistence(TeamWorkspaceInfo team)
+        {
+            var persistenceKey = GetTeamPersistenceKey(team);
+            _dirtyTeamPersistenceState[persistenceKey] = team;
+            _queuedTeamPersistence[persistenceKey] = team;
+
+            if (_teamPersistenceInFlight.Contains(persistenceKey))
+            {
+                DebugHelper.WriteLine($"[TeamSyncQueue] Atualização mais recente enfileirada para '{persistenceKey}'.");
+                return;
+            }
+
+            _teamPersistenceInFlight.Add(persistenceKey);
+            DebugHelper.WriteLine($"[TeamSyncQueue] Worker serial iniciado para '{persistenceKey}'.");
+            _ = PersistQueuedTeamWorkspaceAsync(persistenceKey);
         }
 
         private void TrackTeamWorkspaceLocally(TeamWorkspaceInfo team, bool refreshVisuals = true)
@@ -8915,27 +9846,69 @@ namespace MeuApp
             RenderCalendarAgenda();
         }
 
-        private async Task PersistTeamWorkspaceInBackgroundAsync(TeamWorkspaceInfo team, int syncSequence)
+        private async Task PersistQueuedTeamWorkspaceAsync(string persistenceKey)
         {
-            var result = await SaveTeamToFirestoreAsync(team);
-
-            await Dispatcher.InvokeAsync(() =>
+            while (true)
             {
-                if (syncSequence != _teamSyncSequence)
+                if (!_queuedTeamPersistence.TryGetValue(persistenceKey, out var queuedTeam))
                 {
+                    _teamPersistenceInFlight.Remove(persistenceKey);
+                    DebugHelper.WriteLine($"[TeamSyncQueue] Worker serial finalizado para '{persistenceKey}'.");
                     return;
                 }
 
-                if (result.Success)
+                _queuedTeamPersistence.Remove(persistenceKey);
+                DebugHelper.WriteLine($"[TeamSyncQueue] Persistindo snapshot mais recente de '{persistenceKey}'.");
+
+                var result = await SaveTeamToFirestoreAsync(queuedTeam);
+
+                await Dispatcher.InvokeAsync(() =>
                 {
-                    SetTeamSyncStatus("Equipe sincronizada com sucesso no Firebase.", new SolidColorBrush(Color.FromRgb(21, 128, 61)));
-                    return;
+                    var hasMorePending = _queuedTeamPersistence.ContainsKey(persistenceKey);
+
+                    if (result.Success && !hasMorePending)
+                    {
+                        _dirtyTeamPersistenceState.Remove(persistenceKey);
+                        SetTeamSyncStatus("Equipe sincronizada com sucesso no Firebase.", new SolidColorBrush(Color.FromRgb(21, 128, 61)));
+                        return;
+                    }
+
+                    if (result.Success)
+                    {
+                        SetTeamSyncStatus("Aplicando a atualização mais recente da equipe...", GetThemeBrush("SecondaryTextBrush"));
+                        return;
+                    }
+
+                    SetTeamSyncStatus(
+                        $"Falha na sincronização automática: {result.ErrorMessage ?? "erro não identificado"}",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                });
+            }
+        }
+
+        private List<TeamWorkspaceInfo> MergeRemoteTeamsWithDirtyLocalState(IEnumerable<TeamWorkspaceInfo> remoteTeams)
+        {
+            var mergedTeams = (remoteTeams ?? Enumerable.Empty<TeamWorkspaceInfo>())
+                .Where(team => team != null)
+                .Select(EnsureTeamWorkspaceDefaults)
+                .GroupBy(team => GetTeamPersistenceKey(team), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(team => team.UpdatedAt).First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var localEntry in _dirtyTeamPersistenceState)
+            {
+                if (localEntry.Value == null)
+                {
+                    continue;
                 }
 
-                SetTeamSyncStatus(
-                    $"Falha na sincronização automática: {result.ErrorMessage ?? "erro não identificado"}",
-                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
-            });
+                mergedTeams[localEntry.Key] = EnsureTeamWorkspaceDefaults(localEntry.Value);
+            }
+
+            return mergedTeams.Values
+                .GroupBy(team => GetTeamPersistenceKey(team), StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderByDescending(team => team.UpdatedAt).First())
+                .OrderBy(team => team.TeamName)
+                .ToList();
         }
 
         private void SetTeamSyncStatus(string message, Brush foreground)
@@ -9504,6 +10477,7 @@ namespace MeuApp
         {
             profile.GalleryImages ??= new List<ProfileGalleryImage>();
             profile.FeaturedProjectIds ??= new List<string>();
+            profile.CalendarEntries ??= new List<ProfileCalendarEntry>();
 
             profile.GalleryImages = profile.GalleryImages
                 .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ImageDataUri))
@@ -9526,6 +10500,23 @@ namespace MeuApp
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Select(item => item.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            profile.CalendarEntries = profile.CalendarEntries
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Title))
+                .Select(item => new ProfileCalendarEntry
+                {
+                    EntryId = string.IsNullOrWhiteSpace(item.EntryId) ? Guid.NewGuid().ToString("N") : item.EntryId,
+                    Date = item.Date == default ? DateTime.Today : item.Date,
+                    EntryType = NormalizeProfileCalendarEntryType(item.EntryType),
+                    ContextLabel = NormalizeProfileCalendarContextLabel(item.ContextLabel),
+                    Title = item.Title?.Trim() ?? string.Empty,
+                    Notes = item.Notes?.Trim() ?? string.Empty,
+                    CreatedAt = item.CreatedAt == default ? DateTime.Now : item.CreatedAt
+                })
+                .OrderBy(item => item.Date.Date)
+                .ThenBy(item => item.Title)
+                .ThenBy(item => item.CreatedAt)
                 .ToList();
         }
 
@@ -10828,6 +11819,53 @@ namespace MeuApp
             return _userInfoCache.GetOrAdd(userId, LoadUserInfoByIdAsync);
         }
 
+        private UserProfile CreateUserProfileFromFirestoreFields(string userId, JsonElement fields)
+        {
+            var profile = new UserProfile
+            {
+                UserId = userId,
+                Name = GetFirestoreStringValue(fields, "name"),
+                Email = GetFirestoreStringValue(fields, "email"),
+                Phone = GetFirestoreStringValue(fields, "phone"),
+                Course = GetFirestoreStringValue(fields, "course"),
+                Registration = GetFirestoreStringValue(fields, "registration"),
+                Role = TeamPermissionService.NormalizeRole(GetFirestoreStringValue(fields, "role")),
+                AcademicDepartment = GetFirestoreStringValue(fields, "academicDepartment"),
+                AcademicFocus = GetFirestoreStringValue(fields, "academicFocus"),
+                OfficeHours = GetFirestoreStringValue(fields, "officeHours"),
+                ProfessorAccessLevel = GetFirestoreStringValue(fields, "professorAccessLevel"),
+                Nickname = GetFirestoreStringValue(fields, "nickname"),
+                ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
+                Bio = GetFirestoreStringValue(fields, "bio"),
+                Skills = GetFirestoreStringValue(fields, "skills"),
+                ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
+                PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
+                LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
+                AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
+                AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
+                AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
+                AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory"),
+                AvatarClothing = GetFirestoreStringValue(fields, "avatarClothing"),
+                GalleryImages = GetFirestoreProfileGalleryImages(fields, "galleryImages"),
+                FeaturedProjectIds = GetFirestoreStringListValue(fields, "featuredProjectIds"),
+                CalendarEntries = GetFirestoreProfileCalendarEntries(fields, "calendarEntries")
+            };
+
+            NormalizeProfileCollections(profile);
+            return profile;
+        }
+
+        private string GetFirestoreDocumentId(JsonElement document)
+        {
+            if (!document.TryGetProperty("name", out var nameField))
+            {
+                return string.Empty;
+            }
+
+            var fullName = nameField.GetString() ?? string.Empty;
+            return fullName.Split('/').LastOrDefault() ?? string.Empty;
+        }
+
         private async Task<UserProfile?> LoadUserProfileByIdAsync(string userId)
         {
             if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(_idToken))
@@ -10842,6 +11880,7 @@ namespace MeuApp
 
             try
             {
+                DebugHelper.WriteLine($"[LoadUserProfileByIdAsync] Carregando perfil '{userId}'...");
                 var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{userId}");
                 var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
@@ -10860,34 +11899,10 @@ namespace MeuApp
                     return null;
                 }
 
-                return new UserProfile
-                {
-                    UserId = userId,
-                    Name = GetFirestoreStringValue(fields, "name"),
-                    Email = GetFirestoreStringValue(fields, "email"),
-                    Phone = GetFirestoreStringValue(fields, "phone"),
-                    Course = GetFirestoreStringValue(fields, "course"),
-                    Registration = GetFirestoreStringValue(fields, "registration"),
-                    Role = TeamPermissionService.NormalizeRole(GetFirestoreStringValue(fields, "role")),
-                    AcademicDepartment = GetFirestoreStringValue(fields, "academicDepartment"),
-                    AcademicFocus = GetFirestoreStringValue(fields, "academicFocus"),
-                    OfficeHours = GetFirestoreStringValue(fields, "officeHours"),
-                    ProfessorAccessLevel = GetFirestoreStringValue(fields, "professorAccessLevel"),
-                    Nickname = GetFirestoreStringValue(fields, "nickname"),
-                    ProfessionalTitle = GetFirestoreStringValue(fields, "professionalTitle"),
-                    Bio = GetFirestoreStringValue(fields, "bio"),
-                    Skills = GetFirestoreStringValue(fields, "skills"),
-                    ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
-                    PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
-                    LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
-                    AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
-                    AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
-                    AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
-                    AvatarAccessory = GetFirestoreStringValue(fields, "avatarAccessory"),
-                    AvatarClothing = GetFirestoreStringValue(fields, "avatarClothing"),
-                    GalleryImages = GetFirestoreProfileGalleryImages(fields, "galleryImages"),
-                    FeaturedProjectIds = GetFirestoreStringListValue(fields, "featuredProjectIds")
-                };
+                var profile = CreateUserProfileFromFirestoreFields(userId, fields);
+
+                DebugHelper.WriteLine($"[LoadUserProfileByIdAsync] Perfil '{userId}' carregado com {profile.CalendarEntries.Count} entrada(s) de calendário.");
+                return profile;
             }
             catch (Exception ex)
             {
@@ -10904,6 +11919,119 @@ namespace MeuApp
             }
 
             return _userProfileCache.GetOrAdd(userId, LoadUserProfileByIdAsync);
+        }
+
+        private IReadOnlyList<UserProfile> GetCachedGlobalCalendarFacultyProfiles(out bool refreshScheduled)
+        {
+            refreshScheduled = false;
+
+            if (string.IsNullOrWhiteSpace(_idToken))
+            {
+                return Array.Empty<UserProfile>();
+            }
+
+            var cacheExpired = _globalCalendarFacultyProfilesTask == null
+                || _globalCalendarFacultyProfilesTask.IsCanceled
+                || _globalCalendarFacultyProfilesTask.IsFaulted
+                || DateTime.UtcNow - _globalCalendarFacultyProfilesLoadedAt > CalendarFacultyProfilesCacheTtl;
+
+            if (cacheExpired)
+            {
+                refreshScheduled = !_globalCalendarFacultyProfilesRefreshInFlight;
+                return Array.Empty<UserProfile>();
+            }
+
+            var cachedTask = _globalCalendarFacultyProfilesTask;
+            if (cachedTask != null && cachedTask.IsCompletedSuccessfully)
+            {
+                return cachedTask.Result;
+            }
+
+            refreshScheduled = !_globalCalendarFacultyProfilesRefreshInFlight;
+            return Array.Empty<UserProfile>();
+        }
+
+        private async Task WarmGlobalCalendarFacultyProfilesAsync()
+        {
+            if (_globalCalendarFacultyProfilesRefreshInFlight || string.IsNullOrWhiteSpace(_idToken))
+            {
+                return;
+            }
+
+            _globalCalendarFacultyProfilesRefreshInFlight = true;
+
+            try
+            {
+                var profiles = await LoadGlobalCalendarFacultyProfilesAsync();
+                _globalCalendarFacultyProfilesTask = Task.FromResult(profiles);
+                _globalCalendarFacultyProfilesLoadedAt = DateTime.UtcNow;
+
+                foreach (var profile in profiles.Where(profile => !string.IsNullOrWhiteSpace(profile.UserId)))
+                {
+                    _userProfileCache[profile.UserId] = Task.FromResult<UserProfile?>(profile);
+                }
+
+                DebugHelper.WriteLine($"[CalendarGlobalProfiles] {profiles.Count} perfil(is) docente(s) com entradas globais carregado(s).");
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[CalendarGlobalProfiles] Falha ao carregar perfis docentes globais: {ex.Message}");
+            }
+            finally
+            {
+                _globalCalendarFacultyProfilesRefreshInFlight = false;
+                await Dispatcher.InvokeAsync(RenderCalendarAgenda, DispatcherPriority.Background);
+            }
+        }
+
+        private async Task<List<UserProfile>> LoadGlobalCalendarFacultyProfilesAsync()
+        {
+            var profiles = new List<UserProfile>();
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
+            var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            var content = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                DebugHelper.WriteLine($"[CalendarGlobalProfiles] Falha ao listar usuários: {response.StatusCode} | {content}");
+                return profiles;
+            }
+
+            using var doc = JsonDocument.Parse(content);
+            if (!doc.RootElement.TryGetProperty("documents", out var documents) || documents.ValueKind != JsonValueKind.Array)
+            {
+                return profiles;
+            }
+
+            foreach (var userDoc in documents.EnumerateArray())
+            {
+                if (!userDoc.TryGetProperty("fields", out var fields))
+                {
+                    continue;
+                }
+
+                var userId = GetFirestoreDocumentId(userDoc);
+                if (string.IsNullOrWhiteSpace(userId) || string.Equals(userId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var profile = CreateUserProfileFromFirestoreFields(userId, fields);
+                if (!TeamPermissionService.CanUseProfessorDashboard(profile) || (profile.CalendarEntries?.Count ?? 0) == 0)
+                {
+                    continue;
+                }
+
+                profiles.Add(profile);
+            }
+
+            return profiles
+                .GroupBy(profile => profile.UserId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(profile => profile.Name)
+                .ToList();
         }
 
         private bool CurrentViewerCanUseProfessorDiscovery()
@@ -11421,6 +12549,40 @@ namespace MeuApp
             }
 
             return images;
+        }
+
+        private List<ProfileCalendarEntry> GetFirestoreProfileCalendarEntries(JsonElement fields, string fieldName)
+        {
+            var entries = new List<ProfileCalendarEntry>();
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var items) ||
+                items.ValueKind != JsonValueKind.Array)
+            {
+                return entries;
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                if (!item.TryGetProperty("mapValue", out var mapValue) ||
+                    !mapValue.TryGetProperty("fields", out var mapFields))
+                {
+                    continue;
+                }
+
+                entries.Add(new ProfileCalendarEntry
+                {
+                    EntryId = GetFirestoreStringValue(mapFields, "entryId"),
+                    Date = GetFirestoreTimestampValue(mapFields, "date"),
+                    EntryType = GetFirestoreStringValue(mapFields, "entryType"),
+                    ContextLabel = GetFirestoreStringValue(mapFields, "contextLabel"),
+                    Title = GetFirestoreStringValue(mapFields, "title"),
+                    Notes = GetFirestoreStringValue(mapFields, "notes"),
+                    CreatedAt = GetFirestoreTimestampValue(mapFields, "createdAt")
+                });
+            }
+
+            return entries;
         }
 
         private DateTime GetFirestoreTimestampValue(JsonElement fields, string fieldName)
@@ -18082,6 +19244,8 @@ namespace MeuApp
         private async Task<(bool Success, string? ErrorMessage)> SaveProfessionalProfileAsync(UserProfile profile, string idToken)
         {
             profile.Role = TeamPermissionService.NormalizeRole(profile.Role);
+            profile.CalendarEntries ??= new List<ProfileCalendarEntry>();
+            DebugHelper.WriteLine($"[SaveProfessionalProfile] Salvando perfil '{profile.UserId}' com {profile.CalendarEntries?.Count ?? 0} entrada(s) de calendário.");
 
             var endpoint = AppConfig.BuildFirestoreDocumentUrl($"users/{profile.UserId}");
             var body = new
@@ -18112,6 +19276,7 @@ namespace MeuApp
                     avatarClothing = new { stringValue = profile.AvatarClothing },
                     galleryImages = new { arrayValue = new { values = ConvertProfileGalleryImagesToFirestoreArray(profile.GalleryImages) } },
                     featuredProjectIds = new { arrayValue = new { values = ConvertStringValuesToFirestoreArray(profile.FeaturedProjectIds) } },
+                    calendarEntries = new { arrayValue = new { values = ConvertProfileCalendarEntriesToFirestoreArray((IEnumerable<ProfileCalendarEntry>?)profile.CalendarEntries ?? Array.Empty<ProfileCalendarEntry>()) } },
                     updatedAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -18125,10 +19290,12 @@ namespace MeuApp
             var response = await httpClient.SendAsync(request);
             if (response.IsSuccessStatusCode)
             {
+                DebugHelper.WriteLine($"[SaveProfessionalProfile] Perfil '{profile.UserId}' salvo com sucesso.");
                 return (true, null);
             }
 
             var error = await response.Content.ReadAsStringAsync();
+            DebugHelper.WriteLine($"[SaveProfessionalProfile] Falha ao salvar '{profile.UserId}': HTTP {(int)response.StatusCode} | {error}");
             return (false, error);
         }
 
@@ -18162,6 +19329,30 @@ namespace MeuApp
             return (values ?? Enumerable.Empty<string>())
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Select(item => new { stringValue = item.Trim() })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertProfileCalendarEntriesToFirestoreArray(IEnumerable<ProfileCalendarEntry> calendarEntries)
+        {
+            return (calendarEntries ?? Enumerable.Empty<ProfileCalendarEntry>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Title))
+                .Select(item => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            entryId = new { stringValue = string.IsNullOrWhiteSpace(item.EntryId) ? Guid.NewGuid().ToString("N") : item.EntryId },
+                            date = new { timestampValue = (item.Date == default ? DateTime.UtcNow : item.Date.ToUniversalTime()).ToString("o") },
+                            entryType = new { stringValue = NormalizeProfileCalendarEntryType(item.EntryType) },
+                            contextLabel = new { stringValue = NormalizeProfileCalendarContextLabel(item.ContextLabel) },
+                            title = new { stringValue = item.Title?.Trim() ?? string.Empty },
+                            notes = new { stringValue = item.Notes?.Trim() ?? string.Empty },
+                            createdAt = new { timestampValue = (item.CreatedAt == default ? DateTime.UtcNow : item.CreatedAt.ToUniversalTime()).ToString("o") }
+                        }
+                    }
+                })
                 .Cast<object>()
                 .ToArray();
         }
@@ -19675,11 +20866,19 @@ namespace MeuApp
                 }
 
                 var teams = await _teamService.LoadTeamsAsync();
+                if (teams.Count == 0 && CurrentViewerCanUseProfessorDiscovery())
+                {
+                    DebugHelper.WriteLine("[LoadTeamsFromDatabase] Nenhuma equipe vinculada diretamente. Carregando equipes visíveis para perfil docente...");
+                    teams = await _teamService.LoadAllVisibleTeamsAsync();
+                }
+
                 await EnrichTeamMembersAvatarsAsync(teams);
+
+                var mergedTeams = MergeRemoteTeamsWithDirtyLocalState(teams);
 
                 _teamWorkspaces.Clear();
                 _userAcademicPortfolioCache.Clear();
-                foreach (var team in teams)
+                foreach (var team in mergedTeams)
                 {
                     _teamWorkspaces.Add(team);
                 }
@@ -19695,7 +20894,7 @@ namespace MeuApp
                 RenderProfessorDashboard();
                 RenderCalendarAgenda();
 
-                DebugHelper.WriteLine($"[LoadTeamsFromDatabase] {teams.Count} equipes carregadas do banco de dados");
+                DebugHelper.WriteLine($"[LoadTeamsFromDatabase] {mergedTeams.Count} equipes carregadas do banco de dados ({_dirtyTeamPersistenceState.Count} protegida(s) por estado local pendente).");
             }
             catch (Exception ex)
             {

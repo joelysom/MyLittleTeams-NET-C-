@@ -752,9 +752,9 @@
                         <StackPanel Orientation="Vertical" Margin="0,0,0,18">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <iconPacks:PackIconMaterial Kind="CalendarMonthOutline" Width="20" Height="20" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="Agenda integradora" Style="{StaticResource DisplaySectionTitleStyle}"/>
+                                <TextBlock Text="Calendário" Style="{StaticResource DisplaySectionTitleStyle}"/>
                             </StackPanel>
-                            <TextBlock Text="Consolide as entregas, marcos e tarefas do semestre em uma agenda de acompanhamento profissional." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                            <TextBlock Text="Visualize o mês em grid no estilo iOS. Dias sem marcação ficam estáticos; dias com prazo, evento ou reunião abrem os detalhes ao clicar." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                             <TextBlock x:Name="CalendarStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
 

@@ -1,25 +1,45 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 
 namespace MeuApp
 {
+    public sealed class DebugLogEntry
+    {
+        public DebugLogEntry(DateTime timestamp, string message)
+        {
+            Timestamp = timestamp;
+            Message = message ?? string.Empty;
+        }
+
+        public DateTime Timestamp { get; }
+        public string Message { get; }
+        public string FormattedText => $"[{Timestamp:HH:mm:ss.fff}] {Message}";
+    }
+
     /// <summary>
     /// Classe auxiliar para capturar logs de debug em um arquivo
     /// </summary>
     public static class DebugHelper
     {
         private const long MaxLogFileSizeBytes = 2 * 1024 * 1024;
+        private const int MaxRecentEntries = 1200;
         private static readonly string LogDirectoryPath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory,
             "logs"
         );
         private static readonly string LogFilePath = Path.Combine(LogDirectoryPath, "AppDebug.log");
+        private static readonly object SyncRoot = new object();
+        private static readonly Queue<DebugLogEntry> _recentEntries = new Queue<DebugLogEntry>();
 
         private static StreamWriter? _logWriter;
         private static TextWriterTraceListener? _traceListener;
         private static bool _initialized = false;
+
+        public static event Action<DebugLogEntry>? LogReceived;
 
         /// <summary>
         /// Inicializa o logging em arquivo
@@ -42,11 +62,13 @@ namespace MeuApp
         /// </summary>
         public static void WriteLine(string message)
         {
+            var entry = new DebugLogEntry(DateTime.Now, message);
+
             try
             {
                 if (_logWriter != null)
                 {
-                    _logWriter.WriteLine($"[{DateTime.Now:HH:mm:ss.fff}] {message}");
+                    _logWriter.WriteLine(entry.FormattedText);
                 }
             }
             catch (IOException ex)
@@ -59,7 +81,28 @@ namespace MeuApp
                 CleanupWriter();
             }
 
-            Debug.WriteLine(message);
+            CacheEntry(entry);
+            NotifyListeners(entry);
+            Debug.WriteLine(entry.Message);
+        }
+
+        public static IReadOnlyList<DebugLogEntry> GetRecentEntries(int maxEntries = 400)
+        {
+            lock (SyncRoot)
+            {
+                if (_recentEntries.Count == 0)
+                {
+                    return Array.Empty<DebugLogEntry>();
+                }
+
+                var entries = _recentEntries.ToArray();
+                if (entries.Length <= maxEntries)
+                {
+                    return entries;
+                }
+
+                return entries.Skip(entries.Length - maxEntries).ToArray();
+            }
         }
 
         /// <summary>
@@ -172,6 +215,30 @@ namespace MeuApp
             }
 
             File.WriteAllText(LogFilePath, string.Empty);
+        }
+
+        private static void CacheEntry(DebugLogEntry entry)
+        {
+            lock (SyncRoot)
+            {
+                _recentEntries.Enqueue(entry);
+                while (_recentEntries.Count > MaxRecentEntries)
+                {
+                    _recentEntries.Dequeue();
+                }
+            }
+        }
+
+        private static void NotifyListeners(DebugLogEntry entry)
+        {
+            try
+            {
+                LogReceived?.Invoke(entry);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DebugHelper] Falha ao notificar listeners de log: {ex.Message}");
+            }
         }
 
         private static void CleanupWriter()

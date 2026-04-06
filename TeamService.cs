@@ -17,11 +17,13 @@ namespace MeuApp
         private static readonly HttpClient httpClient = new HttpClient();
         private readonly string _idToken;
         private readonly string _currentUserId;
+        private readonly string _currentUserRole;
 
-        public TeamService(string idToken, string currentUserId)
+        public TeamService(string idToken, string currentUserId, string currentUserRole = "student")
         {
             _idToken = idToken;
             _currentUserId = currentUserId;
+            _currentUserRole = TeamPermissionService.NormalizeRole(currentUserRole);
             DebugHelper.InitializeSilent();
         }
 
@@ -91,7 +93,7 @@ namespace MeuApp
                         professorSupervisorUserIds = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorUserIds) } },
                         professorSupervisorNames = new { arrayValue = new { values = ConvertStringsToFirestoreArray(team.ProfessorSupervisorNames) } },
                         defaultFilePermissionScope = new { stringValue = team.DefaultFilePermissionScope ?? "team" },
-                        milestones = new { arrayValue = new { values = Array.Empty<object>() } },
+                        milestones = new { arrayValue = new { values = ConvertMilestonesToFirestoreArray(team.Milestones ?? new List<TeamMilestoneInfo>()) } },
                         members = new { arrayValue = new { values = ConvertMembersToFirestoreArray(team.Members) } },
                         memberIds = new { arrayValue = new { values = ConvertMemberIdsToFirestoreArray(team.Members) } },
                         memberRolesByUserId = ConvertStringMapToFirestoreMap(memberRoleMap),
@@ -103,7 +105,7 @@ namespace MeuApp
                         semesterTimeline = new { arrayValue = new { values = ConvertTimelineToFirestoreArray(team.SemesterTimeline) } },
                         accessRules = new { arrayValue = new { values = ConvertAccessRulesToFirestoreArray(accessRules) } },
                         assets = new { arrayValue = new { values = ConvertAssetsToFirestoreArray(team.Assets) } },
-                        taskColumns = new { arrayValue = new { values = ConvertTaskColumnsToFirestoreArray(team.TaskColumns, includeCards: false) } },
+                        taskColumns = new { arrayValue = new { values = ConvertTaskColumnsToFirestoreArray(team.TaskColumns ?? new List<TeamTaskColumnInfo>()) } },
                         notifications = new { arrayValue = new { values = ConvertNotificationsToFirestoreArray(team.Notifications) } },
                         chatMessages = new { arrayValue = new { values = ConvertChatMessagesToFirestoreArray(team.ChatMessages) } },
                         csdBoard = ConvertCsdBoardToFirestoreMap(team.CsdBoard),
@@ -450,6 +452,69 @@ namespace MeuApp
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[TeamService.SearchTeams] Erro: {ex.Message}");
+                return results;
+            }
+        }
+
+        public async Task<List<TeamWorkspaceInfo>> LoadAllVisibleTeamsAsync(int maxResults = 80)
+        {
+            var results = new List<TeamWorkspaceInfo>();
+
+            try
+            {
+                DebugHelper.WriteLine($"[TeamService.LoadAllVisibleTeams] Carregando até {maxResults} equipes visíveis...");
+
+                var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl("teams"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    DebugHelper.WriteLine($"[TeamService.LoadAllVisibleTeams] Erro HTTP: {response.StatusCode}");
+                    return results;
+                }
+
+                using var doc = JsonDocument.Parse(jsonContent);
+                if (!doc.RootElement.TryGetProperty("documents", out var documentsArray))
+                {
+                    return results;
+                }
+
+                foreach (var teamDoc in documentsArray.EnumerateArray())
+                {
+                    if (!teamDoc.TryGetProperty("fields", out var fields))
+                    {
+                        continue;
+                    }
+
+                    var team = ParseTeamFromFirestore(fields);
+                    if (team == null)
+                    {
+                        continue;
+                    }
+
+                    results.Add(team);
+                }
+
+                var orderedTeams = results
+                    .GroupBy(team => team.TeamId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.OrderByDescending(team => team.UpdatedAt).First())
+                    .OrderByDescending(team => team.UpdatedAt)
+                    .ThenBy(team => team.TeamName)
+                    .Take(Math.Max(1, maxResults))
+                    .ToList();
+
+                foreach (var team in orderedTeams)
+                {
+                    await PopulateTeamWorkItemsFromSubcollectionsAsync(team);
+                }
+
+                return orderedTeams;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeamService.LoadAllVisibleTeams] Erro: {ex.Message}");
                 return results;
             }
         }
@@ -1181,6 +1246,7 @@ namespace MeuApp
 
         private async Task<TeamOperationResult> SyncTeamWorkItemsAsync(string teamId, TeamWorkspaceInfo team)
         {
+            DebugHelper.WriteLine($"[TeamService.SyncWorkItems] Equipe '{teamId}' com {team.Milestones?.Count ?? 0} milestone(s) e {team.TaskColumns?.Sum(column => column.Cards?.Count ?? 0) ?? 0} card(s).");
             var milestoneResult = await SyncMilestonesSubcollectionAsync(teamId, team, team.Milestones ?? new List<TeamMilestoneInfo>());
             if (!milestoneResult.Success)
             {
@@ -1196,6 +1262,7 @@ namespace MeuApp
             var existingDocuments = await GetSubcollectionDocumentsAsync(collectionPath);
             if (existingDocuments.Count == 0 && !CanCurrentUserManageStructuredWorkItems(team))
             {
+                DebugHelper.WriteLine($"[TeamService.SyncMilestones] Subcoleção vazia em '{collectionPath}', mantendo fallback inline porque o usuário atual não gerencia marcos estruturados.");
                 return TeamOperationResult.Ok();
             }
 
@@ -1234,6 +1301,7 @@ namespace MeuApp
             var existingDocuments = await GetSubcollectionDocumentsAsync(collectionPath);
             if (existingDocuments.Count == 0 && !CanCurrentUserManageStructuredWorkItems(team))
             {
+                DebugHelper.WriteLine($"[TeamService.SyncTaskCards] Subcoleção vazia em '{collectionPath}', mantendo fallback inline porque o usuário atual não gerencia cards estruturados.");
                 return TeamOperationResult.Ok();
             }
 
@@ -1272,9 +1340,34 @@ namespace MeuApp
 
         private bool CanCurrentUserManageStructuredWorkItems(TeamWorkspaceInfo team)
         {
+            if (team == null)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(team.CreatedBy) && string.Equals(team.CreatedBy, _currentUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
             var currentRole = team.Members
                 .FirstOrDefault(member => string.Equals(member.UserId, _currentUserId, StringComparison.OrdinalIgnoreCase))
                 ?.Role;
+
+            if (string.IsNullOrWhiteSpace(currentRole))
+            {
+                if (string.Equals(team.FocalProfessorUserId, _currentUserId, StringComparison.OrdinalIgnoreCase)
+                    || (team.ProfessorSupervisorUserIds?.Contains(_currentUserId, StringComparer.OrdinalIgnoreCase) ?? false))
+                {
+                    currentRole = "professor";
+                }
+                else
+                {
+                    currentRole = _currentUserRole;
+                }
+            }
+
+            currentRole = TeamPermissionService.NormalizeRole(currentRole);
 
             return TeamPermissionService.CanEditProjectSettings(team, currentRole)
                 || TeamPermissionService.CanReviewDeliverables(team, currentRole);
@@ -1394,6 +1487,7 @@ namespace MeuApp
                 var jsonContent = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
                 {
+                    DebugHelper.WriteLine($"[TeamService.GetSubcollectionDocuments] {collectionPath} -> HTTP {(int)response.StatusCode}: {jsonContent.Substring(0, Math.Min(jsonContent.Length, 200))}");
                     return snapshots;
                 }
 
@@ -1416,6 +1510,8 @@ namespace MeuApp
                         Fields = fields.Clone()
                     });
                 }
+
+                DebugHelper.WriteLine($"[TeamService.GetSubcollectionDocuments] {collectionPath} -> {snapshots.Count} documento(s).");
             }
             catch (Exception ex)
             {

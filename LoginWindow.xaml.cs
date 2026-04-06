@@ -760,6 +760,7 @@ namespace MeuApp
                     avatarClothing = new { stringValue = profile.AvatarClothing ?? string.Empty },
                     galleryImages = new { arrayValue = new { } },
                     featuredProjectIds = new { arrayValue = new { } },
+                    calendarEntries = new { arrayValue = new { values = ConvertProfileCalendarEntriesToFirestoreArray(profile.CalendarEntries) } },
                     createdAt = new { timestampValue = DateTime.UtcNow.ToString("o") }
                 }
             };
@@ -823,8 +824,33 @@ namespace MeuApp
                 AvatarAccessory = TryGetStringField(fields, "avatarAccessory"),
                 AvatarClothing = TryGetStringField(fields, "avatarClothing"),
                 GalleryImages = TryGetProfileGalleryField(fields, "galleryImages"),
-                FeaturedProjectIds = TryGetStringListField(fields, "featuredProjectIds")
+                FeaturedProjectIds = TryGetStringListField(fields, "featuredProjectIds"),
+                CalendarEntries = TryGetProfileCalendarField(fields, "calendarEntries")
             };
+        }
+
+        private object[] ConvertProfileCalendarEntriesToFirestoreArray(IEnumerable<ProfileCalendarEntry> calendarEntries)
+        {
+            return (calendarEntries ?? Enumerable.Empty<ProfileCalendarEntry>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Title))
+                .Select(item => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            entryId = new { stringValue = string.IsNullOrWhiteSpace(item.EntryId) ? Guid.NewGuid().ToString("N") : item.EntryId },
+                            date = new { timestampValue = (item.Date == default ? DateTime.UtcNow : item.Date.ToUniversalTime()).ToString("o") },
+                            entryType = new { stringValue = item.EntryType ?? string.Empty },
+                            contextLabel = new { stringValue = item.ContextLabel ?? string.Empty },
+                            title = new { stringValue = item.Title ?? string.Empty },
+                            notes = new { stringValue = item.Notes ?? string.Empty },
+                            createdAt = new { timestampValue = (item.CreatedAt == default ? DateTime.UtcNow : item.CreatedAt.ToUniversalTime()).ToString("o") }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
         }
 
         private string TryGetStringField(JsonElement fields, string fieldName)
@@ -898,6 +924,40 @@ namespace MeuApp
             return images;
         }
 
+        private List<ProfileCalendarEntry> TryGetProfileCalendarField(JsonElement fields, string fieldName)
+        {
+            var entries = new List<ProfileCalendarEntry>();
+
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var values))
+            {
+                return entries;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (!value.TryGetProperty("mapValue", out var mapValue) ||
+                    !mapValue.TryGetProperty("fields", out var entryFields))
+                {
+                    continue;
+                }
+
+                entries.Add(new ProfileCalendarEntry
+                {
+                    EntryId = TryGetStringField(entryFields, "entryId"),
+                    Date = TryGetTimestampField(entryFields, "date"),
+                    EntryType = TryGetStringField(entryFields, "entryType"),
+                    ContextLabel = TryGetStringField(entryFields, "contextLabel"),
+                    Title = TryGetStringField(entryFields, "title"),
+                    Notes = TryGetStringField(entryFields, "notes"),
+                    CreatedAt = TryGetTimestampField(entryFields, "createdAt")
+                });
+            }
+
+            return entries;
+        }
+
         private DateTime TryGetTimestampField(JsonElement fields, string fieldName)
         {
             if (fields.TryGetProperty(fieldName, out var field) &&
@@ -938,6 +998,18 @@ namespace MeuApp
         public string AvatarClothing { get; set; } = string.Empty;
         public List<ProfileGalleryImage> GalleryImages { get; set; } = new List<ProfileGalleryImage>();
         public List<string> FeaturedProjectIds { get; set; } = new List<string>();
+        public List<ProfileCalendarEntry> CalendarEntries { get; set; } = new List<ProfileCalendarEntry>();
+    }
+
+    public class ProfileCalendarEntry
+    {
+        public string EntryId { get; set; } = Guid.NewGuid().ToString("N");
+        public DateTime Date { get; set; } = DateTime.Today;
+        public string EntryType { get; set; } = "Aviso";
+        public string ContextLabel { get; set; } = "Professor";
+        public string Title { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
     }
 
     public class ProfileGalleryImage

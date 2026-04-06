@@ -201,11 +201,18 @@ service cloud.firestore {
     }
 
     function canUpdateTeamStructure(data) {
-      return isTeamCreatorData(data) || isTeamLeader(data) || isTeamProfessor(data) || isTeamCoordinator(data);
+      return isTeamCreatorData(data)
+        || isTeamLeader(data)
+        || isTeamProfessor(data)
+        || isTeamCoordinator(data)
+        || requesterHasProfessorDiscovery();
     }
 
     function canReviewTeamDeliverables(data) {
-      return isTeamLeader(data) || isTeamProfessor(data) || isTeamCoordinator(data);
+      return isTeamLeader(data)
+        || isTeamProfessor(data)
+        || isTeamCoordinator(data)
+        || requesterHasProfessorDiscovery();
     }
 
     function validExecutionRole(role) {
@@ -372,7 +379,7 @@ service cloud.firestore {
         && validPermissionScope(data.defaultFilePermissionScope)
         && data.ucs is list
         && data.memberIds is list
-        && request.auth.uid in data.memberIds
+        && (request.auth.uid in data.memberIds || requesterHasProfessorDiscovery())
         && data.members is list
         && validTeamRoleIndexes(data)
         && data.semesterTimeline is list
