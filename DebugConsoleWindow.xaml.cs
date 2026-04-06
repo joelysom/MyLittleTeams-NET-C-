@@ -77,6 +77,8 @@ namespace MeuApp
         private bool _isPaused;
         private bool _autoScroll = true;
 
+        public bool HasBeenClosed { get; private set; }
+
         public DebugConsoleWindow()
         {
             InitializeComponent();
@@ -110,6 +112,7 @@ namespace MeuApp
 
         private void DebugConsoleWindow_Closed(object? sender, EventArgs e)
         {
+            HasBeenClosed = true;
             DebugHelper.LogReceived -= DebugHelper_LogReceived;
         }
 

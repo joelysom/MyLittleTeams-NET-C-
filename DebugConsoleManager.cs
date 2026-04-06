@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows;
 
@@ -8,6 +9,7 @@ namespace MeuApp
     {
         private static DebugConsoleWindow? _window;
         private static Window? _hostWindow;
+        private static bool _allowWindowClose;
         private static bool _runtimeEnabled;
 
         public static bool IsEnabled => _runtimeEnabled;
@@ -46,7 +48,7 @@ namespace MeuApp
 
             if (!enabled)
             {
-                if (_window?.IsVisible == true)
+                if (_window is { HasBeenClosed: false, IsVisible: true })
                 {
                     _window.Hide();
                 }
@@ -75,16 +77,36 @@ namespace MeuApp
 
             EnsureWindowCreated();
 
+            if (_window == null)
+            {
+                return;
+            }
+
             if (preferredHost != null)
             {
                 AttachToHost(preferredHost);
             }
 
-            _window!.SetHostWindow(_hostWindow);
+            _window.SetHostWindow(_hostWindow);
 
-            if (!_window.IsVisible)
+            if (!TryShowWindow())
             {
-                _window.Show();
+                EnsureWindowCreated(forceRecreate: true);
+                if (_window == null)
+                {
+                    return;
+                }
+
+                if (preferredHost != null)
+                {
+                    AttachToHost(preferredHost);
+                }
+
+                _window.SetHostWindow(_hostWindow);
+                if (!TryShowWindow())
+                {
+                    return;
+                }
             }
 
             UpdatePlacement();
@@ -101,29 +123,67 @@ namespace MeuApp
 
             try
             {
+                _allowWindowClose = true;
                 _window.Close();
             }
             catch
             {
             }
-
-            _window = null;
+            finally
+            {
+                _window = null;
+                _allowWindowClose = false;
+            }
         }
 
-        private static void EnsureWindowCreated()
+        private static void EnsureWindowCreated(bool forceRecreate = false)
         {
+            if (forceRecreate || _window?.HasBeenClosed == true)
+            {
+                _window = null;
+            }
+
             if (_window != null)
             {
                 return;
             }
 
+            _allowWindowClose = false;
             _window = new DebugConsoleWindow();
-            _window.Closed += (_, __) =>
+            _window.Closing += DebugConsoleWindow_Closing;
+            _window.Closed += DebugConsoleWindow_Closed;
+        }
+
+        private static void DebugConsoleWindow_Closing(object? sender, CancelEventArgs e)
+        {
+            if (_allowWindowClose || sender is not DebugConsoleWindow window)
+            {
+                return;
+            }
+
+            e.Cancel = true;
+            _runtimeEnabled = false;
+            DetachFromHost();
+            DebugHelper.WriteLine("[DebugConsole] Mini console fechada pelo usuário.");
+            _ = window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!window.HasBeenClosed && window.IsVisible)
+                {
+                    window.Hide();
+                }
+            }));
+        }
+
+        private static void DebugConsoleWindow_Closed(object? sender, EventArgs e)
+        {
+            if (ReferenceEquals(_window, sender))
             {
                 _window = null;
-                _runtimeEnabled = false;
-                DetachFromHost();
-            };
+            }
+
+            _allowWindowClose = false;
+            _runtimeEnabled = false;
+            DetachFromHost();
         }
 
         private static Window? GetPreferredHostWindow()
@@ -189,6 +249,11 @@ namespace MeuApp
 
         private static void HostWindowStateChanged(object? sender, EventArgs e)
         {
+            if (_window?.HasBeenClosed == true)
+            {
+                _window = null;
+            }
+
             if (_window == null || _hostWindow == null)
             {
                 return;
@@ -200,9 +265,9 @@ namespace MeuApp
                 return;
             }
 
-            if (_runtimeEnabled && !_window.IsVisible)
+            if (_runtimeEnabled && !TryShowWindow())
             {
-                _window.Show();
+                return;
             }
 
             UpdatePlacement();
@@ -220,6 +285,11 @@ namespace MeuApp
 
         private static void UpdatePlacement()
         {
+            if (_window?.HasBeenClosed == true)
+            {
+                _window = null;
+            }
+
             if (_window == null || _hostWindow == null || !_window.IsLoaded)
             {
                 return;
@@ -250,6 +320,36 @@ namespace MeuApp
             _window.Left = left;
             _window.Top = top;
             _window.SetHostWindow(_hostWindow);
+        }
+
+        private static bool TryShowWindow()
+        {
+            if (_window == null)
+            {
+                return false;
+            }
+
+            if (_window.HasBeenClosed)
+            {
+                _window = null;
+                return false;
+            }
+
+            try
+            {
+                if (!_window.IsVisible)
+                {
+                    _window.Show();
+                }
+
+                return true;
+            }
+            catch (InvalidOperationException ex)
+            {
+                DebugHelper.WriteLine($"[DebugConsole] Instância encerrada detectada; recriando mini console. {ex.Message}");
+                _window = null;
+                return false;
+            }
         }
 
         private static double ResolveWindowWidth(Window window)
