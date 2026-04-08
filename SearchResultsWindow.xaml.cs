@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace MeuApp
 {
-    public partial class SearchResultsWindow : MetroWindow
+    public partial class SearchResultsWindow : Window
     {
         // Evento disparado quando usuário iniciar conversa
         public delegate void ConversationStartedEventHandler(UserInfo selectedUser);

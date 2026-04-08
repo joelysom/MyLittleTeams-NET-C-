@@ -19,7 +19,8 @@ namespace MeuApp
             var normalizedArgs = args ?? Array.Empty<string>();
             var argEnabled = normalizedArgs.Any(arg => string.Equals(arg, "--debug-console", StringComparison.OrdinalIgnoreCase));
             var argDisabled = normalizedArgs.Any(arg => string.Equals(arg, "--no-debug-console", StringComparison.OrdinalIgnoreCase));
-            var envEnabled = IsTruthy(Environment.GetEnvironmentVariable("MEUAPP_DEBUG_CONSOLE"));
+            var envEnabled = IsTruthy(Environment.GetEnvironmentVariable("CHOAS_DEBUG_CONSOLE"))
+                || IsTruthy(Environment.GetEnvironmentVariable("MEUAPP_DEBUG_CONSOLE"));
 
             _runtimeEnabled = argDisabled ? false : argEnabled || envEnabled;
             DebugHelper.WriteLine(_runtimeEnabled

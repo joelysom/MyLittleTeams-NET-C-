@@ -1,11 +1,11 @@
-<mah:MetroWindow x:Class="MeuApp.UserProfileViewWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
-        Title="Perfil acadêmico" Height="900" Width="860"
-        WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize"
-        Background="#FFF6F8FB">
+<Window x:Class="MeuApp.UserProfileViewWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+    Title="Choas | Perfil acadêmico" Height="900" Width="860"
+    WindowStartupLocation="CenterOwner"
+    ResizeMode="CanResize"
+    Background="#FFF6F8FB">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -285,4 +285,4 @@
             <Button Content="Fechar" Width="120" Height="40" Click="Close_Click"/>
         </StackPanel>
     </Grid>
-</mah:MetroWindow>
+</Window>

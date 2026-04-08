@@ -14,7 +14,7 @@ using MahApps.Metro.Controls;
 
 namespace MeuApp
 {
-    public partial class LoginWindow : MetroWindow
+    public partial class LoginWindow : Window
     {
         private enum LoginDialogAction
         {
@@ -440,7 +440,7 @@ namespace MeuApp
 
         private LoginDialogAction ShowLoginFeedbackDialog(LoginFeedbackKind kind, string title, string message, string helperText)
         {
-            var dialog = new MetroWindow
+            var dialog = new Window
             {
                 Owner = this,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -451,10 +451,7 @@ namespace MeuApp
                 Title = title,
                 Background = new SolidColorBrush(Color.FromRgb(245, 247, 250)),
                 BorderThickness = new Thickness(0),
-                BorderBrush = Brushes.Transparent,
-                ShowTitleBar = false,
-                ShowCloseButton = false,
-                WindowTransitionsEnabled = false
+                BorderBrush = Brushes.Transparent
             };
 
             var result = LoginDialogAction.Dismiss;

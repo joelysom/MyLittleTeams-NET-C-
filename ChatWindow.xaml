@@ -1,12 +1,11 @@
-<mah:MetroWindow x:Class="MeuApp.ChatWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
-        Title="Chat" Height="720" Width="1400"
-        WindowState="Maximized"
-        Background="{DynamicResource MainContentBackgroundBrush}"
-        BorderThickness="0"
-        AllowsTransparency="False">
+<Window x:Class="MeuApp.ChatWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+    Title="Choas | Conversas" Height="720" Width="1400"
+    WindowState="Maximized"
+    Background="{DynamicResource MainContentBackgroundBrush}"
+    BorderThickness="0">
 
     <Grid Background="{DynamicResource MainContentBackgroundBrush}">
         <Grid.ColumnDefinitions>
@@ -114,4 +113,4 @@
             </Border>
         </Grid>
     </Grid>
-</mah:MetroWindow>
+</Window>

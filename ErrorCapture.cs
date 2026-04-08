@@ -18,13 +18,13 @@ class ErrorCapture
                 
                 writer.WriteLine("=== APPLICATION START ===");
                 writer.WriteLine($"Time: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}");
-                writer.WriteLine("Attempting to start MeuApp...\n");
+                writer.WriteLine("Attempting to start Choas...\n");
                 writer.Flush();
                 
                 // Try to start the app
                 using (System.Diagnostics.Process process = new System.Diagnostics.Process())
                 {
-                    process.StartInfo.FileName = "MeuApp.exe";
+                    process.StartInfo.FileName = "Choas.exe";
                     process.StartInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
                     process.StartInfo.UseShellExecute = false;
                     process.StartInfo.RedirectStandardOutput = true;

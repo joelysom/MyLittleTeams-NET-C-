@@ -83,13 +83,21 @@ namespace MeuApp
                 }
             }
 
-            var apiKeyOverride = Environment.GetEnvironmentVariable("OBSSERACT_FIREBASE_API_KEY");
+            var apiKeyOverride = Environment.GetEnvironmentVariable("CHOAS_FIREBASE_API_KEY");
+            if (string.IsNullOrWhiteSpace(apiKeyOverride))
+            {
+                apiKeyOverride = Environment.GetEnvironmentVariable("OBSSERACT_FIREBASE_API_KEY");
+            }
             if (!string.IsNullOrWhiteSpace(apiKeyOverride))
             {
                 settings.ApiKey = apiKeyOverride.Trim();
             }
 
-            var projectIdOverride = Environment.GetEnvironmentVariable("OBSSERACT_FIREBASE_PROJECT_ID");
+            var projectIdOverride = Environment.GetEnvironmentVariable("CHOAS_FIREBASE_PROJECT_ID");
+            if (string.IsNullOrWhiteSpace(projectIdOverride))
+            {
+                projectIdOverride = Environment.GetEnvironmentVariable("OBSSERACT_FIREBASE_PROJECT_ID");
+            }
             if (!string.IsNullOrWhiteSpace(projectIdOverride))
             {
                 settings.ProjectId = projectIdOverride.Trim();

@@ -7,6 +7,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RestorePackagesPath>$(MSBuildThisFileDirectory).nuget\packages</RestorePackagesPath>
+    <AssemblyName>Choas</AssemblyName>
+    <Title>Choas Observatorio de Projetos Integradores</Title>
+    <Product>Choas Observatorio de Projetos Integradores</Product>
+    <Description>Plataforma desktop para monitoramento academico e colaboracao em projetos integradores.</Description>
+    <Company>Choas</Company>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="img\favicon.ico" />
     <Resource Include="img\TesseractLogin.png" />
     <Resource Include="img\tesseractICO.png" />
     <Resource Include="img\Error\**\*.png" />

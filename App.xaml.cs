@@ -7,7 +7,7 @@ namespace MeuApp;
 
 public partial class App : Application
 {
-    private static string _logFile = "MeuApp_Errors.log";
+    private static string _logFile = "Choas_Errors.log";
 
     protected override void OnStartup(StartupEventArgs e)
     {

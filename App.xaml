@@ -9,9 +9,27 @@
         <FontFamily x:Key="AppDisplayFontFamily">Segoe UI Variable Display, Segoe UI Semibold, Segoe UI</FontFamily>
         <FontFamily x:Key="AppEmojiFontFamily">Segoe UI Emoji, Segoe UI Symbol, Segoe UI</FontFamily>
 
-        <Style TargetType="{x:Type mah:MetroWindow}">
-            <Setter Property="Icon" Value="pack://application:,,,/img/TesseractLogin.png"/>
+        <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#FF2563EB"/>
+        <SolidColorBrush x:Key="BrandPrimaryHoverBrush" Color="#FF1D4ED8"/>
+        <SolidColorBrush x:Key="BrandSecondaryBrush" Color="#FF0F766E"/>
+        <SolidColorBrush x:Key="BrandSurfaceBrush" Color="#FFF8FAFC"/>
+        <SolidColorBrush x:Key="BrandBorderBrush" Color="#FFE2E8F0"/>
+        <SolidColorBrush x:Key="BrandTextBrush" Color="#FF0F172A"/>
+        <SolidColorBrush x:Key="BrandMutedTextBrush" Color="#FF475569"/>
+        <SolidColorBrush x:Key="BrandSuccessBrush" Color="#FF16A34A"/>
+        <SolidColorBrush x:Key="BrandWarningBrush" Color="#FFF59E0B"/>
+        <SolidColorBrush x:Key="BrandDangerBrush" Color="#FFDC2626"/>
+
+        <Style TargetType="{x:Type Window}">
+            <Setter Property="Icon" Value="pack://application:,,,/img/favicon.ico"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
+            <Setter Property="Background" Value="{StaticResource BrandSurfaceBrush}"/>
+        </Style>
+
+        <Style TargetType="{x:Type mah:MetroWindow}">
+            <Setter Property="Icon" Value="pack://application:,,,/img/favicon.ico"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
+            <Setter Property="Background" Value="{StaticResource BrandSurfaceBrush}"/>
         </Style>
 
         <Style TargetType="{x:Type TextBlock}">

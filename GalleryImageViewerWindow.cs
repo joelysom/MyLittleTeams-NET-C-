@@ -28,7 +28,7 @@ namespace MeuApp
         public string Description { get; }
     }
 
-    public sealed class GalleryImageViewerWindow : MetroWindow
+    public sealed class GalleryImageViewerWindow : Window
     {
         private readonly IReadOnlyList<GalleryViewerItem> _items;
         private readonly ScrollViewer _scrollViewer;
@@ -109,7 +109,6 @@ namespace MeuApp
             WindowStartupLocation = owner == null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.CanResize;
             Background = new SolidColorBrush(Color.FromRgb(4, 9, 18));
-            GlowBrush = new SolidColorBrush(_accent);
             KeyDown += OnViewerKeyDown;
 
             var root = new Grid { Margin = new Thickness(24) };

@@ -11,7 +11,7 @@ using MahApps.Metro.Controls;
 
 namespace MeuApp
 {
-    public partial class ChatWindow : MetroWindow
+    public partial class ChatWindow : Window
     {
         private UserProfile? _currentUser;
         private string _contactId = string.Empty;
@@ -23,7 +23,6 @@ namespace MeuApp
         public ChatWindow()
         {
             InitializeComponent();
-            this.GlowBrush = new SolidColorBrush(Color.FromRgb(0, 120, 212));
             this.KeyDown += ChatWindow_KeyDown;
         }
 

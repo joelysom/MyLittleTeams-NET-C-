@@ -32,7 +32,7 @@ using W = DocumentFormat.OpenXml.Wordprocessing;
 
 namespace MeuApp
 {
-    public partial class MainWindow : MetroWindow
+    public partial class MainWindow : Window
     {
         private const int MaxProfileGalleryImages = 6;
         private const int ProfileGalleryImageMaxSide = 720;
@@ -217,7 +217,11 @@ namespace MeuApp
         private TeamWorkspaceInfo? _activeTeamWorkspace = null;
         private TeamEntryMode _teamEntryMode = TeamEntryMode.None;
         private string _chatListFilter = string.Empty;
+        private const double ExpandedSidebarWidth = 288;
+        private const double CollapsedSidebarWidth = 96;
         private bool _appDarkModeEnabled = false;
+        private bool _isSidebarCollapsed = false;
+        private string _activeNavigationTag = "Chats";
         private TeamService? _teamService = null;
         private ConnectionService? _connectionService = null;
         private readonly HashSet<string> _connectedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -352,6 +356,8 @@ namespace MeuApp
             InitializeTeamsUi();
             InitializeRealtimeSync();
             ApplyAppTheme();
+            ApplySidebarState();
+            SetActiveNavigation("Chats");
             this.KeyDown += MainWindow_KeyDown;
             this.Loaded += MainWindow_Loaded;
         }
@@ -439,6 +445,123 @@ namespace MeuApp
                     DebugHelper.OpenLogFile();
                 }
                 e.Handled = true;
+            }
+        }
+
+        private IEnumerable<Button> GetNavigationButtons()
+        {
+            yield return ChatsNavButton;
+            yield return ConnectionsNavButton;
+            yield return TeamsNavButton;
+            yield return ProfessorNavButton;
+            yield return CalendarNavButton;
+            yield return FilesNavButton;
+            yield return SettingsNavButton;
+        }
+
+        private void ToggleSidebar_Click(object sender, RoutedEventArgs e)
+        {
+            _isSidebarCollapsed = !_isSidebarCollapsed;
+            ApplySidebarState();
+        }
+
+        private void ApplySidebarState()
+        {
+            if (SidebarColumn == null)
+            {
+                return;
+            }
+
+            SidebarColumn.Width = new GridLength(_isSidebarCollapsed ? CollapsedSidebarWidth : ExpandedSidebarWidth);
+
+            var expandedVisibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            SidebarBrandIconBadge.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            SidebarBrandTextPanel.Visibility = expandedVisibility;
+            SidebarBrandCompactText.Visibility = _isSidebarCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            SidebarWorkspaceBadge.Visibility = expandedVisibility;
+            SidebarProfileDetails.Visibility = expandedVisibility;
+            SidebarCollapseButton.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            SidebarRestoreHandle.Visibility = _isSidebarCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            SidebarProfileButton.HorizontalContentAlignment = _isSidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+            SidebarProfileButton.Padding = _isSidebarCollapsed ? new Thickness(10) : new Thickness(14);
+            SidebarCollapseIcon.Kind = PackIconMaterialKind.ChevronDoubleLeft;
+
+            ChatsNavLabel.Visibility = expandedVisibility;
+            ConnectionsNavLabel.Visibility = expandedVisibility;
+            TeamsNavLabel.Visibility = expandedVisibility;
+            ProfessorNavLabel.Visibility = expandedVisibility;
+            CalendarNavLabel.Visibility = expandedVisibility;
+            FilesNavLabel.Visibility = expandedVisibility;
+            SettingsNavLabel.Visibility = expandedVisibility;
+
+            foreach (var button in GetNavigationButtons())
+            {
+                if (button == null)
+                {
+                    continue;
+                }
+
+                button.HorizontalContentAlignment = _isSidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+                button.Padding = _isSidebarCollapsed ? new Thickness(12) : new Thickness(14, 12, 14, 12);
+            }
+
+            UpdateChatsBadge();
+            UpdateConnectionsBadge();
+        }
+
+        private int GetUnreadChatsCount()
+        {
+            return _conversations.Count(conversation => conversation.HasUnread);
+        }
+
+        private int GetUnreadConnectionsCount()
+        {
+            return _connectionEntries.Count(item =>
+                string.Equals(item.Status, "pendingIncoming", StringComparison.OrdinalIgnoreCase)
+                || (!item.IsRead && !string.IsNullOrWhiteSpace(item.NotificationType)));
+        }
+
+        private void SetActiveNavigation(string navigationTag)
+        {
+            _activeNavigationTag = string.IsNullOrWhiteSpace(navigationTag) ? "Chats" : navigationTag;
+
+            var hasUnreadChats = GetUnreadChatsCount() > 0;
+            var hasUnreadConnections = GetUnreadConnectionsCount() > 0;
+
+            foreach (var button in GetNavigationButtons())
+            {
+                if (button == null)
+                {
+                    continue;
+                }
+
+                var tag = button.Tag?.ToString() ?? string.Empty;
+                var isActive = string.Equals(tag, _activeNavigationTag, StringComparison.OrdinalIgnoreCase);
+                button.BorderBrush = isActive ? GetThemeBrush("SidebarActiveBorderBrush") : Brushes.Transparent;
+
+                if (isActive)
+                {
+                    button.Background = GetThemeBrush("SidebarActiveBrush");
+                    continue;
+                }
+
+                if (string.Equals(tag, "Chats", StringComparison.OrdinalIgnoreCase) && hasUnreadChats)
+                {
+                    button.Background = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(15, 35, 60))
+                        : GetThemeBrush("AccentMutedBrush");
+                    continue;
+                }
+
+                if (string.Equals(tag, "Conexoes", StringComparison.OrdinalIgnoreCase) && hasUnreadConnections)
+                {
+                    button.Background = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(12, 50, 43))
+                        : new SolidColorBrush(Color.FromRgb(236, 253, 245));
+                    continue;
+                }
+
+                button.Background = Brushes.Transparent;
             }
         }
 
@@ -690,11 +813,29 @@ namespace MeuApp
 
         private string GetFilesHubRootDirectory()
         {
-            return IOPath.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Obsseract",
-                "FilesHub",
-                GetFilesHubUserKey());
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var modernDirectory = IOPath.Combine(localAppData, "Choas", "FilesHub", GetFilesHubUserKey());
+            var legacyDirectory = IOPath.Combine(localAppData, "Obsseract", "FilesHub", GetFilesHubUserKey());
+
+            if (!Directory.Exists(modernDirectory) && Directory.Exists(legacyDirectory))
+            {
+                try
+                {
+                    var modernParent = IOPath.GetDirectoryName(modernDirectory);
+                    if (!string.IsNullOrWhiteSpace(modernParent))
+                    {
+                        Directory.CreateDirectory(modernParent);
+                    }
+
+                    Directory.Move(legacyDirectory, modernDirectory);
+                }
+                catch
+                {
+                    return legacyDirectory;
+                }
+            }
+
+            return modernDirectory;
         }
 
         private string GetFilesHubArchiveDirectory()
@@ -3218,7 +3359,7 @@ namespace MeuApp
                 return;
             }
 
-            if (string.Equals(choice, "Obsseract.IA", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(choice, "Choas IA", StringComparison.OrdinalIgnoreCase))
             {
                 ShowChoasWorkInProgressDialog();
             }
@@ -3228,7 +3369,7 @@ namespace MeuApp
         {
             var accentBrush = GetThemeBrush("AccentBrush");
             var filesBrush = GetThemeBrush("FilesIconBrush");
-            var dialog = CreateStyledDialogWindow("Obsseract.IA", 680, 500, 460);
+            var dialog = CreateStyledDialogWindow("Choas IA", 680, 500, 460);
 
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -3237,7 +3378,7 @@ namespace MeuApp
 
             root.Children.Add(CreateDialogHeader(
                 "CHOAS",
-                "Obsseract.IA em preparo",
+                "Choas IA em preparo",
                 "A camada inteligente do hub ainda esta sendo montada.",
                 accentBrush));
 
@@ -3344,13 +3485,13 @@ namespace MeuApp
                 },
                 272));
             choicePanel.Children.Add(CreateChoasRouteButton(
-                "Obsseract.IA",
+                "Choas IA",
                 "Abre a tela W.I.P. da camada inteligente prevista para o hub.",
                 filesBrush,
                 PackIconMaterialKind.CardsOutline,
                 (_, __) =>
                 {
-                    selectedChoice = "Obsseract.IA";
+                    selectedChoice = "Choas IA";
                     dialog.DialogResult = true;
                     dialog.Close();
                 },
@@ -3359,7 +3500,7 @@ namespace MeuApp
             var helperContent = new StackPanel();
             helperContent.Children.Add(new TextBlock
             {
-                Text = "O GIF do CHOAS continua sendo o ponto de entrada. Arquivos reabre a explicacao do hub e Obsseract.IA mostra o que ainda esta em preparo.",
+                Text = "O GIF do CHOAS continua sendo o ponto de entrada. Arquivos reabre a explicacao do hub e Choas IA mostra o que ainda esta em preparo.",
                 FontSize = 12,
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap,
@@ -10335,24 +10476,20 @@ namespace MeuApp
 
         private void UpdateConnectionsBadge()
         {
-            var unreadCount = _connectionEntries.Count(item =>
-                string.Equals(item.Status, "pendingIncoming", StringComparison.OrdinalIgnoreCase)
-                || (!item.IsRead && !string.IsNullOrWhiteSpace(item.NotificationType)));
+            var unreadCount = GetUnreadConnectionsCount();
 
             if (unreadCount > 0)
             {
-                ConnectionsUnreadBadge.Visibility = Visibility.Visible;
+                ConnectionsUnreadBadge.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
                 ConnectionsUnreadCountText.Text = unreadCount > 99 ? "99+" : unreadCount.ToString();
-                ConnectionsNavButton.Background = _appDarkModeEnabled
-                    ? new SolidColorBrush(Color.FromRgb(6, 78, 59))
-                    : new SolidColorBrush(Color.FromRgb(236, 253, 245));
             }
             else
             {
                 ConnectionsUnreadBadge.Visibility = Visibility.Collapsed;
                 ConnectionsUnreadCountText.Text = "0";
-                ConnectionsNavButton.Background = new SolidColorBrush(Colors.Transparent);
             }
+
+            SetActiveNavigation(_activeNavigationTag);
         }
 
         /// <summary>
@@ -13324,7 +13461,7 @@ namespace MeuApp
             var selectedHairLengthFilter = "Todos";
             const string avatarEditorReadyHint = "Ao aplicar, o personagem é atualizado na tela e salvo no Firebase imediatamente.";
 
-            var dialog = new MetroWindow
+            var dialog = new Window
             {
                 Title = "Criador de avatar",
                 Owner = this,
@@ -13334,7 +13471,6 @@ namespace MeuApp
                 ResizeMode = ResizeMode.NoResize,
                 ShowInTaskbar = false,
                 Background = GetThemeBrush("WindowBackgroundBrush"),
-                GlowBrush = (Brush)GlowBrush,
                 BorderBrush = GetThemeBrush("CardBorderBrush")
             };
 
@@ -14344,6 +14480,7 @@ namespace MeuApp
         private void ShowProfessorDashboardSection()
         {
             ResetNavigation();
+            SetActiveNavigation("Professor");
             ProfessorDashboardContent.Visibility = Visibility.Visible;
             RenderProfessorDashboard();
         }
@@ -14351,6 +14488,7 @@ namespace MeuApp
         private void ShowTeamsSection()
         {
             ResetNavigation();
+            SetActiveNavigation("Equipes");
             TeamsContent.Visibility = Visibility.Visible;
             RenderTeamsList();
         }
@@ -18891,6 +19029,7 @@ namespace MeuApp
             {
                 string tag = button.Tag?.ToString() ?? "";
                 ResetNavigation();
+                SetActiveNavigation(tag);
 
                 switch (tag)
                 {
@@ -18938,6 +19077,7 @@ namespace MeuApp
         private void OpenSettings_Click(object sender, RoutedEventArgs e)
         {
             ResetNavigation();
+            SetActiveNavigation("Configuracoes");
             SettingsContent.Visibility = Visibility.Visible;
             PopulateProfessionalProfileFields(_currentProfile ?? new UserProfile());
         }
@@ -19448,30 +19588,33 @@ namespace MeuApp
 
         private void ApplyAppTheme()
         {
-            SetThemeBrush("WindowBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(9, 14, 18) : Color.FromRgb(247, 249, 252));
-            SetThemeBrush("SurfaceBrush", _appDarkModeEnabled ? Color.FromRgb(17, 24, 39) : Colors.White);
-            SetThemeBrush("SidebarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(15, 23, 42) : Colors.White);
-            SetThemeBrush("SidebarBorderBrush", _appDarkModeEnabled ? Color.FromRgb(31, 41, 55) : Color.FromRgb(232, 232, 232));
-            SetThemeBrush("TopBarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 24, 39) : Colors.White);
-            SetThemeBrush("MainContentBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
-            SetThemeBrush("SearchBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(30, 41, 59) : Color.FromRgb(245, 245, 245));
-            SetThemeBrush("SearchBorderBrush", _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(224, 224, 224));
-            SetThemeBrush("PrimaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(241, 245, 249) : Color.FromRgb(51, 51, 51));
-            SetThemeBrush("SecondaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(102, 102, 102));
-            SetThemeBrush("TertiaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(100, 116, 139) : Color.FromRgb(148, 163, 184));
-            SetThemeBrush("CardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 24, 39) : Colors.White);
-            SetThemeBrush("MutedCardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(22, 31, 49) : Color.FromRgb(248, 250, 252));
-            SetThemeBrush("CardBorderBrush", _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(226, 232, 240));
-            SetThemeBrush("AccentBrush", _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(0, 120, 212));
-            SetThemeBrush("AccentMutedBrush", _appDarkModeEnabled ? Color.FromRgb(8, 47, 73) : Color.FromRgb(234, 244, 255));
-            SetThemeBrush("ToggleTrackOffBrush", _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(215, 222, 231));
-            SetThemeBrush("ToggleTrackOnBrush", _appDarkModeEnabled ? Color.FromRgb(14, 165, 233) : Color.FromRgb(14, 165, 233));
+            SetThemeBrush("WindowBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(7, 17, 31) : Color.FromRgb(243, 247, 252));
+            SetThemeBrush("SurfaceBrush", _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+            SetThemeBrush("SidebarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(9, 17, 30) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("SidebarBorderBrush", _appDarkModeEnabled ? Color.FromRgb(30, 41, 59) : Color.FromRgb(226, 232, 240));
+            SetThemeBrush("TopBarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+            SetThemeBrush("MainContentBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(8, 16, 27) : Color.FromRgb(248, 251, 255));
+            SetThemeBrush("SearchBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("SearchBorderBrush", _appDarkModeEnabled ? Color.FromRgb(36, 50, 71) : Color.FromRgb(216, 226, 238));
+            SetThemeBrush("PrimaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));
+            SetThemeBrush("SecondaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(71, 85, 105));
+            SetThemeBrush("TertiaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(100, 116, 139) : Color.FromRgb(100, 116, 139));
+            SetThemeBrush("CardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(15, 23, 42) : Colors.White);
+            SetThemeBrush("MutedCardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("CardBorderBrush", _appDarkModeEnabled ? Color.FromRgb(34, 50, 71) : Color.FromRgb(219, 229, 240));
+            SetThemeBrush("AccentBrush", _appDarkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
+            SetThemeBrush("AccentMutedBrush", _appDarkModeEnabled ? Color.FromRgb(16, 38, 69) : Color.FromRgb(232, 238, 255));
+            SetThemeBrush("SidebarHoverBrush", _appDarkModeEnabled ? Color.FromRgb(16, 34, 58) : Color.FromRgb(238, 244, 255));
+            SetThemeBrush("SidebarActiveBrush", _appDarkModeEnabled ? Color.FromRgb(19, 42, 73) : Color.FromRgb(231, 238, 255));
+            SetThemeBrush("SidebarActiveBorderBrush", _appDarkModeEnabled ? Color.FromRgb(59, 130, 246) : Color.FromRgb(191, 219, 254));
+            SetThemeBrush("SuccessBrush", _appDarkModeEnabled ? Color.FromRgb(34, 197, 94) : Color.FromRgb(22, 163, 74));
+            SetThemeBrush("WarningBrush", _appDarkModeEnabled ? Color.FromRgb(245, 158, 11) : Color.FromRgb(245, 158, 11));
+            SetThemeBrush("DangerBrush", _appDarkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
+            SetThemeBrush("ToggleTrackOffBrush", _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
+            SetThemeBrush("ToggleTrackOnBrush", _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
             SetThemeBrush("ToggleThumbBrush", Colors.White);
 
             Background = GetThemeBrush("WindowBackgroundBrush");
-            GlowBrush = _appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
-                : new SolidColorBrush(Color.FromRgb(0, 120, 212));
 
             UpdateChatsBadge();
             UpdateConnectionsBadge();
@@ -19522,6 +19665,7 @@ namespace MeuApp
                 
                 // Mostrar aba Chats
                 ResetNavigation();
+                SetActiveNavigation("Chats");
                 ChatsContent.Visibility = Visibility.Visible;
                 UpdateChatsBadge();
                 
@@ -20979,22 +21123,20 @@ namespace MeuApp
 
         private void UpdateChatsBadge()
         {
-            var unreadCount = _conversations.Count(conversation => conversation.HasUnread);
+            var unreadCount = GetUnreadChatsCount();
 
             if (unreadCount > 0)
             {
-                ChatsUnreadBadge.Visibility = Visibility.Visible;
+                ChatsUnreadBadge.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
                 ChatsUnreadCountText.Text = unreadCount > 99 ? "99+" : unreadCount.ToString();
-                ChatsNavButton.Background = _appDarkModeEnabled
-                    ? new SolidColorBrush(Color.FromRgb(8, 47, 73))
-                    : new SolidColorBrush(Color.FromRgb(239, 246, 255));
             }
             else
             {
                 ChatsUnreadBadge.Visibility = Visibility.Collapsed;
                 ChatsUnreadCountText.Text = "0";
-                ChatsNavButton.Background = new SolidColorBrush(Colors.Transparent);
             }
+
+            SetActiveNavigation(_activeNavigationTag);
         }
 
         private FontFamily GetAppTextFontFamily()
@@ -21218,7 +21360,7 @@ namespace MeuApp
             });
             host.Children.Add(new TextBlock
             {
-                Text = "Envie uma despedida rápida com as figurinhas nativas do Obsseract.",
+                Text = "Envie uma despedida rápida com as figurinhas nativas do Choas.",
                 FontSize = 11,
                 Margin = new Thickness(0, 4, 0, 14),
                 TextWrapping = TextWrapping.Wrap,
