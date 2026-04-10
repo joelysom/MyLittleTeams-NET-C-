@@ -1685,21 +1685,31 @@ namespace MeuApp
 
         private async Task<TeamAssetStorageResult> UploadTeamAssetToStorageAsync(string objectPath, string? mimeType, byte[] fileBytes)
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, AppConfig.BuildFirebaseStorageUploadUrl(objectPath));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-            request.Content = new ByteArrayContent(fileBytes);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(mimeType) ? "application/octet-stream" : mimeType);
-
-            var response = await httpClient.SendAsync(request);
-            var responseBody = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode)
+            string? lastErrorMessage = null;
+            foreach (var uploadUrl in AppConfig.BuildFirebaseStorageUploadUrls(objectPath))
             {
-                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
-                DebugHelper.WriteLine($"[TeamService.UploadTeamAssetToStorage] Erro: {errorMessage}");
-                return TeamAssetStorageResult.Fail(errorMessage);
+                var request = new HttpRequestMessage(HttpMethod.Post, uploadUrl);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new ByteArrayContent(fileBytes);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(mimeType) ? "application/octet-stream" : mimeType);
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (response.IsSuccessStatusCode)
+                {
+                    return TeamAssetStorageResult.Ok(objectPath, objectPath);
+                }
+
+                lastErrorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                {
+                    DebugHelper.WriteLine($"[TeamService.UploadTeamAssetToStorage] Erro: {lastErrorMessage}");
+                    return TeamAssetStorageResult.Fail(lastErrorMessage);
+                }
             }
 
-            return TeamAssetStorageResult.Ok(objectPath, objectPath);
+            DebugHelper.WriteLine($"[TeamService.UploadTeamAssetToStorage] Erro: {lastErrorMessage}");
+            return TeamAssetStorageResult.Fail(lastErrorMessage ?? "HTTP 404: bucket do Firebase Storage não encontrado.");
         }
 
         private async Task<TeamAssetDownloadResult> LoadTeamAssetContentFromStorageAsync(string storageReference)
@@ -1710,16 +1720,32 @@ namespace MeuApp
                 return TeamAssetDownloadResult.Fail("Referência remota do arquivo está vazia.");
             }
 
-            var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirebaseStorageDownloadUrl(normalizedReference));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-
-            var response = await httpClient.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
+            HttpResponseMessage? response = null;
+            string? errorMessage = null;
+            foreach (var downloadUrl in AppConfig.BuildFirebaseStorageDownloadUrls(normalizedReference))
             {
+                var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    break;
+                }
+
                 var responseBody = await response.Content.ReadAsStringAsync();
-                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                {
+                    DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContentFromStorage] Erro: {errorMessage}");
+                    return TeamAssetDownloadResult.Fail(errorMessage);
+                }
+            }
+
+            if (response == null || !response.IsSuccessStatusCode)
+            {
                 DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContentFromStorage] Erro: {errorMessage}");
-                return TeamAssetDownloadResult.Fail(errorMessage);
+                return TeamAssetDownloadResult.Fail(errorMessage ?? "HTTP 404: bucket do Firebase Storage não encontrado.");
             }
 
             var bytes = await response.Content.ReadAsByteArrayAsync();
@@ -1809,19 +1835,29 @@ namespace MeuApp
                 return TeamOperationResult.Ok();
             }
 
-            var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirebaseStorageMetadataUrl(normalizedReference));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-
-            var response = await httpClient.SendAsync(request);
-            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            string? errorMessage = null;
+            foreach (var metadataUrl in AppConfig.BuildFirebaseStorageMetadataUrls(normalizedReference))
             {
-                return TeamOperationResult.Ok();
+                var request = new HttpRequestMessage(HttpMethod.Delete, metadataUrl);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    return TeamOperationResult.Ok();
+                }
+
+                var responseBody = await response.Content.ReadAsStringAsync();
+                errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                {
+                    DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContentFromStorage] Erro: {errorMessage}");
+                    return TeamOperationResult.Fail(errorMessage);
+                }
             }
 
-            var responseBody = await response.Content.ReadAsStringAsync();
-            var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
             DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContentFromStorage] Erro: {errorMessage}");
-            return TeamOperationResult.Fail(errorMessage);
+            return TeamOperationResult.Fail(errorMessage ?? "HTTP 404: bucket do Firebase Storage não encontrado.");
         }
 
         private async Task<TeamOperationResult> DeleteTeamAssetContentFromFirestoreAsync(string storageReference)

@@ -65,6 +65,10 @@ service cloud.firestore {
       return !(fieldName in data) || data[fieldName] is bool;
     }
 
+    function hasOptionalInt(data, fieldName) {
+      return !(fieldName in data) || data[fieldName] is int;
+    }
+
     function messageTypeOf(data) {
       return data.get('messageType', 'text');
     }
@@ -406,14 +410,81 @@ service cloud.firestore {
         && data.course is string
         && data.academicTerm is string
         && data.description is string
+        && hasOptionalString(data, 'iconPreviewImageDataUri')
+        && hasOptionalString(data, 'iconStorageReference')
+        && hasOptionalString(data, 'iconFileName')
+        && hasOptionalString(data, 'iconMimeType')
+        && hasOptionalInt(data, 'iconVersion')
+        && (!(('iconVersion' in data)) || data.iconVersion >= 0)
+        && hasOptionalTimestamp(data, 'iconUpdatedAt')
         && data.joinCode is string
         && data.createdBy is string
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && data.professorUserIds is list
         && data.professorNames is list
+        && hasOptionalString(data, 'representativeUserId')
+        && hasOptionalString(data, 'representativeName')
+        && hasOptionalString(data, 'viceRepresentativeUserId')
+        && hasOptionalString(data, 'viceRepresentativeName')
         && data.studentIds is list
         && data.studentSummaries is list;
+    }
+
+    function validTeachingClassPermissionScope(scope) {
+      return scope == 'class'
+        || scope == 'course'
+        || scope == 'staff'
+        || scope == 'private';
+    }
+
+    function validTeachingClassHomePostType(postType) {
+      return postType == 'announcement' || postType == 'activity';
+    }
+
+    function validTeachingClassHomePostPayload(data, postId) {
+      return data.postId is string
+        && data.postId == postId
+        && data.postType is string
+        && validTeachingClassHomePostType(data.postType)
+        && data.authorUserId is string
+        && data.authorName is string
+        && data.title is string
+        && data.content is string
+        && data.linkUrl is string
+        && data.activityLabel is string
+        && hasOptionalTimestamp(data, 'activityDueAt')
+        && data.publishedAt is timestamp
+        && data.updatedAt is timestamp
+        && data.attachments is list
+        && data.attachments.size() <= 10;
+    }
+
+    function validTeachingClassHomeCommentPayload(data, commentId) {
+      return data.commentId is string
+        && data.commentId == commentId
+        && data.parentCommentId is string
+        && data.authorUserId is string
+        && data.authorName is string
+        && data.content is string
+        && data.content.size() > 0
+        && data.createdAt is timestamp;
+    }
+
+    function validTeachingClassHomeReactionPayload(data, reactionId) {
+      return data.userId is string
+        && data.userId == reactionId
+        && data.userName is string
+        && data.emoji is string
+        && data.emoji.size() > 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function teachingClassFeedVisible(classId) {
+      return signedIn()
+        && teachingClassExists(classId)
+        && teachingClassVisible(teachingClassDocument(classId).data);
     }
 
     function teachingClassDocument(classId) {
@@ -428,16 +499,22 @@ service cloud.firestore {
       return signedIn() && (
         data.createdBy == request.auth.uid ||
         (data.professorUserIds is list && request.auth.uid in data.professorUserIds) ||
-        (data.studentIds is list && request.auth.uid in data.studentIds) ||
-        requesterHasProfessorDiscovery()
+        (data.studentIds is list && request.auth.uid in data.studentIds)
       );
     }
 
     function canManageTeachingClass(data) {
       return signedIn() && (
         data.createdBy == request.auth.uid ||
-        (data.professorUserIds is list && request.auth.uid in data.professorUserIds) ||
-        requesterIsCoordinatorLike()
+        (data.professorUserIds is list && request.auth.uid in data.professorUserIds)
+      );
+    }
+
+    function canPublishTeachingClassFeed(data) {
+      return signedIn() && (
+        canManageTeachingClass(data)
+        || data.get('representativeUserId', '') == request.auth.uid
+        || data.get('viceRepresentativeUserId', '') == request.auth.uid
       );
     }
 
@@ -455,6 +532,10 @@ service cloud.firestore {
         && newData.studentIds.hasAll(oldData.studentIds)
         && newData.professorUserIds == oldData.professorUserIds
         && newData.professorNames == oldData.professorNames
+        && newData.get('representativeUserId', '') == oldData.get('representativeUserId', '')
+        && newData.get('representativeName', '') == oldData.get('representativeName', '')
+        && newData.get('viceRepresentativeUserId', '') == oldData.get('viceRepresentativeUserId', '')
+        && newData.get('viceRepresentativeName', '') == oldData.get('viceRepresentativeName', '')
         && newData.className == oldData.className
         && newData.course == oldData.course
         && newData.academicTerm == oldData.academicTerm
@@ -462,6 +543,58 @@ service cloud.firestore {
         && newData.joinCode == oldData.joinCode
         && newData.createdBy == oldData.createdBy
         && newData.createdAt == oldData.createdAt;
+    }
+
+    function canViewScopedTeachingClassAsset(data, permissionScope, ownerUserId) {
+      return teachingClassVisible(data)
+        && validTeachingClassPermissionScope(permissionScope)
+        && (
+          permissionScope == 'class'
+          || permissionScope == 'course'
+          || canManageTeachingClass(data)
+          || (permissionScope == 'private' && ownerUserId == request.auth.uid)
+        );
+    }
+
+    function validTeachingClassAssetFilePayload(data) {
+      return data.classId is string
+        && data.assetId is string
+        && data.versionNumber is int
+        && data.versionNumber > 0
+        && data.fileName is string
+        && data.mimeType is string
+        && data.permissionScope is string
+        && validTeachingClassPermissionScope(data.permissionScope)
+        && data.storageKind is string
+        && data.sizeBytes is int
+        && data.sizeBytes >= 0
+        && data.uploadedByUserId is string
+        && data.uploadedByUserId == request.auth.uid
+        && data.uploadedAt is timestamp
+        && data.contentBase64 is string
+        && data.contentBase64.size() < 900000;
+    }
+
+    function canWriteTeachingClassAssetFile(data) {
+      return signedIn()
+        && teachingClassExists(data.classId)
+        && data.uploadedByUserId == request.auth.uid
+        && (
+          (data.permissionScope == 'private'
+            && teachingClassVisible(teachingClassDocument(data.classId).data))
+          || (data.permissionScope != 'private'
+            && canManageTeachingClass(teachingClassDocument(data.classId).data))
+        );
+    }
+
+    function canReadTeachingClassAssetFile(data) {
+      return signedIn()
+        && teachingClassExists(data.classId)
+        && canViewScopedTeachingClassAsset(
+          teachingClassDocument(data.classId).data,
+          data.permissionScope,
+          data.uploadedByUserId
+        );
     }
 
     function canWriteUserClassEnrollment(data) {
@@ -798,7 +931,7 @@ service cloud.firestore {
 
     match /teachingClasses/{classId} {
       allow get: if teachingClassVisible(resource.data);
-      allow list: if signedIn();
+      allow list: if teachingClassVisible(resource.data);
 
       allow create: if signedIn()
         && requesterHasProfessorDiscovery()
@@ -815,6 +948,90 @@ service cloud.firestore {
         );
 
       allow delete: if canManageTeachingClass(resource.data);
+    }
+
+    match /teachingClasses/{classId}/homePosts/{postId} {
+      allow get, list: if teachingClassFeedVisible(classId);
+
+      allow create: if teachingClassExists(classId)
+        && canPublishTeachingClassFeed(teachingClassDocument(classId).data)
+        && validTeachingClassHomePostPayload(request.resource.data, postId)
+        && request.resource.data.authorUserId == request.auth.uid;
+
+      allow update: if teachingClassExists(classId)
+        && (
+          canManageTeachingClass(teachingClassDocument(classId).data)
+          || (
+            canPublishTeachingClassFeed(teachingClassDocument(classId).data)
+            && resource.data.authorUserId == request.auth.uid
+          )
+        )
+        && validTeachingClassHomePostPayload(request.resource.data, postId)
+        && request.resource.data.authorUserId == resource.data.authorUserId
+        && request.resource.data.publishedAt == resource.data.publishedAt;
+
+      allow delete: if teachingClassExists(classId)
+        && (
+          canManageTeachingClass(teachingClassDocument(classId).data)
+          || (
+            canPublishTeachingClassFeed(teachingClassDocument(classId).data)
+            && resource.data.authorUserId == request.auth.uid
+          )
+        );
+    }
+
+    match /teachingClasses/{classId}/homePosts/{postId}/comments/{commentId} {
+      allow get, list: if teachingClassFeedVisible(classId);
+
+      allow create: if teachingClassFeedVisible(classId)
+        && validTeachingClassHomeCommentPayload(request.resource.data, commentId)
+        && request.resource.data.authorUserId == request.auth.uid;
+
+      allow update: if false;
+
+      allow delete: if teachingClassFeedVisible(classId)
+        && (
+          resource.data.authorUserId == request.auth.uid
+          || canManageTeachingClass(teachingClassDocument(classId).data)
+        );
+    }
+
+    match /teachingClasses/{classId}/homePosts/{postId}/reactions/{reactionId} {
+      allow get, list: if teachingClassFeedVisible(classId);
+
+      allow create: if teachingClassFeedVisible(classId)
+        && reactionId == request.auth.uid
+        && validTeachingClassHomeReactionPayload(request.resource.data, reactionId)
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if teachingClassFeedVisible(classId)
+        && reactionId == request.auth.uid
+        && validTeachingClassHomeReactionPayload(request.resource.data, reactionId)
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if teachingClassFeedVisible(classId)
+        && (
+          reactionId == request.auth.uid
+          || canManageTeachingClass(teachingClassDocument(classId).data)
+        );
+    }
+
+    match /teachingClassAssetFiles/{documentId} {
+      allow get: if canReadTeachingClassAssetFile(resource.data);
+      allow list: if false;
+
+      allow create: if validTeachingClassAssetFilePayload(request.resource.data)
+        && canWriteTeachingClassAssetFile(request.resource.data);
+
+      allow update: if false;
+
+      allow delete: if canReadTeachingClassAssetFile(resource.data)
+        && (
+          resource.data.uploadedByUserId == request.auth.uid
+          || canManageTeachingClass(teachingClassDocument(resource.data.classId).data)
+        );
     }
 
     match /teamAssetFiles/{documentId} {
@@ -885,7 +1102,11 @@ service cloud.firestore {
         (teachingClassExists(resource.data.classId)
           && teachingClassVisible(teachingClassDocument(resource.data.classId).data))
       );
-      allow list: if signedIn();
+      allow list: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        (teachingClassExists(resource.data.classId)
+          && canManageTeachingClass(teachingClassDocument(resource.data.classId).data))
+      );
 
       allow create, update: if canWriteUserClassEnrollment(request.resource.data);
 

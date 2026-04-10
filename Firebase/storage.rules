@@ -45,6 +45,36 @@ service firebase.storage {
         || scope == 'private';
     }
 
+    function validTeachingClassPermissionScope(scope) {
+      return scope == 'class'
+        || scope == 'course'
+        || scope == 'staff'
+        || scope == 'private';
+    }
+
+    function teachingClassDocument(classId) {
+      return firestore.get(/databases/(default)/documents/teachingClasses/$(classId));
+    }
+
+    function teachingClassExists(classId) {
+      return teachingClassDocument(classId).data != null;
+    }
+
+    function teachingClassVisible(data) {
+      return signedIn() && (
+        data.createdBy == request.auth.uid ||
+        (data.professorUserIds is list && request.auth.uid in data.professorUserIds) ||
+        (data.studentIds is list && request.auth.uid in data.studentIds)
+      );
+    }
+
+    function canManageTeachingClass(data) {
+      return signedIn() && (
+        data.createdBy == request.auth.uid ||
+        (data.professorUserIds is list && request.auth.uid in data.professorUserIds)
+      );
+    }
+
     function teamDocument(teamId) {
       return firestore.get(/databases/(default)/documents/teams/$(teamId));
     }
@@ -109,6 +139,51 @@ service firebase.storage {
         );
     }
 
+    function canViewScopedTeachingClassAsset(data, permissionScope, ownerUserId) {
+      return teachingClassVisible(data)
+        && validTeachingClassPermissionScope(permissionScope)
+        && (
+          permissionScope == 'class'
+          || permissionScope == 'course'
+          || canManageTeachingClass(data)
+          || (permissionScope == 'private' && ownerUserId == request.auth.uid)
+        );
+    }
+
+    function canWriteTeachingClassAsset(data, ownerUserId, permissionScope) {
+      return signedIn()
+        && request.auth.uid == ownerUserId
+        && validTeachingClassPermissionScope(permissionScope)
+        && (
+          (permissionScope == 'private' && teachingClassVisible(data))
+          || (permissionScope != 'private' && canManageTeachingClass(data))
+        );
+    }
+
+    function canDeleteTeachingClassAsset(data, ownerUserId) {
+      return signedIn()
+        && (
+          ownerUserId == request.auth.uid ||
+          data.createdBy == request.auth.uid ||
+          canManageTeachingClass(data)
+        );
+    }
+
+    function validTeachingClassAssetPath(permissionScope, ownerUserId, assetId, versionId, fileName) {
+      return validTeachingClassPermissionScope(permissionScope)
+        && ownerUserId.size() > 0
+        && assetId.size() > 0
+        && versionId.matches('^v[0-9]{4}$')
+        && fileName.size() > 0;
+    }
+
+    function validTeachingClassIconPath(ownerUserId, assetId, versionId, fileName) {
+      return ownerUserId.size() > 0
+        && assetId.size() > 0
+        && versionId.matches('^v[0-9]{4}$')
+        && fileName.size() > 0;
+    }
+
     match /team-assets/{teamId}/{permissionScope}/{ownerUserId}/{assetId}/{versionId}/{fileName} {
       allow read: if teamExists(teamId)
         && canViewScopedTeamAsset(teamDocument(teamId).data, permissionScope, ownerUserId);
@@ -118,6 +193,35 @@ service firebase.storage {
 
       allow delete: if teamExists(teamId)
         && canDeleteTeamAsset(teamDocument(teamId).data, ownerUserId);
+    }
+
+    match /teaching-class-assets/{classId}/{permissionScope}/{ownerUserId}/{assetId}/{versionId}/{fileName} {
+      allow read: if validTeachingClassAssetPath(permissionScope, ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && canViewScopedTeachingClassAsset(teachingClassDocument(classId).data, permissionScope, ownerUserId);
+
+      allow write: if validTeachingClassAssetPath(permissionScope, ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && canWriteTeachingClassAsset(teachingClassDocument(classId).data, ownerUserId, permissionScope);
+
+      allow delete: if validTeachingClassAssetPath(permissionScope, ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && canDeleteTeachingClassAsset(teachingClassDocument(classId).data, ownerUserId);
+    }
+
+    match /teaching-class-icons/{classId}/{ownerUserId}/{assetId}/{versionId}/{fileName} {
+      allow read: if validTeachingClassIconPath(ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && teachingClassVisible(teachingClassDocument(classId).data);
+
+      allow write: if validTeachingClassIconPath(ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && request.auth.uid == ownerUserId
+        && canManageTeachingClass(teachingClassDocument(classId).data);
+
+      allow delete: if validTeachingClassIconPath(ownerUserId, assetId, versionId, fileName)
+        && teachingClassExists(classId)
+        && canDeleteTeachingClassAsset(teachingClassDocument(classId).data, ownerUserId);
     }
 
     match /{allPaths=**} {

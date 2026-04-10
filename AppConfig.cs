@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace MeuApp
@@ -20,7 +22,7 @@ namespace MeuApp
     {
         private const string DefaultFirebaseApiKey = "AIzaSyA2V4MEzgOoKEEZAAXH49DXbzxUo0_CuWU";
         private const string DefaultFirebaseProjectId = "obsseractpi";
-        private const string DefaultFirebaseStorageBucket = "obsseractpi.appspot.com";
+        private const string DefaultFirebaseStorageBucket = "obsseractpi.firebasestorage.app";
         private static readonly Lazy<FirebaseSettings> FirebaseSettingsLazy = new Lazy<FirebaseSettings>(LoadFirebaseSettings);
 
         public static FirebaseSettings Firebase => FirebaseSettingsLazy.Value;
@@ -34,6 +36,8 @@ namespace MeuApp
         public static string FirestoreBaseUrl => $"https://firestore.googleapis.com/v1/projects/{FirebaseProjectId}/databases/(default)";
 
         public static string FirebaseStorageBaseUrl => $"https://firebasestorage.googleapis.com/v0/b/{FirebaseStorageBucket}";
+
+        public static IReadOnlyList<string> FirebaseStorageBucketCandidates => BuildFirebaseStorageBucketCandidates(FirebaseStorageBucket, FirebaseProjectId);
 
         public static string BuildFirestoreDocumentUrl(string relativePath)
         {
@@ -51,15 +55,38 @@ namespace MeuApp
             return $"{FirebaseStorageBaseUrl}/o?uploadType=media&name={escapedObjectPath}";
         }
 
+        public static IReadOnlyList<string> BuildFirebaseStorageUploadUrls(string objectPath)
+        {
+            var escapedObjectPath = Uri.EscapeDataString((objectPath ?? string.Empty).Trim('/'));
+            return FirebaseStorageBucketCandidates
+                .Select(bucket => $"https://firebasestorage.googleapis.com/v0/b/{bucket}/o?uploadType=media&name={escapedObjectPath}")
+                .ToList();
+        }
+
         public static string BuildFirebaseStorageMetadataUrl(string objectPath)
         {
             var escapedObjectPath = Uri.EscapeDataString((objectPath ?? string.Empty).Trim('/'));
             return $"{FirebaseStorageBaseUrl}/o/{escapedObjectPath}";
         }
 
+        public static IReadOnlyList<string> BuildFirebaseStorageMetadataUrls(string objectPath)
+        {
+            var escapedObjectPath = Uri.EscapeDataString((objectPath ?? string.Empty).Trim('/'));
+            return FirebaseStorageBucketCandidates
+                .Select(bucket => $"https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{escapedObjectPath}")
+                .ToList();
+        }
+
         public static string BuildFirebaseStorageDownloadUrl(string objectPath)
         {
             return $"{BuildFirebaseStorageMetadataUrl(objectPath)}?alt=media";
+        }
+
+        public static IReadOnlyList<string> BuildFirebaseStorageDownloadUrls(string objectPath)
+        {
+            return BuildFirebaseStorageMetadataUrls(objectPath)
+                .Select(url => $"{url}?alt=media")
+                .ToList();
         }
 
         private static FirebaseSettings LoadFirebaseSettings()
@@ -144,10 +171,46 @@ namespace MeuApp
 
             if (string.IsNullOrWhiteSpace(settings.StorageBucket))
             {
-                settings.StorageBucket = $"{settings.ProjectId}.appspot.com";
+                settings.StorageBucket = $"{settings.ProjectId}.firebasestorage.app";
             }
 
             return settings;
+        }
+
+        private static IReadOnlyList<string> BuildFirebaseStorageBucketCandidates(string configuredBucket, string projectId)
+        {
+            var candidates = new List<string>();
+
+            void AddCandidate(string? bucket)
+            {
+                var normalized = (bucket ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(normalized) || candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                candidates.Add(normalized);
+            }
+
+            var normalizedConfiguredBucket = (configuredBucket ?? string.Empty).Trim();
+            AddCandidate(normalizedConfiguredBucket);
+
+            if (normalizedConfiguredBucket.EndsWith(".appspot.com", StringComparison.OrdinalIgnoreCase))
+            {
+                AddCandidate(normalizedConfiguredBucket[..^".appspot.com".Length] + ".firebasestorage.app");
+            }
+            else if (normalizedConfiguredBucket.EndsWith(".firebasestorage.app", StringComparison.OrdinalIgnoreCase))
+            {
+                AddCandidate(normalizedConfiguredBucket[..^".firebasestorage.app".Length] + ".appspot.com");
+            }
+
+            if (!string.IsNullOrWhiteSpace(projectId))
+            {
+                AddCandidate($"{projectId}.firebasestorage.app");
+                AddCandidate($"{projectId}.appspot.com");
+            }
+
+            return candidates;
         }
     }
 }

@@ -231,14 +231,79 @@ namespace MeuApp
         public string Course { get; set; } = string.Empty;
         public string AcademicTerm { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
+        public string IconPreviewImageDataUri { get; set; } = string.Empty;
+        public string IconStorageReference { get; set; } = string.Empty;
+        public string IconFileName { get; set; } = string.Empty;
+        public string IconMimeType { get; set; } = string.Empty;
+        public int IconVersion { get; set; }
+        public DateTime? IconUpdatedAt { get; set; }
         public string JoinCode { get; set; } = string.Empty;
         public string CreatedBy { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
         public List<string> ProfessorUserIds { get; set; } = new List<string>();
         public List<string> ProfessorNames { get; set; } = new List<string>();
+        public string RepresentativeUserId { get; set; } = string.Empty;
+        public string RepresentativeName { get; set; } = string.Empty;
+        public string ViceRepresentativeUserId { get; set; } = string.Empty;
+        public string ViceRepresentativeName { get; set; } = string.Empty;
         public List<string> StudentIds { get; set; } = new List<string>();
         public List<TeachingClassMemberInfo> StudentSummaries { get; set; } = new List<TeachingClassMemberInfo>();
+        public bool HomeFeedReady { get; set; }
+        public DateTime? HomeFeedLoadedAt { get; set; }
+        public List<TeachingClassHomePostInfo> HomePosts { get; set; } = new List<TeachingClassHomePostInfo>();
+    }
+
+    public class TeachingClassHomePostInfo
+    {
+        public string PostId { get; set; } = Guid.NewGuid().ToString("N");
+        public string PostType { get; set; } = "announcement";
+        public string AuthorUserId { get; set; } = string.Empty;
+        public string AuthorName { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public string LinkUrl { get; set; } = string.Empty;
+        public string ActivityLabel { get; set; } = string.Empty;
+        public DateTime? ActivityDueAt { get; set; }
+        public DateTime PublishedAt { get; set; } = DateTime.Now;
+        public DateTime UpdatedAt { get; set; } = DateTime.Now;
+        public List<TeachingClassPostAttachmentInfo> Attachments { get; set; } = new List<TeachingClassPostAttachmentInfo>();
+        public List<TeachingClassPostCommentInfo> Comments { get; set; } = new List<TeachingClassPostCommentInfo>();
+        public List<TeachingClassPostReactionInfo> Reactions { get; set; } = new List<TeachingClassPostReactionInfo>();
+    }
+
+    public class TeachingClassPostAttachmentInfo
+    {
+        public string AttachmentId { get; set; } = Guid.NewGuid().ToString("N");
+        public string FileName { get; set; } = string.Empty;
+        public string PreviewImageDataUri { get; set; } = string.Empty;
+        public string PermissionScope { get; set; } = "class";
+        public string StorageKind { get; set; } = "firebase-storage";
+        public string StorageReference { get; set; } = string.Empty;
+        public string MimeType { get; set; } = string.Empty;
+        public long SizeBytes { get; set; }
+        public int Version { get; set; } = 1;
+        public string AddedByUserId { get; set; } = string.Empty;
+        public DateTime AddedAt { get; set; } = DateTime.Now;
+    }
+
+    public class TeachingClassPostCommentInfo
+    {
+        public string CommentId { get; set; } = Guid.NewGuid().ToString("N");
+        public string ParentCommentId { get; set; } = string.Empty;
+        public string AuthorUserId { get; set; } = string.Empty;
+        public string AuthorName { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
+    }
+
+    public class TeachingClassPostReactionInfo
+    {
+        public string UserId { get; set; } = string.Empty;
+        public string UserName { get; set; } = string.Empty;
+        public string Emoji { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public DateTime UpdatedAt { get; set; } = DateTime.Now;
     }
 
     public class TeachingClassMemberInfo

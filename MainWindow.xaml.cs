@@ -16,6 +16,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -38,7 +39,12 @@ namespace MeuApp
         private const int ProfileGalleryImageMaxSide = 720;
         private const int TeamLogoOutputSize = 420;
         private const int TeamLogoJpegQuality = 86;
+        private const int TeachingClassIconPreviewSize = 320;
+        private const int TeachingClassIconPreviewQuality = 78;
+        private const int TeachingClassIconUploadSize = 960;
+        private const int TeachingClassIconUploadQuality = 84;
         private const int MaxRemoteTeamAssetBytes = 26214400;
+        private const string TeachingClassModuleHome = "home";
         private static readonly HttpClient httpClient = new HttpClient();
         private static readonly string[] KnownProgrammingLanguages =
         {
@@ -149,6 +155,10 @@ namespace MeuApp
             "👏", "🙏", "✅", "❌", "📚", "💻", "🚀", "🎯",
             "⭐", "📌", "⚠️", "💡", "🫶", "👍", "👀", "🎉"
         };
+        private static readonly string[] TeachingClassHomeReactionEmojis =
+        {
+            "👍", "❤️", "🎉", "📚", "👏", "🤔"
+        };
         private static readonly string[] KnownTeamCourses =
         {
             "Analise e Desenvolvimento de Sistemas",
@@ -244,6 +254,13 @@ namespace MeuApp
         private readonly Dictionary<string, TeamWorkspaceInfo> _dirtyTeamPersistenceState = new Dictionary<string, TeamWorkspaceInfo>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _teamPersistenceInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<TeachingClassInfo> _teachingClasses = new List<TeachingClassInfo>();
+        private TeachingClassInfo? _activeTeachingClass = null;
+        private string _activeTeachingClassModule = TeachingClassModuleHome;
+        private bool _teachingClassComposerOpen = false;
+        private string _teachingClassEditingClassId = string.Empty;
+        private string _teachingClassGallerySelectionId = string.Empty;
+        private bool _teachingClassHomeFeedLoadInFlight = false;
+        private string _teachingClassHomeFeedLoadingClassId = string.Empty;
         private int _chatRenderSequence = 0;
         private int _teamWorkspaceRenderSequence = 0;
         private bool _realtimeSyncInFlight = false;
@@ -724,7 +741,7 @@ namespace MeuApp
 
             if (ProfessorNavButton != null)
             {
-                ProfessorNavButton.Visibility = TeamPermissionService.CanUseProfessorDashboard(profile)
+                ProfessorNavButton.Visibility = profile != null
                     ? Visibility.Visible
                     : Visibility.Collapsed;
             }
@@ -3756,8 +3773,8 @@ namespace MeuApp
             if (TeamListSearchStatusText != null)
             {
                 TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
-                    ? "Pesquise por equipe de projeto, turma docente, curso, período, UC ou professor focal."
-                    : "Filtre suas equipes de projeto e turmas docentes por nome, curso, período ou código.";
+                    ? "Pesquise por equipe de projeto, curso, período, UC ou professor focal."
+                    : "Filtre suas equipes de projeto por nome, curso, período ou código.";
             }
 
             SyncDraftTemplateSuggestion();
@@ -4063,6 +4080,35 @@ namespace MeuApp
                 exportErrorMessage: "O recorte da imagem da galeria não pôde ser exportado. Tente novamente.");
         }
 
+            private string? ShowTeachingClassImageCropperDialog(string filePath)
+            {
+                return ShowImageCropperDialog(
+                filePath,
+                eyebrow: "TURMA",
+                dialogTitle: "Ajustar imagem da turma",
+                headerTitle: "Enquadre a identidade visual da turma",
+                description: "Use um único recorte para controlar melhor o ícone da turma e a capa ampla exibida nos cards da galeria docente.",
+                workspaceHint: "Centralize a parte principal da imagem. O recorte final continua quadrado para preservar nitidez, mas as prévias mostram como ele se comporta tanto no badge quanto na capa do card.",
+                previewDescription: "A primeira visualização mostra o badge da turma. A segunda simula a capa larga do card, no estilo de entrada do Microsoft Teams.",
+                firstPreviewLabel: "Badge da turma",
+                firstPreviewCircular: false,
+                secondPreviewLabel: "Capa do card",
+                secondPreviewCircular: false,
+                tipText: "Dica: priorize rosto, símbolo ou elemento central da disciplina. O card usa esse mesmo recorte com zoom suave, então composições concentradas no centro funcionam melhor.",
+                saveButtonLabel: "Aplicar imagem",
+                accentColor: Color.FromRgb(124, 58, 237),
+                outputSize: TeachingClassIconUploadSize,
+                quality: TeachingClassIconUploadQuality,
+                invalidImageTitle: "Imagem inválida",
+                invalidImageMessage: "Não foi possível abrir a imagem selecionada para a turma.",
+                exportErrorTitle: "Falha ao gerar recorte",
+                exportErrorMessage: "O recorte da imagem da turma não pôde ser exportado. Tente novamente.",
+                firstPreviewWidth: 112,
+                firstPreviewHeight: 112,
+                secondPreviewWidth: 236,
+                secondPreviewHeight: 132);
+            }
+
         private string? ShowImageCropperDialog(
             string filePath,
             string eyebrow,
@@ -4083,7 +4129,11 @@ namespace MeuApp
             string invalidImageTitle,
             string invalidImageMessage,
             string exportErrorTitle,
-            string exportErrorMessage)
+            string exportErrorMessage,
+            double firstPreviewWidth = 126,
+            double firstPreviewHeight = 126,
+            double secondPreviewWidth = 126,
+            double secondPreviewHeight = 126)
         {
             var source = TryLoadBitmapSourceFromFile(filePath);
             if (source == null)
@@ -4242,13 +4292,13 @@ namespace MeuApp
             };
             Grid.SetColumn(previewCard, 2);
 
-            Border CreatePreviewSurface(bool circular)
+            Border CreatePreviewSurface(bool circular, double width, double height)
             {
                 return new Border
                 {
-                    Width = 126,
-                    Height = 126,
-                    CornerRadius = circular ? new CornerRadius(63) : new CornerRadius(26),
+                    Width = width,
+                    Height = height,
+                    CornerRadius = circular ? new CornerRadius(Math.Min(width, height) / 2) : new CornerRadius(Math.Max(18, Math.Min(width, height) * 0.2)),
                     HorizontalAlignment = HorizontalAlignment.Left,
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
@@ -4282,7 +4332,7 @@ namespace MeuApp
                 FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
-            previewStack.Children.Add(CreatePreviewSurface(firstPreviewCircular));
+            previewStack.Children.Add(CreatePreviewSurface(firstPreviewCircular, firstPreviewWidth, firstPreviewHeight));
             previewStack.Children.Add(new TextBlock
             {
                 Text = secondPreviewLabel,
@@ -4291,7 +4341,7 @@ namespace MeuApp
                 FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
-            previewStack.Children.Add(CreatePreviewSurface(secondPreviewCircular));
+            previewStack.Children.Add(CreatePreviewSurface(secondPreviewCircular, secondPreviewWidth, secondPreviewHeight));
             previewStack.Children.Add(new Border
             {
                 Margin = new Thickness(0, 24, 0, 0),
@@ -9787,27 +9837,19 @@ namespace MeuApp
             TeamListPanel.Children.Clear();
 
             var activeQuery = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
-            var classesToRender = ResolveVisibleTeachingClasses(activeQuery);
             var teamsToRender = ResolveVisibleTeamListResults();
-            if (classesToRender.Count == 0 && teamsToRender.Count == 0)
+            if (teamsToRender.Count == 0)
             {
                 TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
                     string.IsNullOrWhiteSpace(activeQuery)
                         ? CurrentViewerCanUseProfessorDiscovery()
                             ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
-                            : CurrentViewerCanManageTeachingClasses()
-                                ? "Nenhuma equipe de projeto ou turma docente carregada ainda para sua conta."
-                                : "Nenhuma equipe de projeto ou turma docente carregada ainda para sua conta."
-                        : $"Nenhuma equipe de projeto ou turma encontrada para \"{activeQuery}\"."));
+                            : "Nenhuma equipe de projeto carregada ainda para sua conta."
+                        : $"Nenhuma equipe de projeto encontrada para \"{activeQuery}\"."));
 
                 RenderProfileProjectSelection(_currentProfile);
                 RenderCalendarAgenda();
                 return;
-            }
-
-            if (classesToRender.Count > 0 || (CurrentViewerCanManageTeachingClasses() && string.IsNullOrWhiteSpace(activeQuery)))
-            {
-                TeamListPanel.Children.Add(CreateTeachingClassesSectionCard(classesToRender, activeQuery));
             }
 
             foreach (var team in teamsToRender)
@@ -10833,9 +10875,8 @@ namespace MeuApp
         {
             TeamEntryOptionsPopup.IsOpen = false;
             var hasProjectTeams = _teamWorkspaces.Count > 0;
-            var hasTeachingClasses = _teachingClasses.Count > 0;
 
-            TeamsEmptyStateCard.Visibility = !hasProjectTeams && !hasTeachingClasses && _teamEntryMode == TeamEntryMode.None
+            TeamsEmptyStateCard.Visibility = !hasProjectTeams && _teamEntryMode == TeamEntryMode.None
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamJoinCard.Visibility = _teamEntryMode == TeamEntryMode.Join
@@ -10844,7 +10885,7 @@ namespace MeuApp
             TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamListCard.Visibility = (hasProjectTeams || hasTeachingClasses || CurrentViewerCanUseProfessorDiscovery() || CurrentViewerCanManageTeachingClasses())
+            TeamListCard.Visibility = (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || CurrentViewerCanManageTeachingClasses())
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamWorkspaceCard.Visibility = _activeTeamWorkspace == null
@@ -14720,7 +14761,7 @@ namespace MeuApp
             var joinCode = NormalizeTeamValue(TeamJoinCodeTextBox.Text);
             if (string.IsNullOrWhiteSpace(joinCode))
             {
-                TeamJoinStatusText.Text = "Informe um código válido para ingressar em uma equipe de projeto ou turma docente.";
+                TeamJoinStatusText.Text = "Informe um código válido para ingressar em uma equipe de projeto ou em uma turma da aba Docência.";
                 return;
             }
 
@@ -14751,7 +14792,7 @@ namespace MeuApp
                 return;
             }
 
-            TeamJoinStatusText.Text = "Código não encontrado em equipe de projeto. Tentando turma docente...";
+            TeamJoinStatusText.Text = "Código não encontrado em equipe de projeto. Tentando turma da aba Docência...";
             var teachingClassJoinResult = await _teachingClassService.JoinClassByCodeAsync(joinCode, CreateCurrentUserInfo());
             if (!teachingClassJoinResult.Success || teachingClassJoinResult.TeachingClass == null)
             {
@@ -14761,7 +14802,7 @@ namespace MeuApp
 
             TrackTeachingClassLocally(teachingClassJoinResult.TeachingClass);
             TeamJoinCodeTextBox.Text = string.Empty;
-            TeamJoinStatusText.Text = "Turma docente vinculada com sucesso. Ela já aparece separada das equipes de projeto na lista.";
+            TeamJoinStatusText.Text = "Turma vinculada com sucesso. Abra a aba Docência para ver o mural e os detalhes da sala.";
             TeamCreationStatusText.Text = string.Empty;
             _teamEntryMode = TeamEntryMode.None;
             UpdateTeamsViewState();
@@ -14827,8 +14868,8 @@ namespace MeuApp
                 if (TeamListSearchStatusText != null)
                 {
                     TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
-                        ? "Pesquise por equipe de projeto, turma docente, curso, período, UC ou professor focal."
-                        : "Filtre suas equipes de projeto e turmas docentes por nome, curso, período ou código.";
+                        ? "Pesquise por equipe de projeto, curso, período, UC ou professor focal."
+                        : "Filtre suas equipes de projeto por nome, curso, período ou código.";
                 }
                 RenderTeamsList();
                 return;
@@ -14838,8 +14879,8 @@ namespace MeuApp
             if (TeamListSearchStatusText != null)
             {
                 TeamListSearchStatusText.Text = CurrentViewerCanUseProfessorDiscovery()
-                    ? "Buscando equipes de projeto e turmas docentes no ambiente local e no Firestore..."
-                    : "Filtrando suas equipes de projeto e turmas docentes carregadas...";
+                    ? "Buscando equipes de projeto no ambiente local e no Firestore..."
+                    : "Filtrando suas equipes de projeto carregadas...";
             }
 
             await Task.Delay(220);
@@ -14857,7 +14898,7 @@ namespace MeuApp
             if (TeamListSearchStatusText != null)
             {
                 TeamListSearchStatusText.Text = _teamListSearchResults.Count == 0
-                    ? $"Nenhuma equipe de projeto encontrada no remoto para \"{query}\". As turmas docentes locais continuam visíveis acima quando houver correspondência."
+                    ? $"Nenhuma equipe de projeto encontrada no remoto para \"{query}\"."
                     : _teamListSearchResults.Count == 1
                         ? "1 equipe de projeto encontrada."
                         : $"{_teamListSearchResults.Count} equipes de projeto encontradas.";
@@ -14875,61 +14916,6096 @@ namespace MeuApp
 
             ProfessorDashboardHost.Children.Clear();
 
-            if (!TeamPermissionService.CanUseProfessorDashboard(_currentProfile))
+            if (_currentProfile == null)
             {
-                ProfessorDashboardStatusText.Text = "O dashboard docente é exibido apenas para perfis com papel de professor orientador.";
+                ProfessorDashboardStatusText.Text = "Entre com um perfil válido para abrir a área de Docência.";
                 ProfessorDashboardHost.Children.Add(CreateSearchSlideInfoCard(
-                    "Sem acesso docente",
-                    "Atualize o cadastro como professor orientador para acompanhar risco, marcos e carga de várias equipes ao mesmo tempo."));
+                    "Docência indisponível",
+                    "A aba Docência precisa de um perfil carregado para mostrar suas turmas, o mural e as matrículas vinculadas."));
                 return;
             }
 
-            var teams = _teamWorkspaces
-                .Select(EnsureTeamWorkspaceDefaults)
-                .OrderBy(team => team.Course)
-                .ThenBy(team => team.ClassName)
-                .ThenBy(team => team.TeamName)
-                .ToList();
             var teachingClasses = (_teachingClasses ?? new List<TeachingClassInfo>())
                 .OrderBy(item => item.Course)
                 .ThenBy(item => item.ClassName)
                 .ToList();
+            var canManageTeachingClasses = CurrentViewerCanManageTeachingClasses();
 
-            ProfessorDashboardHost.Children.Add(CreateTeachingClassesSectionCard(teachingClasses, string.Empty));
+            SynchronizeTeachingClassWorkspaceState();
 
-            if (teams.Count == 0)
+            if (_teachingClassComposerOpen)
             {
-                ProfessorDashboardStatusText.Text = teachingClasses.Count == 0
-                    ? "Nenhuma equipe vinculada ainda para leitura executiva."
-                    : $"{teachingClasses.Count} turma(s) docente(s) carregada(s); as equipes de projeto ainda não apareceram neste painel.";
-                ProfessorDashboardHost.Children.Add(CreateSearchSlideInfoCard(
-                    "Aguardando equipes",
-                    "Assim que equipes forem criadas ou vinculadas, o painel docente passa a consolidar risco, atrasos, checkpoints e sinais de carga por turma."));
+                ProfessorDashboardStatusText.Text = string.IsNullOrWhiteSpace(_teachingClassEditingClassId)
+                    ? "Preencha os dados da nova turma na própria página. Os projetos integradores continuam isolados na aba Equipes."
+                    : $"Edite os dados da turma {_activeTeachingClass?.ClassName ?? "selecionada"} na própria página. Os projetos integradores continuam isolados na aba Equipes.";
+            }
+            else if (_activeTeachingClass != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Turma {_activeTeachingClass.ClassName} aberta em página própria. Projetos integradores permanecem separados na aba Equipes.";
+            }
+            else if (teachingClasses.Count == 0)
+            {
+                ProfessorDashboardStatusText.Text = canManageTeachingClasses
+                    ? "Nenhuma turma docente carregada ainda. Crie a primeira turma para organizar alunos, códigos e comunicação pedagógica."
+                    : "Você ainda não está matriculado em nenhuma turma na Docência. Entre por código na aba Equipes ou aguarde um professor adicionar você.";
+            }
+            else
+            {
+                ProfessorDashboardStatusText.Text = canManageTeachingClasses
+                    ? $"{teachingClasses.Count} turma(s) docente(s) carregada(s). Escolha uma turma pelos cards para abrir a página docente correspondente."
+                    : $"{teachingClasses.Count} turma(s) carregada(s) na Docência. Escolha uma turma pelos cards para acompanhar o mural e os materiais.";
+            }
+
+            ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+            ProfessorDashboardHost.Children.Add(CreateProfessorTeachingWorkspace(teachingClasses));
+        }
+
+        private TeachingClassInfo? FindTeachingClassById(string? classId)
+        {
+            if (string.IsNullOrWhiteSpace(classId))
+            {
+                return null;
+            }
+
+            return _teachingClasses.FirstOrDefault(item =>
+                string.Equals(item.ClassId, classId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void SynchronizeTeachingClassWorkspaceState()
+        {
+            if (_teachingClasses.Count == 0)
+            {
+                _activeTeachingClass = null;
                 return;
             }
 
-            var snapshot = AcademicRiskEngine.BuildProfessorDashboard(teams);
-            ProfessorDashboardStatusText.Text = $"{teachingClasses.Count} turma(s) docente(s), {snapshot.Teams.Count} equipe(s) em leitura, {snapshot.HighRiskTeams} em risco alto e {snapshot.OverdueItems} item(ns) atrasados no consolidado.";
-
-            ProfessorDashboardHost.Children.Add(CreateProfessorDashboardHero(snapshot));
-
-            foreach (var group in snapshot.Teams.GroupBy(item => $"{item.Course} • {item.ClassName}"))
+            if (_teachingClassComposerOpen)
             {
-                ProfessorDashboardHost.Children.Add(new TextBlock
+                if (_activeTeachingClass != null)
                 {
-                    Text = group.Key,
-                    Margin = new Thickness(0, 18, 0, 10),
-                    FontSize = 14,
-                    FontWeight = FontWeights.Bold,
-                    Foreground = GetThemeBrush("PrimaryTextBrush")
-                });
+                    _activeTeachingClass = FindTeachingClassById(_activeTeachingClass.ClassId) ?? _activeTeachingClass;
+                }
 
-                foreach (var risk in group)
+                return;
+            }
+
+            if (_activeTeachingClass != null)
+            {
+                var match = FindTeachingClassById(_activeTeachingClass.ClassId);
+                if (match != null)
                 {
-                    var team = teams.First(current => string.Equals(current.TeamId, risk.TeamId, StringComparison.OrdinalIgnoreCase));
-                    ProfessorDashboardHost.Children.Add(CreateProfessorDashboardTeamCard(team, risk));
+                    _activeTeachingClass = match;
+                    return;
+                }
+
+                _activeTeachingClass = null;
+            }
+        }
+
+        private void OpenTeachingClassWorkspace(TeachingClassInfo teachingClass, bool navigateToProfessorSection = true)
+        {
+            if (teachingClass == null)
+            {
+                return;
+            }
+
+            _teachingClassComposerOpen = false;
+            _teachingClassEditingClassId = string.Empty;
+            _activeTeachingClass = FindTeachingClassById(teachingClass.ClassId) ?? teachingClass;
+            _teachingClassGallerySelectionId = _activeTeachingClass?.ClassId ?? string.Empty;
+            _activeTeachingClassModule = TeachingClassModuleHome;
+            var activeTeachingClass = _activeTeachingClass;
+            if (activeTeachingClass == null)
+            {
+                return;
+            }
+
+            if (navigateToProfessorSection)
+            {
+                ShowProfessorDashboardSection();
+            }
+            else
+            {
+                RenderProfessorDashboard();
+            }
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Turma {activeTeachingClass.ClassName} aberta em página própria. Projetos integradores continuam separados na aba Equipes.";
+                ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            }
+
+            _ = EnsureTeachingClassHomeFeedAsync(activeTeachingClass);
+        }
+
+        private void OpenTeachingClassComposer(bool navigateToProfessorSection = true)
+        {
+            _teachingClassComposerOpen = true;
+            _teachingClassEditingClassId = string.Empty;
+            _activeTeachingClass = null;
+            _activeTeachingClassModule = TeachingClassModuleHome;
+
+            if (navigateToProfessorSection)
+            {
+                ShowProfessorDashboardSection();
+            }
+            else
+            {
+                RenderProfessorDashboard();
+            }
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = "Nova turma docente aberta na própria página. Os projetos integradores seguem separados na aba Equipes.";
+                ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            }
+        }
+
+        private void OpenTeachingClassEditor(TeachingClassInfo teachingClass, bool navigateToProfessorSection = true)
+        {
+            if (teachingClass == null || !CanManageTeachingClass(teachingClass))
+            {
+                return;
+            }
+
+            _teachingClassComposerOpen = true;
+            _activeTeachingClass = FindTeachingClassById(teachingClass.ClassId) ?? teachingClass;
+            _teachingClassEditingClassId = _activeTeachingClass.ClassId ?? string.Empty;
+            _activeTeachingClassModule = TeachingClassModuleHome;
+
+            if (navigateToProfessorSection)
+            {
+                ShowProfessorDashboardSection();
+            }
+            else
+            {
+                RenderProfessorDashboard();
+            }
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Edição da turma {_activeTeachingClass.ClassName} aberta na própria página.";
+                ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            }
+        }
+
+        private async Task EnsureTeachingClassHomeFeedAsync(TeachingClassInfo? teachingClass, bool force = false)
+        {
+            if (teachingClass == null || _teachingClassService == null)
+            {
+                return;
+            }
+
+            var classId = teachingClass.ClassId;
+            if (string.IsNullOrWhiteSpace(classId))
+            {
+                return;
+            }
+
+            if (_teachingClassHomeFeedLoadInFlight && string.Equals(_teachingClassHomeFeedLoadingClassId, classId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!force && teachingClass.HomeFeedReady && teachingClass.HomeFeedLoadedAt.HasValue && DateTime.Now - teachingClass.HomeFeedLoadedAt.Value < TimeSpan.FromSeconds(45))
+            {
+                return;
+            }
+
+            _teachingClassHomeFeedLoadInFlight = true;
+            _teachingClassHomeFeedLoadingClassId = classId;
+
+            try
+            {
+                var posts = await _teachingClassService.LoadHomePostsAsync(classId);
+                teachingClass.HomePosts = posts;
+                teachingClass.HomeFeedReady = true;
+                teachingClass.HomeFeedLoadedAt = DateTime.Now;
+                TrackTeachingClassLocally(teachingClass);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassHomeFeed] Erro ao carregar mural: {ex.Message}");
+            }
+            finally
+            {
+                if (string.Equals(_teachingClassHomeFeedLoadingClassId, classId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _teachingClassHomeFeedLoadingClassId = string.Empty;
+                }
+
+                _teachingClassHomeFeedLoadInFlight = false;
+
+                if (_activeTeachingClass != null && string.Equals(_activeTeachingClass.ClassId, classId, StringComparison.OrdinalIgnoreCase) && !_teachingClassComposerOpen)
+                {
+                    RenderProfessorDashboard();
                 }
             }
+        }
+
+        private bool CanCurrentUserInteractWithTeachingClassFeed(TeachingClassInfo teachingClass)
+        {
+            var currentUserId = GetCurrentUserId();
+            return !string.IsNullOrWhiteSpace(currentUserId)
+                && teachingClass != null
+                && (
+                    CanManageTeachingClass(teachingClass)
+                    || teachingClass.StudentIds.Contains(currentUserId, StringComparer.OrdinalIgnoreCase)
+                    || teachingClass.ProfessorUserIds.Contains(currentUserId, StringComparer.OrdinalIgnoreCase)
+                );
+        }
+
+        private bool CanCurrentUserPublishTeachingClassFeed(TeachingClassInfo teachingClass)
+        {
+            if (teachingClass == null)
+            {
+                return false;
+            }
+
+            var currentUserId = GetCurrentUserId();
+            if (string.IsNullOrWhiteSpace(currentUserId))
+            {
+                return false;
+            }
+
+            if (CanManageTeachingClass(teachingClass))
+            {
+                return true;
+            }
+
+            var currentRole = ResolveTeachingClassFeedParticipantRole(teachingClass, currentUserId, _currentProfile?.Name, _currentProfile?.Role);
+            return string.Equals(currentRole, "leader", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(currentRole, "vice", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool CanCurrentUserEditTeachingClassPost(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post)
+        {
+            var currentUserId = GetCurrentUserId();
+            return !string.IsNullOrWhiteSpace(currentUserId)
+                && teachingClass != null
+                && post != null
+                && (
+                    CanManageTeachingClass(teachingClass)
+                    || (CanCurrentUserPublishTeachingClassFeed(teachingClass)
+                        && string.Equals(post.AuthorUserId, currentUserId, StringComparison.OrdinalIgnoreCase))
+                );
+        }
+
+        private bool CanCurrentUserDeleteTeachingClassPost(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post)
+        {
+            return CanCurrentUserEditTeachingClassPost(teachingClass, post);
+        }
+
+        private bool CanCurrentUserDeleteTeachingClassComment(TeachingClassInfo teachingClass, TeachingClassPostCommentInfo comment)
+        {
+            var currentUserId = GetCurrentUserId();
+            return !string.IsNullOrWhiteSpace(currentUserId)
+                && teachingClass != null
+                && comment != null
+                && (
+                    CanManageTeachingClass(teachingClass)
+                    || string.Equals(comment.AuthorUserId, currentUserId, StringComparison.OrdinalIgnoreCase)
+                );
+        }
+
+        private static string NormalizeTeachingClassMemberRole(string? role)
+        {
+            var normalized = (role ?? string.Empty).Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "leader" => "leader",
+                "lider" => "leader",
+                "representative" => "leader",
+                "representante" => "leader",
+                "vice" => "vice",
+                "vice-representative" => "vice",
+                "vice_representative" => "vice",
+                "vice-representante" => "vice",
+                "vice_representante" => "vice",
+                "professor" => "professor",
+                _ => TeamPermissionService.IsFacultyRole(normalized) ? "professor" : "student"
+            };
+        }
+
+        private string GetTeachingClassMemberRoleLabel(string? role)
+        {
+            return NormalizeTeachingClassMemberRole(role) switch
+            {
+                "professor" => "Professor",
+                "leader" => "Representante",
+                "vice" => "Vice-representante",
+                _ => "Aluno"
+            };
+        }
+
+        private Brush GetTeachingClassMemberRoleAccentBrush(string? role)
+        {
+            return NormalizeTeachingClassMemberRole(role) switch
+            {
+                "professor" => new SolidColorBrush(Color.FromRgb(37, 99, 235)),
+                "leader" => new SolidColorBrush(Color.FromRgb(234, 88, 12)),
+                "vice" => new SolidColorBrush(Color.FromRgb(8, 145, 178)),
+                _ => new SolidColorBrush(Color.FromRgb(16, 185, 129))
+            };
+        }
+
+        private Button CreateTeachingClassMiniActionButton(string label, Brush foreground, Brush background, Brush borderBrush, double minWidth = 86)
+        {
+            return new Button
+            {
+                Content = label,
+                MinWidth = minWidth,
+                Height = 32,
+                Margin = new Thickness(8, 0, 0, 0),
+                Padding = new Thickness(12, 6, 12, 6),
+                Background = background,
+                Foreground = foreground,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                FontSize = 10.5,
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+        }
+
+        private List<TeachingClassMemberInfo> GetTeachingClassProfessorDirectory(TeachingClassInfo teachingClass)
+        {
+            var fallbackNames = new Queue<string>((teachingClass.ProfessorNames ?? new List<string>())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            var result = new List<TeachingClassMemberInfo>();
+
+            foreach (var professorUserId in (teachingClass.ProfessorUserIds ?? new List<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var name = string.Empty;
+                var email = string.Empty;
+
+                if (string.Equals(professorUserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase))
+                {
+                    name = _currentProfile?.Name ?? string.Empty;
+                    email = _currentProfile?.Email ?? string.Empty;
+                }
+                else
+                {
+                    var profileTask = LoadUserProfileCachedAsync(professorUserId);
+                    if (profileTask.IsCompletedSuccessfully && profileTask.Result != null)
+                    {
+                        name = profileTask.Result.Name;
+                        email = profileTask.Result.Email;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(name) && fallbackNames.Count > 0)
+                {
+                    name = fallbackNames.Dequeue();
+                }
+
+                result.Add(new TeachingClassMemberInfo
+                {
+                    UserId = professorUserId,
+                    Name = string.IsNullOrWhiteSpace(name) ? "Professor vinculado" : name,
+                    Email = email,
+                    Role = "professor"
+                });
+            }
+
+            while (fallbackNames.Count > 0)
+            {
+                result.Add(new TeachingClassMemberInfo
+                {
+                    Name = fallbackNames.Dequeue(),
+                    Role = "professor"
+                });
+            }
+
+            return result;
+        }
+
+        private async Task<bool> DeleteTeachingClassAsync(TeachingClassInfo teachingClass)
+        {
+            if (_teachingClassService == null || teachingClass == null || !CanManageTeachingClass(teachingClass))
+            {
+                return false;
+            }
+
+            var deleteResult = await _teachingClassService.DeleteClassAsync(teachingClass.ClassId);
+            if (!deleteResult.Success)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Falha ao apagar turma", deleteResult.ErrorMessage ?? "Não foi possível apagar esta turma agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return false;
+            }
+
+            _teachingClasses.RemoveAll(item => string.Equals(item.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase));
+            if (_activeTeachingClass != null && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeTeachingClass = null;
+            }
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Turma {teachingClass.ClassName} removida da docência.";
+                ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+
+            SynchronizeTeachingClassWorkspaceState();
+            UpdateTeamsViewState();
+            RenderTeamsList();
+            RenderProfessorDashboard();
+            return true;
+        }
+
+        private async Task<bool> DeleteTeachingClassPostAsync(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post)
+        {
+            if (_teachingClassService == null || teachingClass == null || post == null || !CanCurrentUserDeleteTeachingClassPost(teachingClass, post))
+            {
+                return false;
+            }
+
+            var deleteResult = await _teachingClassService.DeleteHomePostAsync(teachingClass.ClassId, post.PostId);
+            if (!deleteResult.Success)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Falha ao apagar post", deleteResult.ErrorMessage ?? "Não foi possível remover esta publicação agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return false;
+            }
+
+            teachingClass.HomePosts.RemoveAll(item => string.Equals(item.PostId, post.PostId, StringComparison.OrdinalIgnoreCase));
+            teachingClass.HomeFeedReady = true;
+            teachingClass.HomeFeedLoadedAt = DateTime.Now;
+            TrackTeachingClassLocally(teachingClass);
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Publicação removida de {teachingClass.ClassName}.";
+                ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+
+            RenderProfessorDashboard();
+            return true;
+        }
+
+        private async Task<bool> DeleteTeachingClassCommentAsync(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, TeachingClassPostCommentInfo comment)
+        {
+            if (_teachingClassService == null || teachingClass == null || post == null || comment == null || !CanCurrentUserDeleteTeachingClassComment(teachingClass, comment))
+            {
+                return false;
+            }
+
+            var deleteResult = await _teachingClassService.DeleteHomeCommentAsync(teachingClass.ClassId, post.PostId, comment.CommentId);
+            if (!deleteResult.Success)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Falha ao apagar comentário", deleteResult.ErrorMessage ?? "Não foi possível remover este comentário agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return false;
+            }
+
+            post.Comments.RemoveAll(item => string.Equals(item.CommentId, comment.CommentId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.ParentCommentId, comment.CommentId, StringComparison.OrdinalIgnoreCase));
+            teachingClass.HomeFeedReady = true;
+            teachingClass.HomeFeedLoadedAt = DateTime.Now;
+            TrackTeachingClassLocally(teachingClass);
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Comentário removido de uma publicação da turma {teachingClass.ClassName}.";
+                ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+
+            RenderProfessorDashboard();
+            return true;
+        }
+
+        private string NormalizeTeachingClassFeedPermissionScope(string? permissionScope)
+        {
+            return (permissionScope ?? string.Empty).Trim().ToLowerInvariant() switch
+            {
+                "course" => "course",
+                "staff" => "staff",
+                "private" => "private",
+                _ => "class"
+            };
+        }
+
+        private string GetTeachingClassPermissionScopeLabel(string? permissionScope)
+        {
+            return NormalizeTeachingClassFeedPermissionScope(permissionScope) switch
+            {
+                "course" => "Curso",
+                "staff" => "Equipe docente",
+                "private" => "Privado",
+                _ => "Turma"
+            };
+        }
+
+        private async Task<(bool Success, TeachingClassPostAttachmentInfo? Attachment, string? ErrorMessage)> CreateTeachingClassPostAttachmentFromFileAsync(
+            TeachingClassInfo teachingClass,
+            string filePath,
+            string permissionScope)
+        {
+            if (_teachingClassService == null)
+            {
+                return (false, null, "Serviço de docência não inicializado.");
+            }
+
+            if (!File.Exists(filePath))
+            {
+                return (false, null, "Arquivo local não encontrado para anexar na turma.");
+            }
+
+            var fileInfo = new FileInfo(filePath);
+            if (!fileInfo.Exists)
+            {
+                return (false, null, "Arquivo local não está mais disponível.");
+            }
+
+            if (fileInfo.Length > MaxRemoteTeamAssetBytes)
+            {
+                return (false, null, $"{IOPath.GetFileName(filePath)} excede o limite de {FormatFilesHubSize(MaxRemoteTeamAssetBytes)} para sincronização remota via Firebase Storage.");
+            }
+
+            var attachment = new TeachingClassPostAttachmentInfo
+            {
+                AttachmentId = Guid.NewGuid().ToString("N"),
+                FileName = IOPath.GetFileName(filePath),
+                PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                    ? TryCreateCompressedImageDataUri(filePath, 320, 72) ?? string.Empty
+                    : string.Empty,
+                PermissionScope = NormalizeTeachingClassFeedPermissionScope(permissionScope),
+                StorageKind = "firebase-storage",
+                MimeType = GetMimeTypeFromFileName(IOPath.GetFileName(filePath)),
+                SizeBytes = fileInfo.Length,
+                Version = 1,
+                AddedByUserId = GetCurrentUserId(),
+                AddedAt = DateTime.Now
+            };
+
+            var fileBytes = await File.ReadAllBytesAsync(filePath);
+            var storageResult = await _teachingClassService.SaveTeachingClassAssetContentAsync(teachingClass.ClassId, attachment.AttachmentId, attachment, fileBytes);
+            if (!storageResult.Success)
+            {
+                return (false, null, storageResult.ErrorMessage ?? "Falha desconhecida ao salvar o anexo da turma.");
+            }
+
+            attachment.StorageReference = storageResult.StorageReference;
+            return (true, attachment, null);
+        }
+
+        private async Task<(bool Success, string LocalPath, string? ErrorMessage)> EnsureTeachingClassAttachmentLocalCopyAsync(TeachingClassInfo teachingClass, TeachingClassPostAttachmentInfo attachment)
+        {
+            if (_teachingClassService == null)
+            {
+                return (false, string.Empty, "Serviço de docência não inicializado.");
+            }
+
+            if (string.IsNullOrWhiteSpace(attachment.StorageReference))
+            {
+                return (false, string.Empty, "Esse anexo ainda não possui conteúdo remoto disponível.");
+            }
+
+            var cacheDirectory = IOPath.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MeuApp",
+                "cache",
+                "teaching-class-assets",
+                string.IsNullOrWhiteSpace(teachingClass.ClassId) ? "unknown-class" : teachingClass.ClassId,
+                string.IsNullOrWhiteSpace(attachment.AttachmentId) ? "unknown-attachment" : attachment.AttachmentId);
+            Directory.CreateDirectory(cacheDirectory);
+
+            var localPath = IOPath.Combine(cacheDirectory, $"v{Math.Max(1, attachment.Version):D4}-{SanitizeTeachingClassCacheFileName(attachment.FileName)}");
+            if (File.Exists(localPath))
+            {
+                return (true, localPath, null);
+            }
+
+            var downloadResult = await _teachingClassService.LoadTeachingClassAssetContentAsync(attachment.StorageReference);
+            if (!downloadResult.Success || downloadResult.Payload == null)
+            {
+                return (false, string.Empty, downloadResult.ErrorMessage ?? "Não foi possível recuperar o conteúdo remoto do anexo.");
+            }
+
+            await File.WriteAllBytesAsync(localPath, downloadResult.Payload.Bytes);
+            return (true, localPath, null);
+        }
+
+        private FilesHubItem CreateTransientFilesHubItemForTeachingClassAttachment(TeachingClassInfo teachingClass, TeachingClassPostAttachmentInfo attachment, string localPath)
+        {
+            return new FilesHubItem
+            {
+                ItemId = Guid.NewGuid().ToString("N"),
+                FileName = string.IsNullOrWhiteSpace(attachment.FileName) ? IOPath.GetFileName(localPath) : attachment.FileName,
+                StoredFilePath = localPath,
+                AssociationType = "Docencia",
+                AssociationLabel = teachingClass.ClassName,
+                AddedAt = attachment.AddedAt,
+                FileSizeBytes = new FileInfo(localPath).Length,
+                FileExtension = IOPath.GetExtension(localPath).TrimStart('.').ToUpperInvariant()
+            };
+        }
+
+        private async Task OpenTeachingClassAttachmentPreviewAsync(TeachingClassInfo teachingClass, TeachingClassPostAttachmentInfo attachment)
+        {
+            var localCopyResult = await EnsureTeachingClassAttachmentLocalCopyAsync(teachingClass, attachment);
+            if (!localCopyResult.Success)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Falha ao abrir anexo", localCopyResult.ErrorMessage ?? "Não foi possível abrir o material desta publicação agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return;
+            }
+
+            ShowFilesHubItemPreviewDialog(CreateTransientFilesHubItemForTeachingClassAttachment(teachingClass, attachment, localCopyResult.LocalPath));
+        }
+
+        private async Task ToggleTeachingClassPostReactionAsync(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, string emoji)
+        {
+            if (_teachingClassService == null || !CanCurrentUserInteractWithTeachingClassFeed(teachingClass))
+            {
+                return;
+            }
+
+            var currentUserId = GetCurrentUserId();
+            if (string.IsNullOrWhiteSpace(currentUserId))
+            {
+                return;
+            }
+
+            post.Reactions ??= new List<TeachingClassPostReactionInfo>();
+
+            var existingReaction = post.Reactions
+                .FirstOrDefault(item => string.Equals(item.UserId, currentUserId, StringComparison.OrdinalIgnoreCase));
+
+            TeachingClassOperationResult operationResult;
+            if (existingReaction != null && string.Equals(existingReaction.Emoji, emoji, StringComparison.Ordinal))
+            {
+                operationResult = await _teachingClassService.DeleteHomeReactionAsync(teachingClass.ClassId, post.PostId, currentUserId);
+                if (operationResult.Success)
+                {
+                    post.Reactions.RemoveAll(item => string.Equals(item.UserId, currentUserId, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            else
+            {
+                var reaction = new TeachingClassPostReactionInfo
+                {
+                    UserId = currentUserId,
+                    UserName = string.IsNullOrWhiteSpace(_currentProfile?.Name) ? "Membro da turma" : _currentProfile!.Name,
+                    Emoji = emoji,
+                    CreatedAt = existingReaction?.CreatedAt ?? DateTime.Now,
+                    UpdatedAt = DateTime.Now
+                };
+
+                operationResult = await _teachingClassService.SaveHomeReactionAsync(teachingClass.ClassId, post.PostId, reaction);
+                if (operationResult.Success)
+                {
+                    post.Reactions.RemoveAll(item => string.Equals(item.UserId, currentUserId, StringComparison.OrdinalIgnoreCase));
+                    post.Reactions.Add(reaction);
+                }
+            }
+
+            if (!operationResult.Success)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Reação indisponível", operationResult.ErrorMessage ?? "Não foi possível registrar essa reação agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return;
+            }
+
+            teachingClass.HomeFeedReady = true;
+            teachingClass.HomeFeedLoadedAt = DateTime.Now;
+            TrackTeachingClassLocally(teachingClass);
+
+            if (ProfessorDashboardStatusText != null)
+            {
+                ProfessorDashboardStatusText.Text = $"Reação atualizada em {post.Title switch { { Length: > 0 } => post.Title, _ => "uma publicação da turma" }}.";
+                ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+
+            RenderProfessorDashboard();
+        }
+
+        private void OpenTeachingClassPostLink(string linkUrl)
+        {
+            try
+            {
+                var normalizedUrl = (linkUrl ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(normalizedUrl))
+                {
+                    return;
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = normalizedUrl,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClass.PostLink] Erro ao abrir link: {ex.Message}");
+                ShowStyledAlertDialog("DOCÊNCIA", "Link indisponível", "Não foi possível abrir o link desta publicação no navegador agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+            }
+        }
+
+        private string SanitizeTeachingClassCacheFileName(string? fileName)
+        {
+            var candidate = string.IsNullOrWhiteSpace(fileName) ? "arquivo.bin" : fileName.Trim();
+            var invalidChars = IOPath.GetInvalidFileNameChars();
+            var builder = new StringBuilder(candidate.Length);
+            foreach (var character in candidate)
+            {
+                builder.Append(Array.IndexOf(invalidChars, character) >= 0 || character == '/' || character == '\\'
+                    ? '-'
+                    : character);
+            }
+
+            var sanitized = builder.ToString().Replace(' ', '-');
+            return string.IsNullOrWhiteSpace(sanitized) ? "arquivo.bin" : sanitized;
+        }
+
+        private Border CreateTeachingClassWorkspaceHeader(
+            string eyebrow,
+            string title,
+            string description,
+            List<TeachingClassInfo> teachingClasses,
+            TeachingClassInfo? activeTeachingClass,
+            Brush accentBrush,
+            double maxDescriptionWidth = 760)
+        {
+            var header = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SidebarBorderBrush"),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(22, 18, 22, 18)
+            };
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = eyebrow,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                Margin = new Thickness(0, 6, 0, 0),
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 22,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = description,
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20,
+                MaxWidth = maxDescriptionWidth
+            });
+            headerGrid.Children.Add(titleStack);
+
+            var menuButton = CreateTeachingClassHamburgerButton("Menu da docência", accentBrush);
+            var actionsPopup = CreateTeachingClassActionsPopup(menuButton, teachingClasses, activeTeachingClass, accentBrush);
+            menuButton.Click += (_, __) => actionsPopup.IsOpen = !actionsPopup.IsOpen;
+
+            Grid.SetColumn(menuButton, 1);
+            headerGrid.Children.Add(menuButton);
+
+            header.Child = headerGrid;
+            return header;
+        }
+
+        private Button CreateTeachingClassHamburgerButton(string tooltip, Brush? lineBrush = null)
+        {
+            var foreground = lineBrush ?? (_appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(226, 232, 240))
+                : new SolidColorBrush(Color.FromRgb(51, 65, 85)));
+
+            Border CreateLine(double width)
+            {
+                return new Border
+                {
+                    Width = width,
+                    Height = 2,
+                    Margin = new Thickness(0, 0, 0, 3),
+                    Background = foreground,
+                    CornerRadius = new CornerRadius(1)
+                };
+            }
+
+            var icon = new StackPanel
+            {
+                Width = 18,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            icon.Children.Add(CreateLine(18));
+            icon.Children.Add(CreateLine(18));
+            icon.Children.Add(new Border
+            {
+                Width = 18,
+                Height = 2,
+                Background = foreground,
+                CornerRadius = new CornerRadius(1)
+            });
+
+            return new Button
+            {
+                Content = icon,
+                ToolTip = tooltip,
+                Width = 42,
+                Height = 40,
+                Padding = new Thickness(10, 0, 10, 0),
+                Margin = new Thickness(16, 0, 0, 0),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+        }
+
+        private Popup CreateTeachingClassActionsPopup(Button anchorButton, List<TeachingClassInfo> teachingClasses, TeachingClassInfo? activeTeachingClass, Brush accentBrush)
+        {
+            var popupBorderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var popupBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                : new SolidColorBrush(Colors.White);
+            var titleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var subtitleBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+            var idleBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(18, 30, 49))
+                : new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            var hoverBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(30, 41, 59))
+                : new SolidColorBrush(Color.FromRgb(241, 245, 249));
+
+            var canManageAny = CurrentViewerCanManageTeachingClasses();
+            var canManageActive = activeTeachingClass != null && CanManageTeachingClass(activeTeachingClass);
+            var hasActiveClass = activeTeachingClass != null;
+
+            var popup = new Popup
+            {
+                PlacementTarget = anchorButton,
+                Placement = PlacementMode.Bottom,
+                HorizontalOffset = -292,
+                VerticalOffset = 10,
+                AllowsTransparency = true,
+                StaysOpen = false
+            };
+
+            Button CreateMenuActionButton(string title, string subtitle, Func<Task> action, bool isEnabled)
+            {
+                var button = new Button
+                {
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0, 0, 0, 8),
+                    Cursor = isEnabled ? Cursors.Hand : Cursors.Arrow,
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    IsEnabled = isEnabled,
+                    Opacity = isEnabled ? 1 : 0.58
+                };
+
+                var cardBorder = new Border
+                {
+                    Background = idleBackground,
+                    BorderBrush = popupBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16),
+                    Padding = new Thickness(14)
+                };
+
+                var cardGrid = new Grid();
+                cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var textStack = new StackPanel();
+                textStack.Children.Add(new TextBlock
+                {
+                    Text = title,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = titleBrush
+                });
+                textStack.Children.Add(new TextBlock
+                {
+                    Text = subtitle,
+                    FontSize = 10.5,
+                    Margin = new Thickness(0, 4, 0, 0),
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = subtitleBrush,
+                    LineHeight = 17
+                });
+                cardGrid.Children.Add(textStack);
+
+                var arrow = new TextBlock
+                {
+                    Text = ">",
+                    FontSize = 15,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = accentBrush,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(12, 0, 0, 0)
+                };
+                Grid.SetColumn(arrow, 1);
+                cardGrid.Children.Add(arrow);
+
+                cardBorder.Child = cardGrid;
+                button.Content = cardBorder;
+
+                if (isEnabled)
+                {
+                    button.MouseEnter += (_, __) => cardBorder.Background = hoverBackground;
+                    button.MouseLeave += (_, __) => cardBorder.Background = idleBackground;
+                    button.Click += async (_, __) =>
+                    {
+                        popup.IsOpen = false;
+                        await action();
+                    };
+                }
+
+                return button;
+            }
+
+            var popupContent = new StackPanel();
+            popupContent.Children.Add(new TextBlock
+            {
+                Text = "Menu da docência",
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = titleBrush,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+            popupContent.Children.Add(new TextBlock
+            {
+                Text = hasActiveClass
+                    ? canManageActive
+                        ? $"Gerencie {activeTeachingClass!.ClassName} sem poluir a timeline da turma com ações operacionais."
+                        : $"Acompanhe {activeTeachingClass!.ClassName} sem misturar a timeline da turma com a aba Equipes."
+                    : canManageAny
+                        ? "Atualize a docência, crie novas turmas e organize a sala usando o menu do topo; a escolha da turma acontece nos cards iniciais."
+                        : "Atualize a docência e abra a turma desejada pelos cards iniciais para acompanhar o mural e os materiais.",
+                FontSize = 11,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = subtitleBrush,
+                Margin = new Thickness(0, 0, 0, 14),
+                LineHeight = 18
+            });
+
+            popupContent.Children.Add(CreateMenuActionButton(
+                "Atualizar turmas",
+                "Recarrega as turmas docentes no Firebase e preserva a turma aberta quando houver correspondência.",
+                async () =>
+                {
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = "Atualizando turmas docentes no Firebase...";
+                        ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                    }
+
+                    await LoadTeachingClassesFromDatabaseAsync(force: true);
+                },
+                true));
+
+            if (canManageAny)
+            {
+                popupContent.Children.Add(CreateMenuActionButton(
+                    "Nova turma",
+                    "Abre a criação inline da turma dentro da própria página da docência.",
+                    () =>
+                    {
+                        OpenTeachingClassComposer(navigateToProfessorSection: false);
+                        return Task.CompletedTask;
+                    },
+                    true));
+            }
+
+            if (canManageActive)
+            {
+                popupContent.Children.Add(CreateMenuActionButton(
+                    "Editar turma",
+                    "Atualize nome, curso, período e descrição sem sair da página atual.",
+                    () =>
+                    {
+                        if (activeTeachingClass != null)
+                        {
+                            OpenTeachingClassEditor(activeTeachingClass, navigateToProfessorSection: false);
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                    true));
+
+                popupContent.Children.Add(CreateMenuActionButton(
+                    "Apagar turma",
+                    "Remove a turma, o mural e os vínculos de matrícula desta sala docente.",
+                    async () =>
+                    {
+                        if (activeTeachingClass == null)
+                        {
+                            return;
+                        }
+
+                        var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        if (!ShowStyledConfirmationDialog(
+                                "DOCÊNCIA",
+                                "Apagar turma",
+                                $"A turma {activeTeachingClass.ClassName} será removida com o mural, comentários, reações e matrículas vinculadas.",
+                                "Apagar turma",
+                                deleteBrush))
+                        {
+                            return;
+                        }
+
+                        await DeleteTeachingClassAsync(activeTeachingClass);
+                    },
+                    true));
+            }
+
+            popupContent.Children.Add(CreateMenuActionButton(
+                "Código e responsáveis",
+                hasActiveClass
+                    ? "Veja o código de entrada e os docentes vinculados a esta turma."
+                    : "Abra uma turma primeiro para consultar código e responsáveis.",
+                () =>
+                {
+                    if (activeTeachingClass != null)
+                    {
+                        ShowTeachingClassCodeAndFacultyDialog(activeTeachingClass);
+                    }
+
+                    return Task.CompletedTask;
+                },
+                hasActiveClass));
+
+            popupContent.Children.Add(CreateMenuActionButton(
+                "Operação docente",
+                hasActiveClass
+                    ? "Abra a gestão operacional da turma com descrição e alunos inscritos."
+                    : "Abra uma turma primeiro para consultar a operação docente.",
+                () =>
+                {
+                    if (activeTeachingClass != null)
+                    {
+                        ShowTeachingClassOperationDialog(activeTeachingClass);
+                    }
+
+                    return Task.CompletedTask;
+                },
+                hasActiveClass));
+
+            popup.Child = new Border
+            {
+                Width = 348,
+                Background = popupBackground,
+                BorderBrush = popupBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(16),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                {
+                    BlurRadius = 28,
+                    ShadowDepth = 8,
+                    Opacity = 0.22,
+                    Color = Colors.Black
+                },
+                Child = popupContent
+            };
+
+            return popup;
+        }
+
+        private void ShowTeachingClassDirectoryDialog(List<TeachingClassInfo> teachingClasses)
+        {
+            var availableClasses = (teachingClasses ?? new List<TeachingClassInfo>())
+                .Where(item => item != null)
+                .OrderBy(item => item.ClassName)
+                .ToList();
+            if (availableClasses.Count == 0)
+            {
+                ShowStyledAlertDialog("DOCÊNCIA", "Sem turmas carregadas", "Ainda não há turmas docentes disponíveis para abrir neste menu.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var dialog = CreateStyledDialogWindow("Turmas docentes", 760, 720, 580, true);
+            var queryBox = new TextBox { Height = 44 };
+            var summaryText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var resultsHost = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+            TeachingClassInfo? selectedClass = null;
+
+            ApplyDialogInputStyle(queryBox);
+
+            Button CreateClassButton(TeachingClassInfo teachingClass)
+            {
+                var isSelected = !_teachingClassComposerOpen
+                    && _activeTeachingClass != null
+                    && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
+
+                var button = new Button
+                {
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0, 0, 0, 10),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    Cursor = Cursors.Hand
+                };
+                button.Click += (_, __) =>
+                {
+                    selectedClass = teachingClass;
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                };
+
+                var tile = new Grid();
+                tile.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                tile.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var identity = new StackPanel();
+                identity.Children.Add(new TextBlock
+                {
+                    Text = teachingClass.ClassName,
+                    FontSize = 13,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                identity.Children.Add(new TextBlock
+                {
+                    Text = $"{teachingClass.Course} • {teachingClass.AcademicTerm}",
+                    Margin = new Thickness(0, 4, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                identity.Children.Add(new WrapPanel
+                {
+                    Margin = new Thickness(0, 10, 0, 0),
+                    Children =
+                    {
+                        CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
+                        CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
+                    }
+                });
+                tile.Children.Add(identity);
+
+                var arrow = new Border
+                {
+                    Width = 34,
+                    Height = 34,
+                    Margin = new Thickness(12, 0, 0, 0),
+                    CornerRadius = new CornerRadius(17),
+                    Background = isSelected ? accentBrush : GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = isSelected ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
+                    {
+                        Text = ">",
+                        FontSize = 16,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = isSelected ? Brushes.White : accentBrush,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                };
+                Grid.SetColumn(arrow, 1);
+                tile.Children.Add(arrow);
+
+                button.Content = new Border
+                {
+                    Background = isSelected ? CreateSoftAccentBrush(accentBrush, 26) : GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(18),
+                    Padding = new Thickness(16),
+                    Child = tile
+                };
+
+                return button;
+            }
+
+            void RenderDirectory(string query)
+            {
+                resultsHost.Children.Clear();
+
+                var normalizedQuery = NormalizeTeamValue(query);
+                var visibleClasses = string.IsNullOrWhiteSpace(normalizedQuery)
+                    ? availableClasses
+                    : availableClasses
+                        .Where(item =>
+                            item.ClassName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                            || item.Course.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                            || item.AcademicTerm.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                            || item.JoinCode.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                            || item.StudentSummaries.Any(member =>
+                                member.Name.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)
+                                || member.Registration.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+                            || item.ProfessorNames.Any(name => name.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+                summaryText.Text = string.IsNullOrWhiteSpace(normalizedQuery)
+                    ? "Selecione uma turma para abrir a página correspondente."
+                    : visibleClasses.Count == 0
+                        ? $"Nenhuma turma encontrada para \"{normalizedQuery}\"."
+                        : $"{visibleClasses.Count} turma(s) encontrada(s) para \"{normalizedQuery}\".";
+
+                if (visibleClasses.Count == 0)
+                {
+                    resultsHost.Children.Add(CreateSearchSlideInfoCard(
+                        "Sem turmas nesta busca",
+                        "Ajuste o nome, curso, período, professor ou código para localizar a turma desejada."));
+                    return;
+                }
+
+                foreach (var teachingClass in visibleClasses)
+                {
+                    resultsHost.Children.Add(CreateClassButton(teachingClass));
+                }
+            }
+
+            queryBox.TextChanged += (_, __) => RenderDirectory(queryBox.Text);
+            RenderDirectory(string.Empty);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader("DOCÊNCIA", "Turmas", "Escolha a turma que deve ocupar a página principal. O diretório sai do corpo fixo e passa a viver neste menu.", accentBrush));
+
+            var filters = new StackPanel
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Children =
+                {
+                    CreateDialogFieldLabel("Buscar turma"),
+                    queryBox,
+                    summaryText
+                }
+            };
+            Grid.SetRow(filters, 1);
+            root.Children.Add(filters);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = resultsHost
+            };
+            Grid.SetRow(scrollViewer, 2);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", accentBrush, Brushes.White, Brushes.Transparent, 110);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton }
+            };
+            Grid.SetRow(footer, 3);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+
+            if (selectedClass != null)
+            {
+                OpenTeachingClassWorkspace(selectedClass, navigateToProfessorSection: false);
+            }
+        }
+
+        private void ShowTeachingClassCodeAndFacultyDialog(TeachingClassInfo teachingClass)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var dialog = CreateStyledDialogWindow($"Código e responsáveis • {teachingClass.ClassName}", 720, 640, 560, true);
+            var canManage = CanManageTeachingClass(teachingClass);
+            var facultyStack = new StackPanel();
+            var leadershipStack = new StackPanel();
+            var searchResultsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var professorStatusText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var professorQueryBox = new TextBox { Height = 42 };
+            ApplyDialogInputStyle(professorQueryBox);
+
+            UserInfo? selectedProfessor = null;
+            Button? selectedProfessorButton = null;
+
+            async Task<bool> PersistFacultyChangesAsync(string successMessage)
+            {
+                if (_teachingClassService == null)
+                {
+                    professorStatusText.Text = "Serviço de docência indisponível para atualizar a turma agora.";
+                    professorStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return false;
+                }
+
+                var saveResult = await _teachingClassService.SaveClassAsync(teachingClass);
+                if (!saveResult.Success)
+                {
+                    professorStatusText.Text = saveResult.ErrorMessage ?? "Não foi possível atualizar os responsáveis da turma agora.";
+                    professorStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return false;
+                }
+
+                TrackTeachingClassLocally(teachingClass);
+                professorStatusText.Text = successMessage;
+                professorStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                if (ProfessorDashboardStatusText != null)
+                {
+                    ProfessorDashboardStatusText.Text = successMessage;
+                    ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                }
+
+                return true;
+            }
+
+            void RenderLeadershipSummary()
+            {
+                leadershipStack.Children.Clear();
+
+                void AddLeadershipCard(string title, string userName, string userId, string role)
+                {
+                    var hasLeader = !string.IsNullOrWhiteSpace(userId);
+                    var roleBrush = GetTeachingClassMemberRoleAccentBrush(role);
+                    leadershipStack.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(14),
+                        Background = hasLeader ? CreateSoftAccentBrush(roleBrush, 18) : GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = hasLeader ? roleBrush : GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(16),
+                        Child = new StackPanel
+                        {
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text = title,
+                                    FontSize = 11,
+                                    FontWeight = FontWeights.SemiBold,
+                                    Foreground = hasLeader ? roleBrush : GetThemeBrush("SecondaryTextBrush")
+                                },
+                                new TextBlock
+                                {
+                                    Text = hasLeader ? userName : "Não definido ainda",
+                                    Margin = new Thickness(0, 6, 0, 0),
+                                    FontSize = 13,
+                                    FontWeight = FontWeights.Bold,
+                                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                    TextWrapping = TextWrapping.Wrap
+                                }
+                            }
+                        }
+                    });
+                }
+
+                AddLeadershipCard("Representante da turma", teachingClass.RepresentativeName, teachingClass.RepresentativeUserId, "leader");
+                AddLeadershipCard("Vice-representante", teachingClass.ViceRepresentativeName, teachingClass.ViceRepresentativeUserId, "vice");
+
+                if (canManage)
+                {
+                    var openOperationButton = CreateDialogActionButton("Gerenciar alunos e lideranças", accentBrush, Brushes.White, Brushes.Transparent, 226);
+                    openOperationButton.Click += (_, __) =>
+                    {
+                        dialog.Close();
+                        ShowTeachingClassOperationDialog(teachingClass);
+                    };
+                    leadershipStack.Children.Add(new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Margin = new Thickness(0, 8, 0, 0),
+                        Children = { openOperationButton }
+                    });
+                }
+            }
+
+            void RenderFacultyDirectory()
+            {
+                facultyStack.Children.Clear();
+                var professors = GetTeachingClassProfessorDirectory(teachingClass);
+                if (professors.Count == 0)
+                {
+                    facultyStack.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum docente adicional registrado além da autoria desta turma.",
+                        FontSize = 12,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 20
+                    });
+                    return;
+                }
+
+                foreach (var professor in professors.OrderBy(item => item.Name))
+                {
+                    var cardGrid = new Grid();
+                    cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    cardGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var infoStack = new StackPanel();
+                    infoStack.Children.Add(new TextBlock
+                    {
+                        Text = professor.Name,
+                        FontSize = 12,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    infoStack.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(professor.Email) ? professor.UserId : professor.Email,
+                        Margin = new Thickness(0, 4, 0, 0),
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    cardGrid.Children.Add(infoStack);
+
+                    if (canManage
+                        && !string.IsNullOrWhiteSpace(professor.UserId)
+                        && !string.Equals(professor.UserId, teachingClass.CreatedBy, StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(professor.UserId, GetCurrentUserId(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        var removeButton = CreateTeachingClassMiniActionButton("Remover", deleteBrush, CreateSoftAccentBrush(deleteBrush, 14), Brushes.Transparent, 96);
+                        removeButton.Click += async (_, __) =>
+                        {
+                            if (!ShowStyledConfirmationDialog(
+                                    "DOCÊNCIA",
+                                    "Remover professor",
+                                    $"{professor.Name} deixará de gerenciar a turma {teachingClass.ClassName}.",
+                                    "Remover",
+                                    deleteBrush))
+                            {
+                                return;
+                            }
+
+                            teachingClass.ProfessorUserIds.RemoveAll(userId => string.Equals(userId, professor.UserId, StringComparison.OrdinalIgnoreCase));
+                            teachingClass.ProfessorNames.RemoveAll(name => string.Equals(name, professor.Name, StringComparison.OrdinalIgnoreCase));
+                            if (!await PersistFacultyChangesAsync($"{professor.Name} foi removido da gestão de {teachingClass.ClassName}."))
+                            {
+                                if (!teachingClass.ProfessorUserIds.Contains(professor.UserId, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    teachingClass.ProfessorUserIds.Add(professor.UserId);
+                                }
+                                if (!string.IsNullOrWhiteSpace(professor.Name) && !teachingClass.ProfessorNames.Contains(professor.Name, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    teachingClass.ProfessorNames.Add(professor.Name);
+                                }
+                            }
+
+                            RenderFacultyDirectory();
+                        };
+                        Grid.SetColumn(removeButton, 1);
+                        cardGrid.Children.Add(removeButton);
+                    }
+
+                    facultyStack.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = cardGrid
+                    });
+                }
+            }
+
+            var copyButton = CreateDialogActionButton("Copiar código", accentBrush, Brushes.White, Brushes.Transparent, 126);
+            copyButton.Click += (_, __) => CopyTeachingClassCode_Click(new Button { Tag = teachingClass }, new RoutedEventArgs());
+
+            var addProfessorButton = CreateDialogActionButton("Adicionar professor", accentBrush, Brushes.White, Brushes.Transparent, 168);
+            addProfessorButton.IsEnabled = false;
+
+            var searchProfessorButton = CreateDialogActionButton("Buscar professor", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 160);
+            searchProfessorButton.Click += async (_, __) =>
+            {
+                var query = NormalizeTeamValue(professorQueryBox.Text);
+                if (string.IsNullOrWhiteSpace(query))
+                {
+                    professorStatusText.Text = "Digite nome, email ou matrícula para localizar um professor.";
+                    professorStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(_idToken))
+                {
+                    professorStatusText.Text = "A sessão atual não possui token para consultar professores.";
+                    professorStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                searchProfessorButton.IsEnabled = false;
+                addProfessorButton.IsEnabled = false;
+                selectedProfessor = null;
+                selectedProfessorButton = null;
+                searchResultsHost.Children.Clear();
+                professorStatusText.Text = "Buscando professores elegíveis...";
+                professorStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var searchService = new UserSearchService(_idToken);
+                    var results = await searchService.SearchUsersAsync(query);
+                    var filtered = results
+                        .Where(user => TeamPermissionService.IsFacultyRole(user.Role))
+                        .Where(user => !string.IsNullOrWhiteSpace(user.UserId))
+                        .Where(user => !teachingClass.ProfessorUserIds.Contains(user.UserId, StringComparer.OrdinalIgnoreCase))
+                        .Take(12)
+                        .ToList();
+
+                    if (filtered.Count == 0)
+                    {
+                        professorStatusText.Text = "Nenhum professor elegível encontrado para essa busca.";
+                        return;
+                    }
+
+                    professorStatusText.Text = $"{filtered.Count} professor(es) encontrado(s). Selecione um para concluir a vinculação.";
+                    foreach (var professor in filtered)
+                    {
+                        var resultButton = new Button
+                        {
+                            Margin = new Thickness(0, 0, 0, 10),
+                            Padding = new Thickness(14),
+                            Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            BorderBrush = GetThemeBrush("CardBorderBrush"),
+                            BorderThickness = new Thickness(1),
+                            HorizontalContentAlignment = HorizontalAlignment.Left,
+                            Cursor = Cursors.Hand,
+                            Tag = professor,
+                            Content = new StackPanel
+                            {
+                                Children =
+                                {
+                                    new TextBlock
+                                    {
+                                        Text = professor.Name,
+                                        FontSize = 13,
+                                        FontWeight = FontWeights.Bold,
+                                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                                    },
+                                    new TextBlock
+                                    {
+                                        Text = string.IsNullOrWhiteSpace(professor.Email)
+                                            ? (string.IsNullOrWhiteSpace(professor.Registration) ? "Professor sem email visível" : $"Matrícula {professor.Registration}")
+                                            : professor.Email,
+                                        Margin = new Thickness(0, 4, 0, 0),
+                                        FontSize = 11,
+                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                        TextWrapping = TextWrapping.Wrap
+                                    }
+                                }
+                            }
+                        };
+
+                        resultButton.Click += (_, __) =>
+                        {
+                            if (selectedProfessorButton != null)
+                            {
+                                selectedProfessorButton.Background = GetThemeBrush("MutedCardBackgroundBrush");
+                                selectedProfessorButton.BorderBrush = GetThemeBrush("CardBorderBrush");
+                            }
+
+                            selectedProfessorButton = resultButton;
+                            selectedProfessorButton.Background = CreateSoftAccentBrush(accentBrush, 24);
+                            selectedProfessorButton.BorderBrush = accentBrush;
+                            selectedProfessor = (UserInfo?)resultButton.Tag;
+                            addProfessorButton.IsEnabled = selectedProfessor != null;
+                            professorStatusText.Text = selectedProfessor == null
+                                ? professorStatusText.Text
+                                : $"Professor selecionado: {selectedProfessor.Name}. Clique em Adicionar professor para concluir.";
+                        };
+
+                        searchResultsHost.Children.Add(resultButton);
+                    }
+                }
+                finally
+                {
+                    searchProfessorButton.IsEnabled = true;
+                }
+            };
+
+            addProfessorButton.Click += async (_, __) =>
+            {
+                if (selectedProfessor == null)
+                {
+                    return;
+                }
+
+                addProfessorButton.IsEnabled = false;
+                searchProfessorButton.IsEnabled = false;
+                if (!teachingClass.ProfessorUserIds.Contains(selectedProfessor.UserId, StringComparer.OrdinalIgnoreCase))
+                {
+                    teachingClass.ProfessorUserIds.Add(selectedProfessor.UserId);
+                }
+                if (!string.IsNullOrWhiteSpace(selectedProfessor.Name) && !teachingClass.ProfessorNames.Contains(selectedProfessor.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    teachingClass.ProfessorNames.Add(selectedProfessor.Name);
+                }
+
+                if (!await PersistFacultyChangesAsync($"{selectedProfessor.Name} agora também gerencia a turma {teachingClass.ClassName}."))
+                {
+                    teachingClass.ProfessorUserIds.RemoveAll(userId => string.Equals(userId, selectedProfessor.UserId, StringComparison.OrdinalIgnoreCase));
+                    teachingClass.ProfessorNames.RemoveAll(name => string.Equals(name, selectedProfessor.Name, StringComparison.OrdinalIgnoreCase));
+                }
+
+                selectedProfessor = null;
+                selectedProfessorButton = null;
+                professorQueryBox.Clear();
+                searchResultsHost.Children.Clear();
+                addProfessorButton.IsEnabled = false;
+                searchProfessorButton.IsEnabled = true;
+                RenderFacultyDirectory();
+            };
+
+            var body = new StackPanel();
+            body.Children.Add(CreateDialogSectionCard(
+                "Código de entrada",
+                "Compartilhe este código com a sala para o autoingresso dos alunos.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new Border
+                        {
+                            Padding = new Thickness(14),
+                            Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                            BorderBrush = GetThemeBrush("CardBorderBrush"),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(16),
+                            Child = new StackPanel
+                            {
+                                Children =
+                                {
+                                    new TextBlock
+                                    {
+                                        Text = teachingClass.JoinCode,
+                                        FontSize = 24,
+                                        FontWeight = FontWeights.ExtraBold,
+                                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                        FontFamily = new FontFamily("Consolas")
+                                    },
+                                    new TextBlock
+                                    {
+                                        Text = "O fluxo de projeto continua separado na aba Equipes. Aqui entra apenas a docência da turma.",
+                                        Margin = new Thickness(0, 8, 0, 0),
+                                        FontSize = 11,
+                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                        TextWrapping = TextWrapping.Wrap,
+                                        LineHeight = 18
+                                    }
+                                }
+                            }
+                        },
+                        new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal,
+                            HorizontalAlignment = HorizontalAlignment.Right,
+                            Margin = new Thickness(0, 14, 0, 0),
+                            Children = { copyButton }
+                        }
+                    }
+                }));
+            body.Children.Add(CreateDialogSectionCard(
+                "Lideranças da turma",
+                "Representante e vice-representante ganham permissão para publicar no mural quando definidos na operação docente.",
+                accentBrush,
+                leadershipStack,
+                new Thickness(0, 0, 0, 0)));
+
+            var facultyBody = new StackPanel();
+            if (canManage)
+            {
+                facultyBody.Children.Add(new Expander
+                {
+                    Header = "Adicionar professor agora",
+                    Margin = new Thickness(0, 0, 0, 16),
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(14, 10, 14, 10),
+                    Content = new StackPanel
+                    {
+                        Children =
+                        {
+                            CreateDialogFieldLabel("Buscar professor"),
+                            professorQueryBox,
+                            professorStatusText,
+                            searchResultsHost,
+                            new StackPanel
+                            {
+                                Orientation = Orientation.Horizontal,
+                                HorizontalAlignment = HorizontalAlignment.Right,
+                                Margin = new Thickness(0, 14, 0, 0),
+                                Children = { searchProfessorButton, addProfessorButton }
+                            }
+                        }
+                    },
+                    IsExpanded = false
+                });
+            }
+            facultyBody.Children.Add(facultyStack);
+            body.Children.Add(CreateDialogSectionCard(
+                "Responsáveis docentes",
+                canManage
+                    ? "Professores vinculados a esta turma neste momento. Você pode adicionar ou remover responsáveis adicionais daqui."
+                    : "Professores vinculados a esta turma neste momento.",
+                accentBrush,
+                facultyBody,
+                new Thickness(0, 0, 0, 0)));
+
+            RenderLeadershipSummary();
+            RenderFacultyDirectory();
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader("DOCÊNCIA", teachingClass.ClassName, "Código de entrada e responsáveis concentrados em um painel leve, fora do corpo principal da página.", accentBrush));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = body
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", accentBrush, Brushes.White, Brushes.Transparent, 110);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+        private void ShowTeachingClassOperationDialog(TeachingClassInfo teachingClass)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var dialog = CreateStyledDialogWindow($"Operação docente • {teachingClass.ClassName}", 920, 760, 640, true);
+            var canManage = CanManageTeachingClass(teachingClass);
+
+            var summary = new StackPanel();
+            summary.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(teachingClass.Description)
+                    ? "Sem descrição pedagógica registrada ainda."
+                    : teachingClass.Description,
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+            summary.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 14, 0, 0),
+                Child = new WrapPanel
+                {
+                    Children =
+                    {
+                        CreateStaticTeamChip($"Criada em {teachingClass.CreatedAt:dd/MM/yyyy}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                        CreateStaticTeamChip($"Atualizada em {teachingClass.UpdatedAt:dd/MM/yyyy}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                        CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                        CreateStaticTeamChip($"{teachingClass.HomePosts.Count} publicação(ões)", CreateSoftAccentBrush(accentBrush, 24), accentBrush)
+                    }
+                }
+            });
+
+            var body = new StackPanel();
+            body.Children.Add(CreateDialogSectionCard(
+                "Operação docente",
+                "Resumo operacional da turma fora da lateral fixa da Página Inicial.",
+                accentBrush,
+                summary));
+            body.Children.Add(CreateTeachingClassRosterCard(teachingClass, accentBrush, canManage));
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader("DOCÊNCIA", teachingClass.ClassName, "Acompanhamento operacional e gestão da composição da turma em um painel sob demanda.", accentBrush));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = body
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", accentBrush, Brushes.White, Brushes.Transparent, 110);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+        private Border CreateProfessorTeachingHeroCard(List<TeachingClassInfo> teachingClasses)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var totalStudents = teachingClasses.Sum(item => item.StudentIds?.Count ?? 0);
+            var activeTerms = teachingClasses
+                .Select(item => NormalizeTeamValue(item.AcademicTerm))
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var averageStudents = teachingClasses.Count == 0
+                ? 0
+                : (int)Math.Round(totalStudents / (double)teachingClasses.Count, MidpointRounding.AwayFromZero);
+
+            var actionWrap = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(18, 0, 0, 0)
+            };
+
+            var refreshButton = new Button
+            {
+                Content = "Atualizar turmas",
+                Height = 40,
+                Margin = new Thickness(0, 0, 10, 10),
+                Padding = new Thickness(16, 10, 16, 10),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+            refreshButton.Click += async (_, __) =>
+            {
+                if (ProfessorDashboardStatusText != null)
+                {
+                    ProfessorDashboardStatusText.Text = "Atualizando turmas docentes no Firebase...";
+                    ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                }
+
+                await LoadTeachingClassesFromDatabaseAsync(force: true);
+            };
+            actionWrap.Children.Add(refreshButton);
+
+            if (CurrentViewerCanManageTeachingClasses())
+            {
+                var createButton = new Button
+                {
+                    Content = "Nova turma",
+                    Height = 40,
+                    Margin = new Thickness(0, 0, 0, 10),
+                    Padding = new Thickness(16, 10, 16, 10),
+                    Background = accentBrush,
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand
+                };
+                createButton.Click += (_, __) => OpenTeachingClassComposer(navigateToProfessorSection: false);
+                actionWrap.Children.Add(createButton);
+            }
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var headerStack = new StackPanel();
+            headerStack.Children.Add(new TextBlock
+            {
+                Text = "Docência em espaço próprio",
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 22,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            headerStack.Children.Add(new TextBlock
+            {
+                Text = "Cada turma agora abre como página dentro do app, com código de entrada, composição da sala e gestão pedagógica sem contaminar o fluxo das equipes integradoras.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20,
+                MaxWidth = 720
+            });
+            Grid.SetColumn(headerStack, 0);
+            headerGrid.Children.Add(headerStack);
+
+            Grid.SetColumn(actionWrap, 1);
+            headerGrid.Children.Add(actionWrap);
+
+            var chips = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+            chips.Children.Add(CreateStaticTeamChip($"{teachingClasses.Count} turma(s)", CreateSoftAccentBrush(accentBrush, 28), accentBrush));
+            chips.Children.Add(CreateStaticTeamChip($"{totalStudents} aluno(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip($"{activeTerms} período(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip($"Média {averageStudents} por turma", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            chips.Children.Add(CreateStaticTeamChip("Projetos seguem na aba Equipes", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = accentBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(22),
+                Margin = new Thickness(0, 0, 0, 18),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        headerGrid,
+                        chips
+                    }
+                }
+            };
+        }
+
+        private UIElement CreateProfessorTeachingWorkspace(List<TeachingClassInfo> teachingClasses)
+        {
+            return CreateProfessorTeachingDetailArea(teachingClasses);
+        }
+
+        private Border CreateTeachingClassesGalleryWorkspace(List<TeachingClassInfo> teachingClasses)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var canManage = CurrentViewerCanManageTeachingClasses();
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            layout.Children.Add(CreateTeachingClassWorkspaceHeader(
+                "Docência",
+                canManage ? "Suas turmas docentes" : "Suas turmas e UCs",
+                canManage
+                    ? "Escolha uma turma pelos cards, como uma entrada de times/canais. Depois disso, a setinha lateral volta para esta galeria inicial das classes."
+                    : "Escolha uma turma pelos cards para acompanhar o mural, os materiais e os avisos publicados para a sala.",
+                teachingClasses,
+                null,
+                accentBrush,
+                760));
+
+            var cardsWrap = new WrapPanel
+            {
+                Margin = new Thickness(24, 24, 24, 24),
+                ItemWidth = 308,
+                Orientation = Orientation.Horizontal
+            };
+
+            foreach (var teachingClass in teachingClasses.OrderBy(item => item.Course).ThenBy(item => item.ClassName))
+            {
+                cardsWrap.Children.Add(CreateTeachingClassGalleryCard(teachingClass, accentBrush));
+            }
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = cardsWrap
+            };
+            Grid.SetRow(scrollViewer, 1);
+            layout.Children.Add(scrollViewer);
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Child = layout
+            };
+        }
+
+        private Border CreateTeachingClassGalleryCard(TeachingClassInfo teachingClass, Brush accentBrush)
+        {
+            var accentSolid = accentBrush as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var isSelected = string.Equals(_teachingClassGallerySelectionId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
+            var coverSource = TryCreateImageSourceFromDataUri(teachingClass.IconPreviewImageDataUri);
+            var idleBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 14) : GetThemeBrush("MutedCardBackgroundBrush");
+            var hoverBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 22) : CreateSoftAccentBrush(accentBrush, 10);
+            var idleBorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush");
+            var hoverBorderBrush = accentBrush;
+            var cardLift = new TranslateTransform();
+            var coverScale = new ScaleTransform(1, 1);
+            var coverIdleOverlay = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(isSelected ? (byte)34 : (byte)18, 255, 255, 255), 0),
+                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 0.34),
+                    new GradientStop(Color.FromArgb(176, 15, 23, 42), 1)
+                },
+                new Point(0.05, 0),
+                new Point(0.95, 1));
+            var coverHoverOverlay = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromArgb(30, 255, 255, 255), 0),
+                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 0.28),
+                    new GradientStop(Color.FromArgb(132, accentSolid.Color.R, accentSolid.Color.G, accentSolid.Color.B), 1)
+                },
+                new Point(0.05, 0),
+                new Point(0.95, 1));
+            var cardShadow = new DropShadowEffect
+            {
+                Color = Color.FromRgb(15, 23, 42),
+                BlurRadius = isSelected ? 32 : 20,
+                ShadowDepth = 0,
+                Opacity = isSelected ? 0.22 : 0.12
+            };
+            Brush coverBrush = coverSource != null
+                ? new ImageBrush(coverSource)
+                {
+                    Stretch = Stretch.UniformToFill,
+                    AlignmentX = AlignmentX.Center,
+                    AlignmentY = AlignmentY.Center
+                }
+                : new LinearGradientBrush(
+                    new GradientStopCollection
+                    {
+                        new GradientStop(Color.FromRgb(30, 41, 59), 0),
+                        new GradientStop(accentSolid.Color, 0.58),
+                        new GradientStop(Color.FromRgb(79, 70, 229), 1)
+                    },
+                    new Point(0, 0),
+                    new Point(1, 1));
+
+            var button = new Button
+            {
+                Width = 296,
+                Margin = new Thickness(0, 0, 20, 22),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Cursor = Cursors.Hand,
+                Tag = teachingClass
+            };
+            button.Click += (_, __) => OpenTeachingClassWorkspace(teachingClass, navigateToProfessorSection: false);
+
+            var coverShell = new Border
+            {
+                Height = 154,
+                CornerRadius = new CornerRadius(28, 28, 0, 0),
+                ClipToBounds = true
+            };
+
+            var coverGrid = new Grid
+            {
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = coverScale
+            };
+            coverGrid.Children.Add(new Border
+            {
+                Background = coverBrush
+            });
+            var coverOverlay = new Border
+            {
+                Background = coverIdleOverlay
+            };
+            coverGrid.Children.Add(coverOverlay);
+
+            var coverTopRow = new Grid
+            {
+                Margin = new Thickness(18, 16, 18, 0)
+            };
+            coverTopRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            coverTopRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            coverTopRow.Children.Add(CreateStaticTeamChip(
+                string.IsNullOrWhiteSpace(teachingClass.AcademicTerm) ? teachingClass.Course : teachingClass.AcademicTerm,
+                new SolidColorBrush(Color.FromArgb(118, 255, 255, 255)),
+                Brushes.White));
+            var stateChip = CreateStaticTeamChip(
+                isSelected ? "Última aberta" : "Abrir turma",
+                isSelected ? Brushes.White : new SolidColorBrush(Color.FromArgb(112, 255, 255, 255)),
+                isSelected ? accentBrush : Brushes.White);
+            Grid.SetColumn(stateChip, 1);
+            coverTopRow.Children.Add(stateChip);
+            coverGrid.Children.Add(coverTopRow);
+
+            var coverTextStack = new StackPanel
+            {
+                Margin = new Thickness(18, 0, 18, 18),
+                VerticalAlignment = VerticalAlignment.Bottom
+            };
+            coverTextStack.Children.Add(new TextBlock
+            {
+                Text = teachingClass.ClassName,
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 20,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = Brushes.White,
+                TextWrapping = TextWrapping.Wrap
+            });
+            coverTextStack.Children.Add(new TextBlock
+            {
+                Text = $"{teachingClass.Course} • {teachingClass.StudentIds.Count} aluno(s)",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 11.5,
+                Foreground = new SolidColorBrush(Color.FromArgb(232, 255, 255, 255)),
+                TextWrapping = TextWrapping.Wrap
+            });
+            coverGrid.Children.Add(coverTextStack);
+            coverShell.Child = coverGrid;
+
+            var body = new StackPanel
+            {
+                Margin = new Thickness(18, 48, 18, 18)
+            };
+            body.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(teachingClass.Description)
+                    ? "Canal da turma pronto para mural, código de entrada e acompanhamento pedagógico da disciplina."
+                    : teachingClass.Description,
+                FontSize = 11.5,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18,
+                MaxHeight = 54
+            });
+            body.Children.Add(new WrapPanel
+            {
+                Margin = new Thickness(0, 14, 0, 0),
+                Children =
+                {
+                    CreateStaticTeamChip($"Código {teachingClass.JoinCode}", CreateSoftAccentBrush(accentBrush, 26), accentBrush),
+                    CreateStaticTeamChip($"{teachingClass.HomePosts.Count} post(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip($"{teachingClass.ProfessorNames.Count} docente(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                }
+            });
+
+            var footerGrid = new Grid
+            {
+                Margin = new Thickness(0, 16, 0, 0)
+            };
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            footerGrid.Children.Add(new TextBlock
+            {
+                Text = teachingClass.ProfessorNames.Count == 0
+                    ? "Sem docente adicional registrado"
+                    : string.Join(" • ", teachingClass.ProfessorNames.Distinct(StringComparer.OrdinalIgnoreCase).Take(2)),
+                FontSize = 10.5,
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 154
+            });
+
+            var openCalloutText = new TextBlock
+            {
+                Text = isSelected ? "Reabrir turma" : "Entrar",
+                FontSize = 11.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var openCalloutIcon = new PackIconMaterial
+            {
+                Kind = PackIconMaterialKind.ChevronRight,
+                Width = 16,
+                Height = 16,
+                Margin = new Thickness(8, 0, 0, 0),
+                Foreground = isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var openCallout = new Border
+            {
+                Padding = new Thickness(12, 8, 12, 8),
+                Background = isSelected ? CreateSoftAccentBrush(accentBrush, 30) : GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Child = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Children =
+                    {
+                        openCalloutText,
+                        openCalloutIcon
+                    }
+                }
+            };
+            Grid.SetColumn(openCallout, 1);
+            footerGrid.Children.Add(openCallout);
+            body.Children.Add(footerGrid);
+
+            var rootGrid = new Grid();
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            rootGrid.Children.Add(coverShell);
+
+            var iconBadge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 74, false, 24, 2);
+            iconBadge.Margin = new Thickness(18, 0, 0, -36);
+            iconBadge.HorizontalAlignment = HorizontalAlignment.Left;
+            iconBadge.VerticalAlignment = VerticalAlignment.Bottom;
+            iconBadge.BorderBrush = Brushes.White;
+            iconBadge.BorderThickness = new Thickness(3);
+            Grid.SetRow(iconBadge, 0);
+            rootGrid.Children.Add(iconBadge);
+
+            Grid.SetRow(body, 1);
+            rootGrid.Children.Add(body);
+
+            var cardBorder = new Border
+            {
+                Background = idleBackground,
+                BorderBrush = idleBorderBrush,
+                BorderThickness = new Thickness(isSelected ? 1.4 : 1),
+                CornerRadius = new CornerRadius(28),
+                ClipToBounds = true,
+                RenderTransform = cardLift,
+                Effect = cardShadow,
+                Child = rootGrid
+            };
+            button.Content = cardBorder;
+
+            void ApplyHoverState(bool hovered)
+            {
+                cardBorder.Background = hovered ? hoverBackground : idleBackground;
+                cardBorder.BorderBrush = hovered ? hoverBorderBrush : idleBorderBrush;
+                cardLift.Y = hovered ? -6 : 0;
+                coverScale.ScaleX = hovered ? 1.035 : 1;
+                coverScale.ScaleY = hovered ? 1.035 : 1;
+                cardShadow.BlurRadius = hovered ? 34 : (isSelected ? 32 : 20);
+                cardShadow.Opacity = hovered ? (isSelected ? 0.3 : 0.2) : (isSelected ? 0.22 : 0.12);
+                coverOverlay.Background = hovered ? coverHoverOverlay : coverIdleOverlay;
+                openCallout.Background = hovered
+                    ? CreateSoftAccentBrush(accentBrush, isSelected ? (byte)36 : (byte)24)
+                    : (isSelected ? CreateSoftAccentBrush(accentBrush, 30) : GetThemeBrush("CardBackgroundBrush"));
+                openCallout.BorderBrush = hovered || isSelected ? accentBrush : GetThemeBrush("CardBorderBrush");
+                openCalloutText.Foreground = hovered || isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush");
+                openCalloutIcon.Foreground = hovered || isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush");
+            }
+
+            button.MouseEnter += (_, __) => ApplyHoverState(true);
+            button.MouseLeave += (_, __) => ApplyHoverState(false);
+
+            return new Border
+            {
+                Child = button
+            };
+        }
+
+        private Border CreateTeachingClassDirectoryCard(List<TeachingClassInfo> teachingClasses)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var resultsHost = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+            var summaryText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var searchBox = new TextBox
+            {
+                Height = 42,
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 16, 0, 0),
+                Background = GetThemeBrush("SearchBackgroundBrush"),
+                BorderBrush = GetThemeBrush("SearchBorderBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                FontSize = 13,
+                Text = string.Empty
+            };
+
+            void RenderDirectory(string query)
+            {
+                resultsHost.Children.Clear();
+
+                var normalizedQuery = NormalizeTeamValue(query);
+                var visibleClasses = string.IsNullOrWhiteSpace(normalizedQuery)
+                    ? teachingClasses
+                    : teachingClasses
+                        .Where(item =>
+                            item.ClassName.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                            item.Course.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                            item.AcademicTerm.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                            item.JoinCode.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                            item.StudentSummaries.Any(member =>
+                                member.Name.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                                member.Registration.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)) ||
+                            item.ProfessorNames.Any(name => name.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+                summaryText.Text = string.IsNullOrWhiteSpace(normalizedQuery)
+                    ? "Selecione uma turma para abrir a página completa ao lado."
+                    : visibleClasses.Count == 0
+                        ? $"Nenhuma turma encontrada para \"{normalizedQuery}\"."
+                        : $"{visibleClasses.Count} turma(s) encontrada(s) para \"{normalizedQuery}\".";
+
+                if (visibleClasses.Count == 0)
+                {
+                    resultsHost.Children.Add(CreateSearchSlideInfoCard(
+                        "Sem turmas nesta busca",
+                        string.IsNullOrWhiteSpace(normalizedQuery)
+                            ? "Crie a primeira turma docente para começar a organizar alunos e códigos de entrada."
+                            : "Ajuste o nome, curso, período, professor ou código para encontrar a turma desejada."));
+                    return;
+                }
+
+                foreach (var teachingClass in visibleClasses)
+                {
+                    resultsHost.Children.Add(CreateTeachingClassDirectoryItem(
+                        teachingClass,
+                        !_teachingClassComposerOpen && _activeTeachingClass != null && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase)));
+                }
+            }
+
+            searchBox.TextChanged += (_, __) => RenderDirectory(searchBox.Text);
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Turmas",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Diretório docente inspirado no Microsoft Teams. Aqui entram só turmas, nunca equipes integradoras.",
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+            headerGrid.Children.Add(titleStack);
+
+            if (CurrentViewerCanManageTeachingClasses())
+            {
+                var createButton = new Button
+                {
+                    Content = _teachingClassComposerOpen ? "Compondo turma" : "Nova turma",
+                    Height = 38,
+                    Margin = new Thickness(12, 0, 0, 0),
+                    Padding = new Thickness(14, 8, 14, 8),
+                    Background = accentBrush,
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    IsEnabled = !_teachingClassComposerOpen
+                };
+                createButton.Click += (_, __) => OpenTeachingClassComposer(navigateToProfessorSection: false);
+                Grid.SetColumn(createButton, 1);
+                headerGrid.Children.Add(createButton);
+            }
+
+            RenderDirectory(string.Empty);
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(20),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        headerGrid,
+                        searchBox,
+                        summaryText,
+                        resultsHost
+                    }
+                }
+            };
+        }
+
+        private UIElement CreateTeachingClassDirectoryItem(TeachingClassInfo teachingClass, bool isSelected)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var selectionBrush = CreateSoftAccentBrush(accentBrush, 26);
+
+            var button = new Button
+            {
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 0, 0, 10),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Cursor = Cursors.Hand,
+                Tag = teachingClass
+            };
+            button.Click += (_, __) => OpenTeachingClassWorkspace(teachingClass, navigateToProfessorSection: false);
+
+            var contentGrid = new Grid();
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var identityStack = new StackPanel();
+            identityStack.Children.Add(new TextBlock
+            {
+                Text = teachingClass.ClassName,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            identityStack.Children.Add(new TextBlock
+            {
+                Text = $"{teachingClass.Course} • {teachingClass.AcademicTerm}",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            identityStack.Children.Add(new WrapPanel
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                Children =
+                {
+                    CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
+                }
+            });
+            contentGrid.Children.Add(identityStack);
+
+            var chevronBadge = new Border
+            {
+                Width = 34,
+                Height = 34,
+                Margin = new Thickness(12, 0, 0, 0),
+                CornerRadius = new CornerRadius(17),
+                Background = isSelected ? accentBrush : GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = isSelected ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Child = new PackIconMaterial
+                {
+                    Kind = PackIconMaterialKind.ChevronRight,
+                    Width = 16,
+                    Height = 16,
+                    Foreground = isSelected ? Brushes.White : accentBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            Grid.SetColumn(chevronBadge, 1);
+            contentGrid.Children.Add(chevronBadge);
+
+            button.Content = new Border
+            {
+                Background = isSelected ? selectionBrush : GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Child = contentGrid
+            };
+
+            return button;
+        }
+
+        private UIElement CreateProfessorTeachingDetailArea(List<TeachingClassInfo> teachingClasses)
+        {
+            if (_teachingClassComposerOpen)
+            {
+                return CreateTeachingClassCreateWorkspaceCard();
+            }
+
+            if (_activeTeachingClass == null)
+            {
+                return teachingClasses.Count == 0
+                    ? CreateTeachingClassEmptyWorkspaceCard(true)
+                    : CreateTeachingClassesGalleryWorkspace(teachingClasses);
+            }
+
+            return CreateTeachingClassInlineWorkspace(_activeTeachingClass);
+        }
+
+        private Border CreateTeachingClassEmptyWorkspaceCard(bool hasNoClasses)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var canManage = CurrentViewerCanManageTeachingClasses();
+            var body = new StackPanel
+            {
+                Margin = new Thickness(28),
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = hasNoClasses ? "Nenhuma turma pronta ainda" : "Escolha uma turma",
+                        FontFamily = GetAppDisplayFontFamily(),
+                        FontSize = 22,
+                        FontWeight = FontWeights.ExtraBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                    },
+                    new TextBlock
+                    {
+                        Text = hasNoClasses
+                            ? canManage
+                                ? "Use o menu no canto superior direito para criar a primeira turma docente e depois gerenciar a sala com mural, código de entrada e composição acadêmica."
+                                : "Você ainda não está em nenhuma turma na Docência. Entre por código na aba Equipes ou aguarde um professor adicionar você à sala."
+                            : canManage
+                                ? "Escolha uma turma pelos cards para abrir o ambiente docente correspondente."
+                                : "Escolha uma turma pelos cards para acompanhar o mural, os materiais e os avisos publicados.",
+                        Margin = new Thickness(0, 10, 0, 0),
+                        FontSize = 12,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 20,
+                        MaxWidth = 620
+                    }
+                }
+            };
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.Children.Add(CreateTeachingClassWorkspaceHeader(
+                "Docência",
+                "Docência organizada por página",
+                canManage
+                    ? "A entrada da docência agora começa pela galeria de classes. O topo mantém atualização, criação e ações operacionais sem trocar turma por menu."
+                    : "A entrada da docência agora começa pela galeria de classes. Abra uma turma para acompanhar o mural, os materiais e a composição da sala sem misturar isso com Equipes.",
+                _teachingClasses,
+                null,
+                accentBrush,
+                700));
+            Grid.SetRow(body, 1);
+            layout.Children.Add(body);
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Child = layout
+            };
+        }
+
+        private Border CreateTeachingClassCreateWorkspaceCard()
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var editingClass = string.IsNullOrWhiteSpace(_teachingClassEditingClassId)
+                ? null
+                : FindTeachingClassById(_teachingClassEditingClassId) ?? _activeTeachingClass;
+            var isEditing = editingClass != null;
+            var classNameBox = new TextBox
+            {
+                Height = 46,
+                Text = editingClass?.ClassName ?? string.Empty
+            };
+            var courseBox = new ComboBox
+            {
+                Height = 46,
+                IsEditable = true,
+                ItemsSource = KnownTeamCourses.OrderBy(item => item).ToList(),
+                Text = !string.IsNullOrWhiteSpace(editingClass?.Course)
+                    ? editingClass.Course
+                    : string.IsNullOrWhiteSpace(_currentProfile?.Course)
+                        ? KnownTeamCourses.FirstOrDefault() ?? string.Empty
+                        : _currentProfile.Course
+            };
+            var academicTermBox = new TextBox
+            {
+                Height = 46,
+                Text = !string.IsNullOrWhiteSpace(editingClass?.AcademicTerm)
+                    ? editingClass.AcademicTerm
+                    : ResolveCurrentAcademicTerm()
+            };
+            var descriptionBox = new TextBox
+            {
+                Height = 120,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Text = !string.IsNullOrWhiteSpace(editingClass?.Description)
+                    ? editingClass.Description
+                    : "Canal da disciplina para orientação, avisos e entrada de alunos por código."
+            };
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(24, 0, 24, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var iconPreviewDataUri = editingClass?.IconPreviewImageDataUri ?? string.Empty;
+            var iconUploadDataUri = string.Empty;
+            var iconFileName = editingClass?.IconFileName ?? string.Empty;
+            var iconMimeType = editingClass?.IconMimeType ?? string.Empty;
+            var iconVersion = Math.Max(0, editingClass?.IconVersion ?? 0);
+            var removeIconRequested = false;
+            var iconPreviewHost = new ContentControl();
+            var iconStatusText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            };
+
+            ApplyDialogInputStyle(classNameBox);
+            ApplyDialogInputStyle(courseBox);
+            ApplyDialogInputStyle(academicTermBox);
+            ApplyDialogInputStyle(descriptionBox);
+
+            void RenderIconPreview()
+            {
+                var fallbackText = string.IsNullOrWhiteSpace(classNameBox.Text)
+                    ? (editingClass?.ClassName ?? "Turma")
+                    : classNameBox.Text;
+                iconPreviewHost.Content = CreateTeamLogoBadge(iconPreviewDataUri, fallbackText, 104, false, 28, 1);
+                iconStatusText.Text = string.IsNullOrWhiteSpace(iconPreviewDataUri)
+                    ? "Nenhuma foto/ícone carregado ainda. A turma usa um badge com iniciais até você enviar uma imagem."
+                    : $"Foto/ícone pronto para a turma{(string.IsNullOrWhiteSpace(iconFileName) ? string.Empty : $": {iconFileName}")}.";
+            }
+
+            classNameBox.TextChanged += (_, __) => RenderIconPreview();
+
+            var uploadIconButton = CreateDialogActionButton("Carregar foto/ícone", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 166);
+            uploadIconButton.Click += (_, __) =>
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Title = isEditing && editingClass != null
+                        ? $"Selecionar foto da turma {editingClass.ClassName}"
+                        : "Selecionar foto da turma",
+                    Filter = "Imagens|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp"
+                };
+
+                if (openDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                var croppedDataUri = ShowTeachingClassImageCropperDialog(openDialog.FileName);
+                if (string.IsNullOrWhiteSpace(croppedDataUri))
+                {
+                    return;
+                }
+
+                var previewDataUri = TryCreateCompressedImageDataUriFromDataUri(croppedDataUri, TeachingClassIconPreviewSize, TeachingClassIconPreviewQuality) ?? croppedDataUri;
+                var uploadDataUri = TryCreateCompressedImageDataUriFromDataUri(croppedDataUri, TeachingClassIconUploadSize, TeachingClassIconUploadQuality) ?? croppedDataUri;
+                if (string.IsNullOrWhiteSpace(previewDataUri) || string.IsNullOrWhiteSpace(uploadDataUri))
+                {
+                    iconStatusText.Text = "Não foi possível processar a imagem selecionada para a turma. Tente outro arquivo.";
+                    iconStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                iconPreviewDataUri = previewDataUri;
+                iconUploadDataUri = uploadDataUri;
+                iconFileName = IOPath.ChangeExtension(IOPath.GetFileName(openDialog.FileName), ".jpg");
+                iconMimeType = "image/jpeg";
+                removeIconRequested = false;
+                iconStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                RenderIconPreview();
+            };
+
+            var removeIconButton = CreateDialogActionButton("Remover foto", Brushes.Transparent, new SolidColorBrush(Color.FromRgb(220, 38, 38)), GetThemeBrush("CardBorderBrush"), 132);
+            removeIconButton.Click += (_, __) =>
+            {
+                iconPreviewDataUri = string.Empty;
+                iconUploadDataUri = string.Empty;
+                iconFileName = string.Empty;
+                iconMimeType = string.Empty;
+                removeIconRequested = true;
+                iconStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                RenderIconPreview();
+            };
+
+            var form = new StackPanel();
+            form.Children.Add(CreateDialogFieldLabel("Foto ou ícone da turma"));
+            form.Children.Add(new Border
+            {
+                Padding = new Thickness(16),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        iconPreviewHost,
+                        new WrapPanel
+                        {
+                            Margin = new Thickness(0, 14, 0, 0),
+                            Children = { uploadIconButton, removeIconButton }
+                        },
+                        iconStatusText
+                    }
+                }
+            });
+            form.Children.Add(CreateDialogFieldLabel("Nome da turma"));
+            form.Children.Add(classNameBox);
+            form.Children.Add(CreateDialogFieldLabel("Curso", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(courseBox);
+            form.Children.Add(CreateDialogFieldLabel("Período letivo", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(academicTermBox);
+            form.Children.Add(CreateDialogFieldLabel("Descrição pedagógica", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(descriptionBox);
+
+            form.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Padding = new Thickness(16),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Child = new TextBlock
+                {
+                    Text = isEditing
+                        ? "Atualize o contexto pedagógico e a identidade visual da turma sem sair da página. O mural e os alunos inscritos continuam preservados."
+                        : "A turma nasce já vinculada ao seu perfil docente. Você também pode carregar uma foto/ícone para facilitar a identificação visual antes de salvar.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                }
+            });
+
+            RenderIconPreview();
+
+            var cancelButton = new Button
+            {
+                Content = "Cancelar",
+                Width = 118,
+                Height = 42,
+                Background = Brushes.Transparent,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+            cancelButton.Click += (_, __) =>
+            {
+                _teachingClassComposerOpen = false;
+                _teachingClassEditingClassId = string.Empty;
+                SynchronizeTeachingClassWorkspaceState();
+                RenderProfessorDashboard();
+            };
+
+            var saveButton = new Button
+            {
+                Content = isEditing ? "Salvar ajustes" : "Criar turma",
+                Width = 142,
+                Height = 42,
+                Margin = new Thickness(10, 0, 0, 0),
+                Background = accentBrush,
+                Foreground = Brushes.White,
+                BorderThickness = new Thickness(0),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+            saveButton.Click += async (_, __) =>
+            {
+                if (_teachingClassService == null)
+                {
+                    statusText.Text = "O serviço de turmas docentes ainda não foi inicializado nesta sessão.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var className = NormalizeTeamValue(classNameBox.Text);
+                var course = NormalizeTeamValue(courseBox.Text);
+                if (string.IsNullOrWhiteSpace(className) || string.IsNullOrWhiteSpace(course))
+                {
+                    statusText.Text = "Preencha pelo menos o nome da turma e o curso antes de continuar.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var professorName = _currentProfile?.Name ?? "Professor responsável";
+                var teachingClass = isEditing && editingClass != null
+                    ? editingClass
+                    : new TeachingClassInfo
+                    {
+                        CreatedBy = GetCurrentUserId(),
+                        ProfessorUserIds = string.IsNullOrWhiteSpace(GetCurrentUserId())
+                            ? new List<string>()
+                            : new List<string> { GetCurrentUserId() },
+                        ProfessorNames = string.IsNullOrWhiteSpace(professorName)
+                            ? new List<string>()
+                            : new List<string> { professorName }
+                    };
+
+                teachingClass.ClassName = className;
+                teachingClass.Course = course;
+                teachingClass.AcademicTerm = NormalizeTeamValue(academicTermBox.Text);
+                teachingClass.Description = NormalizeTeamValue(descriptionBox.Text);
+                teachingClass.UpdatedAt = DateTime.Now;
+
+                if (isEditing && string.IsNullOrWhiteSpace(teachingClass.CreatedBy))
+                {
+                    teachingClass.CreatedBy = GetCurrentUserId();
+                }
+
+                if (string.IsNullOrWhiteSpace(teachingClass.ClassId))
+                {
+                    teachingClass.ClassId = TeachingClassService.GenerateClassId(course, className);
+                }
+
+                saveButton.IsEnabled = false;
+                cancelButton.IsEnabled = false;
+                uploadIconButton.IsEnabled = false;
+                removeIconButton.IsEnabled = false;
+                statusText.Text = isEditing
+                    ? "Salvando ajustes da turma docente no Firebase..."
+                    : "Salvando turma docente no Firebase...";
+                statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var hasPendingIconUpload = !string.IsNullOrWhiteSpace(iconUploadDataUri);
+                    var shouldRemoveIcon = removeIconRequested && !hasPendingIconUpload;
+                    var classSeededForUpload = false;
+
+                    if (hasPendingIconUpload && !isEditing)
+                    {
+                        statusText.Text = "Criando a turma no Firebase antes de vincular a nova foto/ícone...";
+                        var seedResult = await _teachingClassService.SaveClassAsync(teachingClass);
+                        if (!seedResult.Success)
+                        {
+                            statusText.Text = seedResult.ErrorMessage ?? "Não foi possível criar a turma antes do upload da foto/ícone.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        classSeededForUpload = true;
+                    }
+
+                    if (hasPendingIconUpload)
+                    {
+                        var payload = TryExtractDataUriPayload(iconUploadDataUri);
+                        if (!payload.Success)
+                        {
+                            statusText.Text = "Não foi possível preparar a foto/ícone da turma para upload.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        var nextIconVersion = Math.Max(1, iconVersion + 1);
+                        var uploadResult = await _teachingClassService.SaveTeachingClassIconContentAsync(
+                            teachingClass.ClassId,
+                            string.IsNullOrWhiteSpace(iconFileName) ? "turma.jpg" : iconFileName,
+                            string.IsNullOrWhiteSpace(iconMimeType) ? payload.MimeType : iconMimeType,
+                            payload.Bytes,
+                            nextIconVersion);
+                        if (!uploadResult.Success)
+                        {
+                            statusText.Text = classSeededForUpload
+                                ? $"A turma foi criada, mas o upload da foto/ícone falhou: {uploadResult.ErrorMessage ?? "erro desconhecido"}"
+                                : uploadResult.ErrorMessage ?? "Não foi possível enviar a foto/ícone da turma agora.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        teachingClass.IconPreviewImageDataUri = iconPreviewDataUri;
+                        teachingClass.IconStorageReference = uploadResult.StorageReference;
+                        teachingClass.IconFileName = string.IsNullOrWhiteSpace(iconFileName) ? "turma.jpg" : iconFileName;
+                        teachingClass.IconMimeType = string.IsNullOrWhiteSpace(iconMimeType) ? payload.MimeType : iconMimeType;
+                        teachingClass.IconVersion = nextIconVersion;
+                        teachingClass.IconUpdatedAt = DateTime.Now;
+                    }
+                    else if (shouldRemoveIcon)
+                    {
+                        teachingClass.IconPreviewImageDataUri = string.Empty;
+                        teachingClass.IconStorageReference = string.Empty;
+                        teachingClass.IconFileName = string.Empty;
+                        teachingClass.IconMimeType = string.Empty;
+                        teachingClass.IconVersion = 0;
+                        teachingClass.IconUpdatedAt = null;
+                    }
+
+                    var result = await _teachingClassService.SaveClassAsync(teachingClass);
+                    if (!result.Success)
+                    {
+                        statusText.Text = classSeededForUpload
+                            ? $"A turma foi criada, mas a nova foto/ícone não pôde ser vinculada: {result.ErrorMessage ?? "erro desconhecido"}"
+                            : result.ErrorMessage ?? (isEditing
+                                ? "Não foi possível salvar os ajustes da turma agora."
+                                : "Não foi possível salvar a turma docente agora.");
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    _teachingClassComposerOpen = false;
+                    _teachingClassEditingClassId = string.Empty;
+                    _activeTeachingClass = teachingClass;
+                    _teachingClassGallerySelectionId = teachingClass.ClassId ?? string.Empty;
+                    TrackTeachingClassLocally(teachingClass);
+
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = isEditing
+                            ? $"Turma docente {teachingClass.ClassName} atualizada com sucesso."
+                            : $"Turma docente {teachingClass.ClassName} criada com sucesso. Código de entrada: {teachingClass.JoinCode}.";
+                        ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    }
+
+                    RenderProfessorDashboard();
+                }
+                finally
+                {
+                    saveButton.IsEnabled = true;
+                    cancelButton.IsEnabled = true;
+                    uploadIconButton.IsEnabled = true;
+                    removeIconButton.IsEnabled = true;
+                }
+            };
+
+            var scrollViewer = new ScrollViewer
+            {
+                Margin = new Thickness(24, 24, 24, 0),
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(24, 22, 24, 24),
+                Children = { cancelButton, saveButton }
+            };
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.Children.Add(CreateTeachingClassWorkspaceHeader(
+                isEditing ? "Docência / editar turma" : "Docência / nova turma",
+                isEditing && editingClass != null ? $"Editar {editingClass.ClassName}" : "Nova turma docente",
+                isEditing
+                    ? "Ajuste nome, curso, período, descrição e a foto/ícone da turma sem sair da página principal da docência."
+                    : "Monte a sala dentro da própria página, com identidade visual da turma, código de entrada e a mesma lógica de canal acadêmico persistente que você espera no Microsoft Teams.",
+                _teachingClasses,
+                editingClass,
+                accentBrush,
+                700));
+            Grid.SetRow(scrollViewer, 1);
+            layout.Children.Add(scrollViewer);
+            Grid.SetRow(statusText, 2);
+            layout.Children.Add(statusText);
+            Grid.SetRow(footer, 3);
+            layout.Children.Add(footer);
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = accentBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Child = layout
+            };
+        }
+
+        private UIElement CreateTeachingClassInlineWorkspace(TeachingClassInfo teachingClass)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var canManage = CanManageTeachingClass(teachingClass);
+            var shellGrid = new Grid
+            {
+                MinHeight = 760
+            };
+            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(272) });
+            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
+            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var shellSidebar = CreateTeachingClassTeamsShellSidebar(teachingClass, accentBrush, canManage);
+            shellGrid.Children.Add(shellSidebar);
+
+            var divider = new Border
+            {
+                Background = GetThemeBrush("SidebarBorderBrush")
+            };
+            Grid.SetColumn(divider, 1);
+            shellGrid.Children.Add(divider);
+
+            var shellContent = CreateTeachingClassTeamsShellContent(teachingClass, accentBrush, canManage);
+            Grid.SetColumn(shellContent, 2);
+            shellGrid.Children.Add(shellContent);
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                ClipToBounds = true,
+                Child = shellGrid
+            };
+        }
+
+        private Border CreateTeachingClassTeamsShellSidebar(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
+        {
+            var sidebarGrid = new Grid
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush")
+            };
+            sidebarGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            sidebarGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var headerGrid = new Grid
+            {
+                Margin = new Thickness(18, 18, 18, 0)
+            };
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var backButton = new Button
+            {
+                Width = 38,
+                Height = 38,
+                Margin = new Thickness(0, 0, 12, 0),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                Content = new PackIconMaterial
+                {
+                    Kind = PackIconMaterialKind.ChevronLeft,
+                    Width = 18,
+                    Height = 18,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            backButton.Click += (_, __) =>
+            {
+                _activeTeachingClass = null;
+                RenderProfessorDashboard();
+            };
+            headerGrid.Children.Add(backButton);
+
+            var iconBadge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 44, false, 16, 1);
+            iconBadge.Margin = new Thickness(0, 0, 12, 0);
+            Grid.SetColumn(iconBadge, 1);
+            headerGrid.Children.Add(iconBadge);
+
+            var classIdentity = new StackPanel();
+            classIdentity.Children.Add(new TextBlock
+            {
+                Text = "Turma ativa",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            classIdentity.Children.Add(new TextBlock
+            {
+                Text = teachingClass.ClassName,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = 18,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            classIdentity.Children.Add(new TextBlock
+            {
+                Text = $"{teachingClass.Course} • {teachingClass.AcademicTerm}",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            Grid.SetColumn(classIdentity, 2);
+            headerGrid.Children.Add(classIdentity);
+            sidebarGrid.Children.Add(headerGrid);
+
+            var sectionsHost = new StackPanel
+            {
+                Margin = new Thickness(18, 16, 18, 16)
+            };
+            sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
+                "Página inicial",
+                PackIconMaterialKind.HomeVariantOutline,
+                accentBrush,
+                string.Equals(_activeTeachingClassModule, TeachingClassModuleHome, StringComparison.OrdinalIgnoreCase),
+                () =>
+                {
+                    _activeTeachingClassModule = TeachingClassModuleHome;
+                    _ = EnsureTeachingClassHomeFeedAsync(teachingClass);
+                    RenderProfessorDashboard();
+                }));
+
+            var sectionsScroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = sectionsHost
+            };
+            Grid.SetRow(sectionsScroll, 1);
+            sidebarGrid.Children.Add(sectionsScroll);
+
+            return new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Child = sidebarGrid
+            };
+        }
+
+        private Border CreateTeachingClassSidebarNavButton(string title, PackIconMaterialKind iconKind, Brush accentBrush, bool isActive, Action onClick)
+        {
+            var button = new Button
+            {
+                Margin = new Thickness(0, 0, 0, 12),
+                Padding = new Thickness(14, 12, 14, 12),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Background = isActive ? CreateSoftAccentBrush(accentBrush, 28) : GetThemeBrush("CardBackgroundBrush"),
+                Foreground = isActive ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = isActive ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            button.Click += (_, __) => onClick();
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var iconBadge = new Border
+            {
+                Width = 40,
+                Height = 40,
+                CornerRadius = new CornerRadius(20),
+                Background = isActive ? accentBrush : GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = isActive ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Child = new PackIconMaterial
+                {
+                    Kind = iconKind,
+                    Width = 18,
+                    Height = 18,
+                    Foreground = isActive ? Brushes.White : accentBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            layout.Children.Add(iconBadge);
+
+            var titleText = new TextBlock
+            {
+                Text = title,
+                Margin = new Thickness(12, 0, 0, 0),
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = isActive ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap
+            };
+            Grid.SetColumn(titleText, 1);
+            layout.Children.Add(titleText);
+
+            button.Content = layout;
+
+            return new Border
+            {
+                Child = button
+            };
+        }
+
+        private Border CreateTeachingClassSidebarFutureSection(string title, string description, Brush accentBrush, params string[] slots)
+        {
+            var slotsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            foreach (var slot in slots.Where(item => !string.IsNullOrWhiteSpace(item)))
+            {
+                slotsHost.Children.Add(CreateTeachingClassSidebarFutureSlot(slot, accentBrush));
+            }
+
+            return new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = title,
+                            FontSize = 12,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        new TextBlock
+                        {
+                            Text = description,
+                            Margin = new Thickness(0, 6, 0, 0),
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            LineHeight = 18
+                        },
+                        slotsHost
+                    }
+                }
+            };
+        }
+
+        private Border CreateTeachingClassSidebarFutureSlot(string label, Brush accentBrush)
+        {
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 0, 8),
+                Padding = new Thickness(10),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Child = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Children =
+                    {
+                        new Border
+                        {
+                            Width = 30,
+                            Height = 30,
+                            CornerRadius = new CornerRadius(15),
+                            Background = CreateSoftAccentBrush(accentBrush, 20),
+                            BorderBrush = accentBrush,
+                            BorderThickness = new Thickness(1),
+                            Child = new PackIconMaterial
+                            {
+                                Kind = PackIconMaterialKind.ChevronRight,
+                                Width = 14,
+                                Height = 14,
+                                Foreground = accentBrush,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        },
+                        new TextBlock
+                        {
+                            Text = label,
+                            Margin = new Thickness(10, 6, 0, 0),
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    }
+                }
+            };
+        }
+
+        private UIElement CreateTeachingClassTeamsShellContent(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
+        {
+            var canPublish = CanCurrentUserPublishTeachingClassFeed(teachingClass);
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var topBar = CreateTeachingClassWorkspaceHeader(
+                "Docência / Página inicial da turma",
+                $"Mural pedagógico de {teachingClass.ClassName}",
+                canManage
+                    ? "O topo concentra Turmas, atualização, edição, código e operação docente. A página principal fica dedicada ao mural da turma."
+                    : "O topo concentra Turmas, atualização, código e consulta da composição da sala. A página principal fica dedicada ao mural da turma.",
+                _teachingClasses,
+                teachingClass,
+                accentBrush,
+                780);
+            root.Children.Add(topBar);
+
+            var mainStack = new StackPanel
+            {
+                Margin = new Thickness(22)
+            };
+
+            var homeFeed = CreateTeachingClassHomeFeedSurface(teachingClass, accentBrush, canManage);
+            mainStack.Children.Add(homeFeed);
+
+            var contentScrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = mainStack
+            };
+
+            var contentHost = new Grid();
+            contentHost.Children.Add(contentScrollViewer);
+
+            if (canPublish)
+            {
+                var composeButton = new Button
+                {
+                    Padding = new Thickness(16, 12, 16, 12),
+                    Margin = new Thickness(0, 0, 24, 24),
+                    Background = accentBrush,
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Effect = new System.Windows.Media.Effects.DropShadowEffect
+                    {
+                        BlurRadius = 20,
+                        ShadowDepth = 4,
+                        Opacity = 0.18,
+                        Color = Colors.Black
+                    },
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Children =
+                        {
+                            new PackIconMaterial
+                            {
+                                Kind = PackIconMaterialKind.PencilOutline,
+                                Width = 16,
+                                Height = 16,
+                                Foreground = Brushes.White,
+                                VerticalAlignment = VerticalAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = "Fazer postagem",
+                                Margin = new Thickness(8, 0, 0, 0),
+                                FontSize = 12,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = Brushes.White,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        }
+                    }
+                };
+                composeButton.Click += (_, __) => ShowTeachingClassPostComposerDialog(teachingClass, accentBrush);
+                contentHost.Children.Add(composeButton);
+            }
+
+            Grid.SetRow(contentHost, 1);
+            root.Children.Add(contentHost);
+
+            return root;
+        }
+
+        private Border CreateTeachingClassLandingSurface(TeachingClassInfo teachingClass, Brush accentBrush)
+        {
+            var activityCount = teachingClass.HomePosts.Count(post => string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase));
+            var commentCount = teachingClass.HomePosts.Sum(post => post.Comments?.Count ?? 0);
+            var metrics = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+            metrics.Children.Add(CreateTeamMetricCard("Posts", teachingClass.HomePosts.Count.ToString(), "publicações no mural", Color.FromRgb(124, 58, 237)));
+            metrics.Children.Add(CreateTeamMetricCard("Atividades", activityCount.ToString(), "itens pedagógicos publicados", Color.FromRgb(37, 99, 235)));
+            metrics.Children.Add(CreateTeamMetricCard("Interações", commentCount.ToString(), "comentários registrados", Color.FromRgb(16, 185, 129)));
+            metrics.Children.Add(CreateTeamMetricCard("Código", teachingClass.JoinCode, "entrada rápida", Color.FromRgb(245, 158, 11)));
+
+            var content = new StackPanel();
+            content.Children.Add(new TextBlock
+            {
+                Text = "A Página Inicial se comporta como o mural central da turma. O professor publica avisos, materiais, links e atividades; a sala responde no mesmo fluxo com comentários e reações.",
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+            content.Children.Add(metrics);
+
+            if (_teachingClassHomeFeedLoadInFlight && string.Equals(_teachingClassHomeFeedLoadingClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase) && !teachingClass.HomeFeedReady)
+            {
+                content.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 16, 0, 0),
+                    Child = CreateSearchSlideInfoCard(
+                        "Carregando o mural",
+                        "Estamos puxando as publicações, comentários e reações remotas desta turma para preencher a timeline.")
+                });
+            }
+            else if (teachingClass.HomePosts.Count > 0)
+            {
+                var latestPost = teachingClass.HomePosts
+                    .OrderByDescending(post => post.PublishedAt)
+                    .First();
+                content.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 16, 0, 0),
+                    Child = CreateSearchSlideInfoCard(
+                        "Última movimentação",
+                        $"{(string.IsNullOrWhiteSpace(latestPost.Title) ? "Nova publicação no mural" : latestPost.Title)} • {latestPost.PublishedAt:dd/MM HH:mm} • {latestPost.Reactions.Count} reação(ões) • {latestPost.Comments.Count} comentário(s).")
+                });
+            }
+
+            return CreateDialogSectionCard(
+                "Pulso da Página Inicial",
+                "Resumo executivo do mural vivo da turma.",
+                accentBrush,
+                content,
+                new Thickness(0, 0, 0, 0));
+        }
+
+        private Border CreateTeachingClassHomeFeedSurface(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
+        {
+            var feedStack = new StackPanel();
+            var canPublish = CanCurrentUserPublishTeachingClassFeed(teachingClass);
+
+            PrimeTeachingClassFeedProfiles(teachingClass);
+
+            if (_teachingClassHomeFeedLoadInFlight && string.Equals(_teachingClassHomeFeedLoadingClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase) && !teachingClass.HomeFeedReady)
+            {
+                feedStack.Children.Add(CreateSearchSlideInfoCard(
+                    "Sincronizando publicações",
+                    "O feed está buscando posts, comentários e reações da turma no Firebase agora."));
+            }
+            else if (teachingClass.HomePosts.Count == 0)
+            {
+                feedStack.Children.Add(CreateSearchSlideInfoCard(
+                    canPublish ? "Mural pronto para a primeira publicação" : "Nenhuma publicação ainda",
+                    canPublish
+                        ? "Use o botão de fazer postagem no canto da tela para inaugurar a Página Inicial da Turma."
+                        : "Ainda não há avisos publicados no mural desta turma."));
+            }
+            else
+            {
+                foreach (var post in teachingClass.HomePosts.OrderByDescending(item => item.PublishedAt))
+                {
+                    feedStack.Children.Add(CreateTeachingClassHomePostCard(teachingClass, post, accentBrush));
+                }
+            }
+
+            return CreateDialogSectionCard(
+                "Feed pedagógico",
+                canPublish
+                    ? "Publique no mural da turma com anexos, links, atividades e trilha de conversa logo abaixo de cada post."
+                    : "Acompanhe o mural da turma e interaja nas publicações disponíveis.",
+                accentBrush,
+                feedStack,
+                new Thickness(0, 0, 0, 0));
+        }
+
+        private Border CreateTeachingClassPostComposerCard(TeachingClassInfo teachingClass, Brush accentBrush, Action? onPublished = null)
+        {
+            var postTypeBox = new ComboBox
+            {
+                Height = 46,
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Aviso / material", Value = "announcement" },
+                    new { Label = "Atividade", Value = "activity" }
+                },
+                SelectedValue = "announcement"
+            };
+            var titleBox = new TextBox { Height = 46 };
+            var contentBox = new TextBox
+            {
+                MinHeight = 128,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            var linkBox = new TextBox { Height = 46 };
+            var dueDatePicker = new DatePicker
+            {
+                Height = 46,
+                Visibility = Visibility.Collapsed
+            };
+            var permissionScopeBox = new ComboBox
+            {
+                Height = 46,
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Turma", Value = "class" },
+                    new { Label = "Curso", Value = "course" },
+                    new { Label = "Equipe docente", Value = "staff" },
+                    new { Label = "Privado", Value = "private" }
+                },
+                SelectedValue = "class"
+            };
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var pendingAttachments = new List<PendingAttachmentFile>();
+            var pendingAttachmentsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var dueDateLabel = CreateDialogFieldLabel("Prazo da atividade", new Thickness(0, 16, 0, 6));
+            dueDateLabel.Visibility = Visibility.Collapsed;
+
+            ApplyDialogInputStyle(postTypeBox);
+            ApplyDialogInputStyle(titleBox);
+            ApplyDialogInputStyle(contentBox);
+            ApplyDialogInputStyle(linkBox);
+            ApplyDialogInputStyle(dueDatePicker);
+            ApplyDialogInputStyle(permissionScopeBox);
+
+            void RenderPendingAttachments()
+            {
+                pendingAttachmentsHost.Children.Clear();
+                if (pendingAttachments.Count == 0)
+                {
+                    pendingAttachmentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum arquivo preparado ainda. Os anexos só sobem para o remoto quando você publicar o post.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var attachment in pendingAttachments.ToList())
+                {
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = attachment.FileName,
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+
+                    var removeButton = new Button
+                    {
+                        Content = "Remover",
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(12, 0, 0, 0)
+                    };
+                    removeButton.Click += (_, __) =>
+                    {
+                        pendingAttachments.Remove(attachment);
+                        RenderPendingAttachments();
+                    };
+                    Grid.SetColumn(removeButton, 1);
+                    row.Children.Add(removeButton);
+
+                    pendingAttachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = row
+                    });
+                }
+            }
+
+            void RefreshPostTypeState()
+            {
+                var isActivity = string.Equals(postTypeBox.SelectedValue?.ToString(), "activity", StringComparison.OrdinalIgnoreCase);
+                dueDateLabel.Visibility = isActivity ? Visibility.Visible : Visibility.Collapsed;
+                dueDatePicker.Visibility = isActivity ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            postTypeBox.SelectionChanged += (_, __) => RefreshPostTypeState();
+
+            var addAttachmentButton = CreateDialogActionButton("Adicionar arquivo", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 142);
+            addAttachmentButton.Click += (_, __) =>
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Multiselect = true,
+                    Title = $"Selecionar anexos para {teachingClass.ClassName}",
+                    Filter = "Todos os arquivos|*.*"
+                };
+
+                if (openDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                foreach (var filePath in openDialog.FileNames)
+                {
+                    if (pendingAttachments.Any(existing => string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    pendingAttachments.Add(new PendingAttachmentFile
+                    {
+                        FilePath = filePath,
+                        FileName = IOPath.GetFileName(filePath),
+                        PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                            ? TryCreateCompressedImageDataUri(filePath, 240, 72) ?? string.Empty
+                            : string.Empty
+                    });
+                }
+
+                RenderPendingAttachments();
+            };
+
+            var publishButton = CreateDialogActionButton("Publicar no mural", accentBrush, Brushes.White, Brushes.Transparent, 154);
+            publishButton.Click += async (_, __) =>
+            {
+                if (_teachingClassService == null)
+                {
+                    statusText.Text = "Serviço de docência indisponível para publicar agora.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var postType = postTypeBox.SelectedValue?.ToString() ?? "announcement";
+                var title = titleBox.Text.Trim();
+                var content = contentBox.Text.Trim();
+                var linkUrl = linkBox.Text.Trim();
+                var hasPayload = !string.IsNullOrWhiteSpace(title)
+                    || !string.IsNullOrWhiteSpace(content)
+                    || !string.IsNullOrWhiteSpace(linkUrl)
+                    || pendingAttachments.Count > 0;
+
+                if (!hasPayload)
+                {
+                    statusText.Text = "Escreva algo, adicione um link ou prepare ao menos um arquivo antes de publicar.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(title))
+                {
+                    statusText.Text = "Atividades precisam de um título claro antes da publicação.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                publishButton.IsEnabled = false;
+                addAttachmentButton.IsEnabled = false;
+                statusText.Text = "Publicando no mural da turma...";
+                statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var createdAttachments = new List<TeachingClassPostAttachmentInfo>();
+                    foreach (var pendingAttachment in pendingAttachments)
+                    {
+                        var attachmentResult = await CreateTeachingClassPostAttachmentFromFileAsync(
+                            teachingClass,
+                            pendingAttachment.FilePath,
+                            permissionScopeBox.SelectedValue?.ToString() ?? "class");
+                        if (!attachmentResult.Success || attachmentResult.Attachment == null)
+                        {
+                            statusText.Text = attachmentResult.ErrorMessage ?? "Não foi possível sincronizar um dos anexos desta publicação.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        createdAttachments.Add(attachmentResult.Attachment);
+                    }
+
+                    var post = new TeachingClassHomePostInfo
+                    {
+                        PostId = Guid.NewGuid().ToString("N"),
+                        PostType = postType,
+                        AuthorUserId = GetCurrentUserId(),
+                        AuthorName = string.IsNullOrWhiteSpace(_currentProfile?.Name) ? "Participante da turma" : _currentProfile!.Name,
+                        Title = title,
+                        Content = content,
+                        LinkUrl = linkUrl,
+                        ActivityLabel = string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase) ? "Atividade publicada" : string.Empty,
+                        ActivityDueAt = string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase) ? dueDatePicker.SelectedDate : null,
+                        PublishedAt = DateTime.Now,
+                        UpdatedAt = DateTime.Now,
+                        Attachments = createdAttachments,
+                        Comments = new List<TeachingClassPostCommentInfo>(),
+                        Reactions = new List<TeachingClassPostReactionInfo>()
+                    };
+
+                    var publishResult = await _teachingClassService.SaveHomePostAsync(teachingClass.ClassId, post);
+                    if (!publishResult.Success || publishResult.Post == null)
+                    {
+                        statusText.Text = publishResult.ErrorMessage ?? "Não foi possível publicar no mural da turma agora.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    teachingClass.HomePosts.Insert(0, publishResult.Post);
+                    teachingClass.HomeFeedReady = true;
+                    teachingClass.HomeFeedLoadedAt = DateTime.Now;
+                    TrackTeachingClassLocally(teachingClass);
+
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = $"Nova publicação enviada para a Página Inicial de {teachingClass.ClassName}.";
+                        ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    }
+
+                    onPublished?.Invoke();
+                    RenderProfessorDashboard();
+                }
+                finally
+                {
+                    publishButton.IsEnabled = true;
+                    addAttachmentButton.IsEnabled = true;
+                }
+            };
+
+            var composer = new StackPanel();
+            composer.Children.Add(CreateDialogFieldLabel("Tipo de publicação"));
+            composer.Children.Add(postTypeBox);
+            composer.Children.Add(CreateDialogFieldLabel("Título", new Thickness(0, 16, 0, 6)));
+            composer.Children.Add(titleBox);
+            composer.Children.Add(CreateDialogFieldLabel("Texto da publicação", new Thickness(0, 16, 0, 6)));
+            composer.Children.Add(contentBox);
+            composer.Children.Add(CreateDialogFieldLabel("Link opcional", new Thickness(0, 16, 0, 6)));
+            composer.Children.Add(linkBox);
+            composer.Children.Add(dueDateLabel);
+            composer.Children.Add(dueDatePicker);
+            composer.Children.Add(CreateDialogFieldLabel("Escopo dos anexos", new Thickness(0, 16, 0, 6)));
+            composer.Children.Add(permissionScopeBox);
+            composer.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 14, 0, 0),
+                Child = addAttachmentButton
+            });
+            composer.Children.Add(pendingAttachmentsHost);
+            composer.Children.Add(statusText);
+            composer.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 16, 0, 0),
+                Children = { publishButton }
+            });
+
+            RenderPendingAttachments();
+            RefreshPostTypeState();
+
+            return CreateDialogSectionCard(
+                "Publicar no mural",
+                "Escreva no mural, anexe materiais, inclua links úteis e poste atividades que já caem no mesmo feed da turma.",
+                accentBrush,
+                composer,
+                new Thickness(0, 0, 0, 16));
+        }
+
+        private void ShowTeachingClassPostComposerDialog(TeachingClassInfo teachingClass, Brush accentBrush)
+        {
+            var dialog = CreateStyledDialogWindow($"Fazer postagem • {teachingClass.ClassName}", 780, 860, 640, true);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(
+                "DOCÊNCIA",
+                "Fazer postagem",
+                "Publique avisos, materiais, links e atividades no mural da turma sem deixar o formulário aberto o tempo todo no feed.",
+                accentBrush));
+
+            var composerCard = CreateTeachingClassPostComposerCard(
+                teachingClass,
+                accentBrush,
+                () =>
+                {
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                });
+            composerCard.Margin = new Thickness(0);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = composerCard
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", accentBrush, Brushes.White, Brushes.Transparent, 110);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+        private void ShowTeachingClassPostEditorDialog(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, Brush accentBrush)
+        {
+            if (_teachingClassService == null || teachingClass == null || post == null || !CanCurrentUserEditTeachingClassPost(teachingClass, post))
+            {
+                return;
+            }
+
+            var dialog = CreateStyledDialogWindow($"Editar publicação • {teachingClass.ClassName}", 760, 760, 620, true);
+            var postTypeBox = new ComboBox
+            {
+                Height = 46,
+                DisplayMemberPath = "Label",
+                SelectedValuePath = "Value",
+                ItemsSource = new[]
+                {
+                    new { Label = "Aviso / material", Value = "announcement" },
+                    new { Label = "Atividade", Value = "activity" }
+                },
+                SelectedValue = string.IsNullOrWhiteSpace(post.PostType) ? "announcement" : post.PostType
+            };
+            var titleBox = new TextBox { Height = 46, Text = post.Title ?? string.Empty };
+            var contentBox = new TextBox
+            {
+                MinHeight = 128,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Text = post.Content ?? string.Empty
+            };
+            var linkBox = new TextBox { Height = 46, Text = post.LinkUrl ?? string.Empty };
+            var dueDatePicker = new DatePicker
+            {
+                Height = 46,
+                SelectedDate = post.ActivityDueAt,
+                Visibility = string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed
+            };
+            var dueDateLabel = CreateDialogFieldLabel("Prazo da atividade", new Thickness(0, 16, 0, 6));
+            dueDateLabel.Visibility = dueDatePicker.Visibility;
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            ApplyDialogInputStyle(postTypeBox);
+            ApplyDialogInputStyle(titleBox);
+            ApplyDialogInputStyle(contentBox);
+            ApplyDialogInputStyle(linkBox);
+            ApplyDialogInputStyle(dueDatePicker);
+
+            void RefreshPostTypeState()
+            {
+                var isActivity = string.Equals(postTypeBox.SelectedValue?.ToString(), "activity", StringComparison.OrdinalIgnoreCase);
+                dueDateLabel.Visibility = isActivity ? Visibility.Visible : Visibility.Collapsed;
+                dueDatePicker.Visibility = isActivity ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            postTypeBox.SelectionChanged += (_, __) => RefreshPostTypeState();
+
+            var attachmentSummary = new StackPanel();
+            if ((post.Attachments?.Count ?? 0) == 0)
+            {
+                attachmentSummary.Children.Add(new TextBlock
+                {
+                    Text = "Este post não possui anexos vinculados.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            else
+            {
+                foreach (var attachment in (post.Attachments ?? new List<TeachingClassPostAttachmentInfo>()).OrderBy(item => item.FileName))
+                {
+                    attachmentSummary.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = new TextBlock
+                        {
+                            Text = attachment.FileName,
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    });
+                }
+            }
+
+            var saveButton = CreateDialogActionButton("Salvar edição", accentBrush, Brushes.White, Brushes.Transparent, 136);
+            saveButton.Click += async (_, __) =>
+            {
+                var postType = postTypeBox.SelectedValue?.ToString() ?? "announcement";
+                var title = titleBox.Text.Trim();
+                var content = contentBox.Text.Trim();
+                var linkUrl = linkBox.Text.Trim();
+                var hasPayload = !string.IsNullOrWhiteSpace(title)
+                    || !string.IsNullOrWhiteSpace(content)
+                    || !string.IsNullOrWhiteSpace(linkUrl)
+                    || (post.Attachments?.Count ?? 0) > 0;
+
+                if (!hasPayload)
+                {
+                    statusText.Text = "Mantenha algum conteúdo, link ou anexo antes de salvar a edição.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(title))
+                {
+                    statusText.Text = "Atividades precisam de um título claro antes de salvar.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                saveButton.IsEnabled = false;
+                statusText.Text = "Salvando edição da publicação...";
+                statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var updatedPost = new TeachingClassHomePostInfo
+                    {
+                        PostId = post.PostId,
+                        PostType = postType,
+                        AuthorUserId = post.AuthorUserId,
+                        AuthorName = post.AuthorName,
+                        Title = title,
+                        Content = content,
+                        LinkUrl = linkUrl,
+                        ActivityLabel = string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase)
+                            ? (string.IsNullOrWhiteSpace(post.ActivityLabel) ? "Atividade publicada" : post.ActivityLabel)
+                            : string.Empty,
+                        ActivityDueAt = string.Equals(postType, "activity", StringComparison.OrdinalIgnoreCase) ? dueDatePicker.SelectedDate : null,
+                        PublishedAt = post.PublishedAt,
+                        UpdatedAt = DateTime.Now,
+                        Attachments = post.Attachments?.Select(item => new TeachingClassPostAttachmentInfo
+                        {
+                            AttachmentId = item.AttachmentId,
+                            FileName = item.FileName,
+                            PreviewImageDataUri = item.PreviewImageDataUri,
+                            PermissionScope = item.PermissionScope,
+                            StorageKind = item.StorageKind,
+                            StorageReference = item.StorageReference,
+                            MimeType = item.MimeType,
+                            SizeBytes = item.SizeBytes,
+                            Version = item.Version,
+                            AddedByUserId = item.AddedByUserId,
+                            AddedAt = item.AddedAt
+                        }).ToList() ?? new List<TeachingClassPostAttachmentInfo>(),
+                        Comments = post.Comments?.ToList() ?? new List<TeachingClassPostCommentInfo>(),
+                        Reactions = post.Reactions?.ToList() ?? new List<TeachingClassPostReactionInfo>()
+                    };
+
+                    var saveResult = await _teachingClassService.SaveHomePostAsync(teachingClass.ClassId, updatedPost);
+                    if (!saveResult.Success || saveResult.Post == null)
+                    {
+                        statusText.Text = saveResult.ErrorMessage ?? "Não foi possível atualizar esta publicação agora.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    var existingIndex = teachingClass.HomePosts.FindIndex(item => string.Equals(item.PostId, post.PostId, StringComparison.OrdinalIgnoreCase));
+                    if (existingIndex >= 0)
+                    {
+                        teachingClass.HomePosts[existingIndex] = saveResult.Post;
+                    }
+                    else
+                    {
+                        teachingClass.HomePosts.Insert(0, saveResult.Post);
+                    }
+
+                    teachingClass.HomeFeedReady = true;
+                    teachingClass.HomeFeedLoadedAt = DateTime.Now;
+                    TrackTeachingClassLocally(teachingClass);
+
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = $"Publicação atualizada em {teachingClass.ClassName}.";
+                        ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    }
+
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                    RenderProfessorDashboard();
+                }
+                finally
+                {
+                    saveButton.IsEnabled = true;
+                }
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(
+                "DOCÊNCIA",
+                "Editar publicação",
+                "Ajuste o texto, o tipo da publicação e o prazo sem alterar a conversa já registrada nesta thread.",
+                accentBrush));
+
+            var form = new StackPanel();
+            form.Children.Add(CreateDialogFieldLabel("Tipo de publicação"));
+            form.Children.Add(postTypeBox);
+            form.Children.Add(CreateDialogFieldLabel("Título", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(titleBox);
+            form.Children.Add(CreateDialogFieldLabel("Texto da publicação", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(contentBox);
+            form.Children.Add(CreateDialogFieldLabel("Link opcional", new Thickness(0, 16, 0, 6)));
+            form.Children.Add(linkBox);
+            form.Children.Add(dueDateLabel);
+            form.Children.Add(dueDatePicker);
+            form.Children.Add(CreateDialogSectionCard(
+                "Anexos atuais",
+                "Os anexos existentes permanecem vinculados; esta edição atualiza o conteúdo textual do post.",
+                accentBrush,
+                attachmentSummary,
+                new Thickness(0, 16, 0, 0)));
+            form.Children.Add(statusText);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var closeButton = CreateDialogActionButton("Fechar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            closeButton.Click += (_, __) => dialog.Close();
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { closeButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            RefreshPostTypeState();
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+        private Border CreateTeachingClassHomePostCard(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, Brush accentBrush)
+        {
+            var canInteract = CanCurrentUserInteractWithTeachingClassFeed(teachingClass);
+            var canEditPost = CanCurrentUserEditTeachingClassPost(teachingClass, post);
+            var canDeletePost = CanCurrentUserDeleteTeachingClassPost(teachingClass, post);
+            var currentUserId = GetCurrentUserId();
+            var currentReaction = (post.Reactions ?? new List<TeachingClassPostReactionInfo>())
+                .FirstOrDefault(item => string.Equals(item.UserId, currentUserId, StringComparison.OrdinalIgnoreCase));
+            var groupedReactions = (post.Reactions ?? new List<TeachingClassPostReactionInfo>())
+                .Where(item => !string.IsNullOrWhiteSpace(item.Emoji))
+                .GroupBy(item => item.Emoji)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => group.Key)
+                .ToList();
+
+            var card = new Border
+            {
+                Margin = new Thickness(0, 0, 0, 14),
+                Padding = new Thickness(20),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Effect = new DropShadowEffect
+                {
+                    BlurRadius = 20,
+                    ShadowDepth = 0,
+                    Opacity = _appDarkModeEnabled ? 0.32 : 0.10,
+                    Color = Colors.Black
+                }
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new Border
+            {
+                Width = 82,
+                Height = 5,
+                Margin = new Thickness(0, 0, 0, 16),
+                CornerRadius = new CornerRadius(999),
+                Background = accentBrush,
+                Opacity = 0.92,
+                HorizontalAlignment = HorizontalAlignment.Left
+            });
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var identityButton = CreateTeachingClassFeedIdentityButton(
+                teachingClass,
+                post.AuthorUserId,
+                post.AuthorName,
+                post.PublishedAt,
+                accentBrush,
+                48,
+                13.5);
+            identityButton.Margin = new Thickness(0, 0, 12, 0);
+            headerGrid.Children.Add(identityButton);
+
+            var rightStack = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+
+            if (canEditPost || canDeletePost)
+            {
+                var actionWrap = new WrapPanel
+                {
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+
+                if (canEditPost)
+                {
+                    var editButton = CreateTeachingClassMiniActionButton(
+                        "Editar",
+                        accentBrush,
+                        CreateSoftAccentBrush(accentBrush, 18),
+                        Brushes.Transparent,
+                        78);
+                    editButton.Margin = new Thickness(0, 0, 8, 0);
+                    editButton.Click += (_, __) => ShowTeachingClassPostEditorDialog(teachingClass, post, accentBrush);
+                    actionWrap.Children.Add(editButton);
+                }
+
+                if (canDeletePost)
+                {
+                    var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    var deleteButton = CreateTeachingClassMiniActionButton(
+                        "Apagar",
+                        deleteBrush,
+                        CreateSoftAccentBrush(deleteBrush, 14),
+                        Brushes.Transparent,
+                        82);
+                    deleteButton.Margin = new Thickness(0);
+                    deleteButton.Click += async (_, __) =>
+                    {
+                        if (!ShowStyledConfirmationDialog(
+                                "DOCÊNCIA",
+                                "Apagar publicação",
+                                $"A publicação {(string.IsNullOrWhiteSpace(post.Title) ? "sem título" : post.Title)} será removida do mural de {teachingClass.ClassName}.",
+                                "Apagar",
+                                deleteBrush))
+                        {
+                            return;
+                        }
+
+                        await DeleteTeachingClassPostAsync(teachingClass, post);
+                    };
+                    actionWrap.Children.Add(deleteButton);
+                }
+
+                rightStack.Children.Add(actionWrap);
+            }
+
+            var chipWrap = new WrapPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            chipWrap.Children.Add(CreateStaticTeamChip(
+                string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase) ? "Atividade" : "Publicação",
+                CreateSoftAccentBrush(accentBrush, 24),
+                accentBrush));
+            if (post.Attachments.Count > 0)
+            {
+                chipWrap.Children.Add(CreateStaticTeamChip($"{post.Attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            if (!string.IsNullOrWhiteSpace(post.LinkUrl))
+            {
+                chipWrap.Children.Add(CreateStaticTeamChip("Link", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            }
+            rightStack.Children.Add(chipWrap);
+
+            Grid.SetColumn(rightStack, 1);
+            headerGrid.Children.Add(rightStack);
+            stack.Children.Add(headerGrid);
+
+            if (!string.IsNullOrWhiteSpace(post.Title))
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = post.Title,
+                    Margin = new Thickness(0, 14, 0, 0),
+                    FontSize = 17,
+                    FontWeight = FontWeights.ExtraBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(post.Content))
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = post.Content,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 21
+                });
+            }
+
+            if (string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase))
+            {
+                stack.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 14, 0, 0),
+                    Padding = new Thickness(14),
+                    Background = CreateSoftAccentBrush(accentBrush, 16),
+                    BorderBrush = accentBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16),
+                    Child = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = string.IsNullOrWhiteSpace(post.ActivityLabel) ? "Atividade publicada" : post.ActivityLabel,
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = accentBrush
+                            },
+                            new TextBlock
+                            {
+                                Text = post.ActivityDueAt.HasValue
+                                    ? $"Prazo sugerido: {post.ActivityDueAt.Value:dd/MM/yyyy}"
+                                    : "Sem prazo informado nesta publicação.",
+                                Margin = new Thickness(0, 6, 0, 0),
+                                FontSize = 11,
+                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                TextWrapping = TextWrapping.Wrap
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(post.LinkUrl))
+            {
+                var linkCard = new Grid();
+                linkCard.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                linkCard.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                var linkInfo = new StackPanel();
+                linkInfo.Children.Add(new TextBlock
+                {
+                    Text = "Link compartilhado",
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = accentBrush
+                });
+                linkInfo.Children.Add(new TextBlock
+                {
+                    Text = post.LinkUrl,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                linkCard.Children.Add(linkInfo);
+
+                var openLinkButton = CreateDialogActionButton("Abrir", accentBrush, Brushes.White, Brushes.Transparent, 96);
+                openLinkButton.Margin = new Thickness(12, 0, 0, 0);
+                openLinkButton.Click += (_, __) => OpenTeachingClassPostLink(post.LinkUrl);
+                Grid.SetColumn(openLinkButton, 1);
+                linkCard.Children.Add(openLinkButton);
+
+                stack.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 14, 0, 0),
+                    Padding = new Thickness(14),
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(16),
+                    Child = linkCard
+                });
+            }
+
+            if (post.Attachments.Count > 0)
+            {
+                var attachmentsHost = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+                foreach (var attachment in post.Attachments.OrderByDescending(item => item.AddedAt))
+                {
+                    var attachmentGrid = new Grid();
+                    attachmentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    attachmentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var infoStack = new StackPanel();
+                    infoStack.Children.Add(new TextBlock
+                    {
+                        Text = attachment.FileName,
+                        FontSize = 12,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    var attachmentChips = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                    attachmentChips.Children.Add(CreateStaticTeamChip(GetTeachingClassPermissionScopeLabel(attachment.PermissionScope), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    attachmentChips.Children.Add(CreateStaticTeamChip(FormatFilesHubSize(attachment.SizeBytes), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    attachmentChips.Children.Add(CreateStaticTeamChip(attachment.AddedAt == default ? "Sem data" : attachment.AddedAt.ToString("dd/MM HH:mm"), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    infoStack.Children.Add(attachmentChips);
+                    attachmentGrid.Children.Add(infoStack);
+
+                    var openButton = CreateDialogActionButton("Abrir", accentBrush, Brushes.White, Brushes.Transparent, 92);
+                    openButton.Margin = new Thickness(12, 0, 0, 0);
+                    openButton.Click += async (_, __) => await OpenTeachingClassAttachmentPreviewAsync(teachingClass, attachment);
+                    Grid.SetColumn(openButton, 1);
+                    attachmentGrid.Children.Add(openButton);
+
+                    attachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(14),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(16),
+                        Child = attachmentGrid
+                    });
+                }
+
+                stack.Children.Add(attachmentsHost);
+            }
+
+            var engagementStack = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
+
+            if (groupedReactions.Count > 0)
+            {
+                var reactionSummary = new WrapPanel();
+                foreach (var group in groupedReactions)
+                {
+                    reactionSummary.Children.Add(CreateTeachingClassReactionSummaryChip(
+                        group.Key,
+                        group.Count(),
+                        string.Equals(currentReaction?.Emoji, group.Key, StringComparison.Ordinal)));
+                }
+                engagementStack.Children.Add(reactionSummary);
+            }
+
+            if (canInteract)
+            {
+                var reactionPickerHost = new Border
+                {
+                    Margin = new Thickness(10, 0, 0, 0),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(999),
+                    Visibility = Visibility.Collapsed,
+                    Opacity = 0,
+                    RenderTransformOrigin = new Point(0, 0.5),
+                    RenderTransform = new ScaleTransform(0.86, 1)
+                };
+
+                var reactionChoices = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal
+                };
+                reactionPickerHost.Child = reactionChoices;
+
+                var pickerAccent = !string.IsNullOrWhiteSpace(currentReaction?.Emoji)
+                    ? GetTeachingClassReactionAccentBrush(currentReaction.Emoji)
+                    : accentBrush;
+                var pickerToggleButton = CreateTeachingClassReactionCircleButton(
+                    currentReaction?.Emoji ?? "🙂",
+                    pickerAccent,
+                    currentReaction != null,
+                    44,
+                    currentReaction == null
+                        ? "Abrir reações"
+                        : $"Alterar reação: {GetTeachingClassReactionLabel(currentReaction.Emoji)}");
+
+                var reactionPickerRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Margin = new Thickness(0, groupedReactions.Count > 0 ? 12 : 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                reactionPickerRow.Children.Add(pickerToggleButton);
+                reactionPickerRow.Children.Add(reactionPickerHost);
+
+                var reactionPickerOpen = false;
+                pickerToggleButton.Click += (_, __) =>
+                {
+                    reactionPickerOpen = !reactionPickerOpen;
+                    SetTeachingClassReactionPickerState(reactionPickerHost, reactionPickerOpen);
+                };
+
+                for (var index = 0; index < TeachingClassHomeReactionEmojis.Length; index++)
+                {
+                    var emoji = TeachingClassHomeReactionEmojis[index];
+                    var optionButton = CreateTeachingClassReactionCircleButton(
+                        emoji,
+                        GetTeachingClassReactionAccentBrush(emoji),
+                        string.Equals(currentReaction?.Emoji, emoji, StringComparison.Ordinal),
+                        38,
+                        GetTeachingClassReactionLabel(emoji));
+                    optionButton.Margin = new Thickness(0, 0, index == TeachingClassHomeReactionEmojis.Length - 1 ? 0 : 8, 0);
+                    optionButton.Click += async (_, __) =>
+                    {
+                        reactionPickerOpen = false;
+                        SetTeachingClassReactionPickerState(reactionPickerHost, false);
+                        await ToggleTeachingClassPostReactionAsync(teachingClass, post, emoji);
+                    };
+                    reactionChoices.Children.Add(optionButton);
+                }
+
+                engagementStack.Children.Add(reactionPickerRow);
+            }
+
+            stack.Children.Add(engagementStack);
+
+            var commentsHost = new StackPanel { Margin = new Thickness(0, 16, 0, 0) };
+            commentsHost.Children.Add(new TextBlock
+            {
+                Text = post.Comments.Count == 0 ? "Comentários" : $"Comentários • {post.Comments.Count}",
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+
+            TeachingClassPostCommentInfo? replyTarget = null;
+            var replyBanner = new Border
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(12),
+                Background = CreateSoftAccentBrush(accentBrush, 18),
+                BorderBrush = accentBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Visibility = Visibility.Collapsed
+            };
+            var replyBannerText = new TextBlock
+            {
+                FontSize = 11,
+                Foreground = accentBrush,
+                TextWrapping = TextWrapping.Wrap
+            };
+            replyBanner.Child = replyBannerText;
+
+            void SetReplyTarget(TeachingClassPostCommentInfo? target)
+            {
+                replyTarget = target;
+                replyBanner.Visibility = replyTarget == null ? Visibility.Collapsed : Visibility.Visible;
+                replyBannerText.Text = replyTarget == null
+                    ? string.Empty
+                    : $"Respondendo {replyTarget.AuthorName}. O comentário será publicado como resposta direta nesta thread.";
+            }
+
+            var rootComments = post.Comments
+                .Where(comment => string.IsNullOrWhiteSpace(comment.ParentCommentId))
+                .OrderBy(comment => comment.CreatedAt)
+                .ToList();
+
+            if (rootComments.Count == 0)
+            {
+                commentsHost.Children.Add(new TextBlock
+                {
+                    Text = "Nenhum comentário publicado ainda nesta postagem.",
+                    Margin = new Thickness(0, 10, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                foreach (var comment in rootComments)
+                {
+                    commentsHost.Children.Add(CreateTeachingClassCommentCard(teachingClass, post, comment, accentBrush, canInteract, () => SetReplyTarget(comment)));
+                    foreach (var reply in post.Comments
+                        .Where(item => string.Equals(item.ParentCommentId, comment.CommentId, StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(item => item.CreatedAt))
+                    {
+                        commentsHost.Children.Add(CreateTeachingClassCommentCard(teachingClass, post, reply, accentBrush, canInteract, () => SetReplyTarget(comment), indentLevel: 1));
+                    }
+                }
+            }
+
+            if (canInteract)
+            {
+                var commentBox = new TextBox
+                {
+                    MinHeight = 82,
+                    Margin = new Thickness(0, 12, 0, 0),
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                };
+                ApplyDialogInputStyle(commentBox);
+
+                var commentStatus = new TextBlock
+                {
+                    Margin = new Thickness(0, 10, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                };
+
+                var publishCommentButton = CreateDialogActionButton("Comentar", accentBrush, Brushes.White, Brushes.Transparent, 118);
+                publishCommentButton.Margin = new Thickness(0, 12, 0, 0);
+                publishCommentButton.Click += async (_, __) =>
+                {
+                    if (_teachingClassService == null)
+                    {
+                        return;
+                    }
+
+                    var commentText = commentBox.Text.Trim();
+                    if (string.IsNullOrWhiteSpace(commentText))
+                    {
+                        commentStatus.Text = "Escreva o comentário antes de publicar a resposta no mural.";
+                        commentStatus.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    publishCommentButton.IsEnabled = false;
+                    commentStatus.Text = "Publicando comentário...";
+                    commentStatus.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                    try
+                    {
+                        var comment = new TeachingClassPostCommentInfo
+                        {
+                            CommentId = Guid.NewGuid().ToString("N"),
+                            ParentCommentId = replyTarget?.CommentId ?? string.Empty,
+                            AuthorUserId = GetCurrentUserId(),
+                            AuthorName = string.IsNullOrWhiteSpace(_currentProfile?.Name) ? "Membro da turma" : _currentProfile!.Name,
+                            Content = commentText,
+                            CreatedAt = DateTime.Now
+                        };
+
+                        var result = await _teachingClassService.SaveHomeCommentAsync(teachingClass.ClassId, post.PostId, comment);
+                        if (!result.Success)
+                        {
+                            commentStatus.Text = result.ErrorMessage ?? "Não foi possível publicar o comentário agora.";
+                            commentStatus.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        post.Comments.Add(comment);
+                        teachingClass.HomeFeedReady = true;
+                        teachingClass.HomeFeedLoadedAt = DateTime.Now;
+                        TrackTeachingClassLocally(teachingClass);
+
+                        if (ProfessorDashboardStatusText != null)
+                        {
+                            ProfessorDashboardStatusText.Text = $"Comentário publicado em uma postagem da turma {teachingClass.ClassName}.";
+                            ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                        }
+
+                        RenderProfessorDashboard();
+                    }
+                    finally
+                    {
+                        publishCommentButton.IsEnabled = true;
+                    }
+                };
+
+                commentsHost.Children.Add(replyBanner);
+                commentsHost.Children.Add(commentBox);
+                commentsHost.Children.Add(commentStatus);
+                commentsHost.Children.Add(new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { publishCommentButton }
+                });
+            }
+
+            stack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Padding = new Thickness(16),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Child = commentsHost
+            });
+            card.Child = stack;
+            return card;
+        }
+
+        private Border CreateTeachingClassCommentCard(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, TeachingClassPostCommentInfo comment, Brush accentBrush, bool canReply, Action onReply, int indentLevel = 0)
+        {
+            var canDeleteComment = CanCurrentUserDeleteTeachingClassComment(teachingClass, comment);
+            var card = new Border
+            {
+                Margin = new Thickness(indentLevel == 0 ? 0 : 30, 10, 0, 0),
+                Padding = new Thickness(14),
+                Background = indentLevel == 0 ? GetThemeBrush("CardBackgroundBrush") : CreateSoftAccentBrush(accentBrush, 14),
+                BorderBrush = indentLevel == 0 ? GetThemeBrush("CardBorderBrush") : CreateSoftAccentBrush(accentBrush, 84),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18)
+            };
+
+            var stack = new StackPanel();
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var identityButton = CreateTeachingClassFeedIdentityButton(
+                teachingClass,
+                comment.AuthorUserId,
+                comment.AuthorName,
+                comment.CreatedAt,
+                accentBrush,
+                indentLevel == 0 ? 38 : 34,
+                12.5);
+            headerGrid.Children.Add(identityButton);
+
+            var metadata = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            if (canReply)
+            {
+                var replyButton = CreateTeachingClassMiniActionButton(
+                    "Responder",
+                    accentBrush,
+                    CreateSoftAccentBrush(accentBrush, 24),
+                    Brushes.Transparent,
+                    92);
+                replyButton.Click += (_, __) => onReply();
+                metadata.Children.Add(replyButton);
+            }
+
+            if (canDeleteComment)
+            {
+                var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                var deleteButton = CreateTeachingClassMiniActionButton(
+                    "Apagar",
+                    deleteBrush,
+                    CreateSoftAccentBrush(deleteBrush, 14),
+                    Brushes.Transparent,
+                    82);
+                deleteButton.Click += async (_, __) =>
+                {
+                    if (!ShowStyledConfirmationDialog(
+                            "DOCÊNCIA",
+                            "Apagar comentário",
+                            $"O comentário de {comment.AuthorName} será removido desta publicação.",
+                            "Apagar",
+                            deleteBrush))
+                    {
+                        return;
+                    }
+
+                    await DeleteTeachingClassCommentAsync(teachingClass, post, comment);
+                };
+                metadata.Children.Add(deleteButton);
+            }
+
+            Grid.SetColumn(metadata, 1);
+            headerGrid.Children.Add(metadata);
+            stack.Children.Add(headerGrid);
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = comment.Content,
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11.5,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 19
+            });
+
+            card.Child = stack;
+            return card;
+        }
+
+        private UserInfo CreateUserInfoFromProfile(UserProfile profile)
+        {
+            return new UserInfo
+            {
+                UserId = string.IsNullOrWhiteSpace(profile.UserId) ? "user-profile" : profile.UserId,
+                Name = profile.Name,
+                Email = profile.Email,
+                Phone = profile.Phone,
+                Registration = profile.Registration,
+                Course = profile.Course,
+                Role = TeamPermissionService.NormalizeRole(profile.Role),
+                Nickname = profile.Nickname,
+                ProfessionalTitle = profile.ProfessionalTitle,
+                AcademicDepartment = profile.AcademicDepartment,
+                AcademicFocus = profile.AcademicFocus,
+                OfficeHours = profile.OfficeHours,
+                Bio = profile.Bio,
+                Skills = profile.Skills,
+                ProgrammingLanguages = profile.ProgrammingLanguages,
+                PortfolioLink = profile.PortfolioLink,
+                LinkedInLink = profile.LinkedInLink,
+                AvatarBody = profile.AvatarBody,
+                AvatarHair = profile.AvatarHair,
+                AvatarHat = profile.AvatarHat,
+                AvatarAccessory = profile.AvatarAccessory,
+                AvatarClothing = profile.AvatarClothing
+            };
+        }
+
+        private void PrimeTeachingClassFeedProfiles(TeachingClassInfo teachingClass)
+        {
+            if (teachingClass == null || teachingClass.HomePosts.Count == 0)
+            {
+                return;
+            }
+
+            var pendingProfileIds = GetTeachingClassFeedProfileIds(teachingClass)
+                .Where(userId =>
+                {
+                    var task = LoadUserProfileCachedAsync(userId);
+                    return !task.IsCompletedSuccessfully;
+                })
+                .ToList();
+
+            if (pendingProfileIds.Count > 0)
+            {
+                _ = WarmTeachingClassFeedProfilesAsync(teachingClass.ClassId, pendingProfileIds);
+            }
+        }
+
+        private IEnumerable<string> GetTeachingClassFeedProfileIds(TeachingClassInfo teachingClass)
+        {
+            return teachingClass.HomePosts
+                .Select(post => post.AuthorUserId)
+                .Concat(teachingClass.HomePosts.SelectMany(post => (post.Comments ?? new List<TeachingClassPostCommentInfo>()).Select(comment => comment.AuthorUserId)))
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Select(userId => userId.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private async Task WarmTeachingClassFeedProfilesAsync(string classId, IEnumerable<string> userIds)
+        {
+            var targets = (userIds ?? Enumerable.Empty<string>())
+                .Where(userId => !string.IsNullOrWhiteSpace(userId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (targets.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.WhenAll(targets.Select(LoadUserProfileCachedAsync));
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassFeedProfileWarmup] Falha ao aquecer perfis do mural: {ex.Message}");
+            }
+
+            if (_activeTeachingClass != null && string.Equals(_activeTeachingClass.ClassId, classId, StringComparison.OrdinalIgnoreCase))
+            {
+                await Dispatcher.InvokeAsync(RenderProfessorDashboard, DispatcherPriority.Background);
+            }
+        }
+
+        private UserInfo BuildTeachingClassFeedParticipantSummary(TeachingClassInfo teachingClass, string? userId, string? userName)
+        {
+            var normalizedUserId = userId?.Trim() ?? string.Empty;
+            var normalizedUserName = userName?.Trim() ?? string.Empty;
+
+            UserInfo? summary = null;
+            if (!string.IsNullOrWhiteSpace(normalizedUserId) && string.Equals(normalizedUserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase))
+            {
+                summary = CreateCurrentUserInfo();
+            }
+
+            if (summary == null && !string.IsNullOrWhiteSpace(normalizedUserId))
+            {
+                var task = LoadUserProfileCachedAsync(normalizedUserId);
+                if (task.IsCompletedSuccessfully && task.Result != null)
+                {
+                    summary = CreateUserInfoFromProfile(task.Result);
+                }
+            }
+
+            var studentSummary = (teachingClass.StudentSummaries ?? new List<TeachingClassMemberInfo>())
+                .FirstOrDefault(member =>
+                    (!string.IsNullOrWhiteSpace(normalizedUserId) && string.Equals(member.UserId, normalizedUserId, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(normalizedUserName) && string.Equals(member.Name, normalizedUserName, StringComparison.OrdinalIgnoreCase)));
+
+            summary ??= new UserInfo();
+            summary.UserId = string.IsNullOrWhiteSpace(summary.UserId) ? normalizedUserId : summary.UserId;
+            summary.Name = string.IsNullOrWhiteSpace(summary.Name)
+                ? (string.IsNullOrWhiteSpace(normalizedUserName) ? "Membro da turma" : normalizedUserName)
+                : summary.Name;
+            summary.Email = string.IsNullOrWhiteSpace(summary.Email) ? studentSummary?.Email ?? string.Empty : summary.Email;
+            summary.Registration = string.IsNullOrWhiteSpace(summary.Registration) ? studentSummary?.Registration ?? string.Empty : summary.Registration;
+            summary.Course = string.IsNullOrWhiteSpace(summary.Course) ? teachingClass.Course : summary.Course;
+            summary.Role = ResolveTeachingClassFeedParticipantRole(teachingClass, normalizedUserId, summary.Name, summary.Role);
+
+            if (string.IsNullOrWhiteSpace(summary.ProfessionalTitle) && TeamPermissionService.IsFacultyRole(summary.Role))
+            {
+                summary.ProfessionalTitle = "Professor da turma";
+            }
+
+            summary.IsCurrentUser = string.Equals(summary.UserId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(summary.UserId))
+            {
+                summary.ConnectionState = _connectionService?.GetRelationshipState(summary.UserId, _connectionEntries) ?? "none";
+            }
+
+            return summary;
+        }
+
+        private string ResolveTeachingClassFeedParticipantRole(TeachingClassInfo teachingClass, string? userId, string? userName, string? fallbackRole = null)
+        {
+            if (TeamPermissionService.IsFacultyRole(fallbackRole))
+            {
+                return "professor";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId) && string.Equals(userId, teachingClass.RepresentativeUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return "leader";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId) && string.Equals(userId, teachingClass.ViceRepresentativeUserId, StringComparison.OrdinalIgnoreCase))
+            {
+                return "vice";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userName) && string.Equals(userName, teachingClass.RepresentativeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return "leader";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userName) && string.Equals(userName, teachingClass.ViceRepresentativeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return "vice";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId) && string.Equals(userId, _currentProfile?.UserId, StringComparison.OrdinalIgnoreCase) && TeamPermissionService.IsFacultyRole(_currentProfile?.Role))
+            {
+                return TeamPermissionService.NormalizeRole(_currentProfile?.Role);
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId) && (teachingClass.ProfessorUserIds ?? new List<string>()).Contains(userId, StringComparer.OrdinalIgnoreCase))
+            {
+                return "professor";
+            }
+
+            if (!string.IsNullOrWhiteSpace(userName) && (teachingClass.ProfessorNames ?? new List<string>()).Contains(userName, StringComparer.OrdinalIgnoreCase))
+            {
+                return "professor";
+            }
+
+            var studentSummary = (teachingClass.StudentSummaries ?? new List<TeachingClassMemberInfo>()).FirstOrDefault(member =>
+                (!string.IsNullOrWhiteSpace(userId) && string.Equals(member.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrWhiteSpace(userName) && string.Equals(member.Name, userName, StringComparison.OrdinalIgnoreCase)));
+
+            if (studentSummary != null)
+            {
+                return NormalizeTeachingClassMemberRole(studentSummary.Role);
+            }
+
+            if (!string.IsNullOrWhiteSpace(userId) && (teachingClass.StudentIds ?? new List<string>()).Contains(userId, StringComparer.OrdinalIgnoreCase))
+            {
+                return "student";
+            }
+
+            return "student";
+        }
+
+        private string GetTeachingClassFeedRoleLabel(UserInfo user)
+        {
+            return GetTeachingClassMemberRoleLabel(user.Role);
+        }
+
+        private Brush GetTeachingClassFeedRoleAccentBrush(string? role)
+        {
+            return GetTeachingClassMemberRoleAccentBrush(role);
+        }
+
+        private Button CreateTeachingClassFeedIdentityButton(TeachingClassInfo teachingClass, string? userId, string? userName, DateTime timestamp, Brush accentBrush, double avatarSize, double nameFontSize)
+        {
+            var user = BuildTeachingClassFeedParticipantSummary(teachingClass, userId, userName);
+            var roleLabel = GetTeachingClassFeedRoleLabel(user);
+            var roleBrush = GetTeachingClassFeedRoleAccentBrush(user.Role);
+            var canOpenProfile = !string.IsNullOrWhiteSpace(user.UserId);
+
+            var button = new Button
+            {
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Cursor = canOpenProfile ? Cursors.Hand : Cursors.Arrow,
+                Focusable = false,
+                ToolTip = canOpenProfile ? "Abrir contexto do participante" : null,
+                IsHitTestVisible = canOpenProfile
+            };
+
+            if (canOpenProfile)
+            {
+                button.Click += (_, __) => ShowTeachingClassFeedParticipantSlide(user, teachingClass);
+            }
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            layout.Children.Add(new Border
+            {
+                Width = avatarSize,
+                Height = avatarSize,
+                CornerRadius = new CornerRadius(avatarSize / 2),
+                ClipToBounds = true,
+                Background = CreateSoftAccentBrush(accentBrush, 20),
+                Child = CreateUserAvatarVisual(user, avatarSize, true)
+            });
+
+            var infoStack = new StackPanel
+            {
+                Margin = new Thickness(12, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            infoStack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(user.Name) ? "Membro da turma" : user.Name,
+                FontSize = nameFontSize,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var metadataRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 4, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            metadataRow.Children.Add(new Border
+            {
+                Background = CreateSoftAccentBrush(roleBrush, 28),
+                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(8, 3, 8, 3),
+                Child = new TextBlock
+                {
+                    Text = roleLabel,
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = roleBrush
+                }
+            });
+            metadataRow.Children.Add(new TextBlock
+            {
+                Text = timestamp == default ? "Agora" : timestamp.ToString("dd/MM/yyyy • HH:mm"),
+                Margin = new Thickness(8, 1, 0, 0),
+                FontSize = 10.5,
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            infoStack.Children.Add(metadataRow);
+
+            Grid.SetColumn(infoStack, 1);
+            layout.Children.Add(infoStack);
+
+            button.Content = layout;
+            return button;
+        }
+
+        private void ShowTeachingClassFeedParticipantSlide(UserInfo user, TeachingClassInfo teachingClass)
+        {
+            if (user == null || string.IsNullOrWhiteSpace(user.UserId))
+            {
+                return;
+            }
+
+            SearchSlideTitleText.Text = string.IsNullOrWhiteSpace(user.Name) ? "Participante da turma" : user.Name;
+            SearchSlideStatusText.Text = $"{GetTeachingClassFeedRoleLabel(user)} em {teachingClass.ClassName}. Abra o chat, envie conexão ou aprofunde o perfil completo sem sair do feed.";
+            SearchSlideStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            SearchSlideResultsHost.Children.Clear();
+            SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
+            SearchSlideResultsHost.Children.Add(CreateSearchSlideInfoCard(
+                "Contexto rápido do participante",
+                "Use Conversar para ir direto ao chat ou Detalhes para abrir o perfil acadêmico completo com mais ações."));
+            SearchSlideResultsHost.Children.Add(CreateSearchSlideResultCard(user));
+
+            _searchSlideQuery = string.Empty;
+            _searchSlideResults = new List<UserInfo> { user };
+            _searchSlideTeamResults.Clear();
+            ShowSearchSlidePanel();
+        }
+
+        private string GetTeachingClassReactionLabel(string emoji)
+        {
+            return emoji switch
+            {
+                "👍" => "Gostei",
+                "❤️" => "Amei",
+                "🎉" => "Celebrar",
+                "📚" => "Aprendi",
+                "👏" => "Aplaudir",
+                "🤔" => "Refletir",
+                _ => "Reagir"
+            };
+        }
+
+        private Brush GetTeachingClassReactionAccentBrush(string emoji)
+        {
+            return emoji switch
+            {
+                "👍" => new SolidColorBrush(Color.FromRgb(37, 99, 235)),
+                "❤️" => new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                "🎉" => new SolidColorBrush(Color.FromRgb(245, 158, 11)),
+                "📚" => new SolidColorBrush(Color.FromRgb(16, 185, 129)),
+                "👏" => new SolidColorBrush(Color.FromRgb(236, 72, 153)),
+                "🤔" => new SolidColorBrush(Color.FromRgb(107, 114, 128)),
+                _ => GetThemeBrush("AccentBrush")
+            };
+        }
+
+        private Border CreateTeachingClassReactionSummaryChip(string emoji, int count, bool isCurrentReaction)
+        {
+            var accent = GetTeachingClassReactionAccentBrush(emoji);
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 8, 8),
+                Padding = new Thickness(10, 6, 10, 6),
+                Background = isCurrentReaction ? CreateSoftAccentBrush(accent, 40) : CreateSoftAccentBrush(accent, 24),
+                BorderBrush = isCurrentReaction ? accent : GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(999),
+                Child = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = emoji,
+                            FontSize = 14,
+                            FontFamily = GetAppEmojiFontFamily(),
+                            VerticalAlignment = VerticalAlignment.Center
+                        },
+                        new TextBlock
+                        {
+                            Text = count.ToString(),
+                            Margin = new Thickness(6, 0, 0, 0),
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = isCurrentReaction ? accent : GetThemeBrush("PrimaryTextBrush"),
+                            VerticalAlignment = VerticalAlignment.Center
+                        }
+                    }
+                }
+            };
+        }
+
+        private Button CreateTeachingClassReactionCircleButton(string emoji, Brush accentBrush, bool isSelected, double size, string tooltip)
+        {
+            return new Button
+            {
+                Width = size,
+                Height = size,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip,
+                Content = new Border
+                {
+                    Width = size,
+                    Height = size,
+                    CornerRadius = new CornerRadius(size / 2),
+                    Background = isSelected ? CreateSoftAccentBrush(accentBrush, 42) : CreateSoftAccentBrush(accentBrush, 24),
+                    BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
+                    {
+                        Text = emoji,
+                        FontSize = size >= 44 ? 17 : 15,
+                        FontFamily = GetAppEmojiFontFamily(),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        TextAlignment = TextAlignment.Center
+                    }
+                }
+            };
+        }
+
+        private void SetTeachingClassReactionPickerState(Border pickerHost, bool isOpen)
+        {
+            if (pickerHost.RenderTransform is not ScaleTransform scaleTransform)
+            {
+                scaleTransform = new ScaleTransform(0.86, 1);
+                pickerHost.RenderTransform = scaleTransform;
+            }
+
+            if (isOpen)
+            {
+                pickerHost.Visibility = Visibility.Visible;
+                pickerHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)));
+                scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.86, 1, TimeSpan.FromMilliseconds(180)));
+                return;
+            }
+
+            if (pickerHost.Visibility != Visibility.Visible)
+            {
+                return;
+            }
+
+            var opacityAnimation = new DoubleAnimation(0, TimeSpan.FromMilliseconds(120));
+            opacityAnimation.Completed += (_, __) => pickerHost.Visibility = Visibility.Collapsed;
+            pickerHost.BeginAnimation(OpacityProperty, opacityAnimation);
+            scaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.86, TimeSpan.FromMilliseconds(120)));
+        }
+
+        private Border CreateTeachingClassRosterCard(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
+        {
+            var rosterStack = new StackPanel();
+            var studentsHost = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+            var leadershipSummary = new WrapPanel { Margin = new Thickness(0, 0, 0, 0) };
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            async Task<bool> PersistRosterMutationAsync(string successMessage)
+            {
+                if (_teachingClassService == null)
+                {
+                    statusText.Text = "Serviço de docência indisponível para atualizar a turma agora.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return false;
+                }
+
+                var saveResult = await _teachingClassService.SaveClassAsync(teachingClass);
+                if (!saveResult.Success)
+                {
+                    statusText.Text = saveResult.ErrorMessage ?? "Não foi possível atualizar a turma agora.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return false;
+                }
+
+                TrackTeachingClassLocally(teachingClass);
+                statusText.Text = successMessage;
+                statusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                if (ProfessorDashboardStatusText != null)
+                {
+                    ProfessorDashboardStatusText.Text = successMessage;
+                    ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                }
+
+                return true;
+            }
+
+            void RefreshLeadershipSummary()
+            {
+                leadershipSummary.Children.Clear();
+
+                leadershipSummary.Children.Add(CreateStaticTeamChip(
+                    string.IsNullOrWhiteSpace(teachingClass.RepresentativeUserId)
+                        ? "Sem representante"
+                        : $"Representante: {teachingClass.RepresentativeName}",
+                    CreateSoftAccentBrush(GetTeachingClassMemberRoleAccentBrush("leader"), 24),
+                    GetTeachingClassMemberRoleAccentBrush("leader")));
+                leadershipSummary.Children.Add(CreateStaticTeamChip(
+                    string.IsNullOrWhiteSpace(teachingClass.ViceRepresentativeUserId)
+                        ? "Sem vice"
+                        : $"Vice: {teachingClass.ViceRepresentativeName}",
+                    CreateSoftAccentBrush(GetTeachingClassMemberRoleAccentBrush("vice"), 24),
+                    GetTeachingClassMemberRoleAccentBrush("vice")));
+                leadershipSummary.Children.Add(CreateStaticTeamChip(
+                    $"{teachingClass.StudentSummaries.Count} aluno(s)",
+                    GetThemeBrush("CardBackgroundBrush"),
+                    GetThemeBrush("PrimaryTextBrush")));
+            }
+
+            void ApplyLeadershipSelection(TeachingClassMemberInfo student, string targetRole)
+            {
+                var normalizedTargetRole = NormalizeTeachingClassMemberRole(targetRole);
+                if (string.Equals(normalizedTargetRole, "leader", StringComparison.OrdinalIgnoreCase))
+                {
+                    teachingClass.RepresentativeUserId = student.UserId;
+                    teachingClass.RepresentativeName = student.Name;
+                    if (string.Equals(teachingClass.ViceRepresentativeUserId, student.UserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        teachingClass.ViceRepresentativeUserId = string.Empty;
+                        teachingClass.ViceRepresentativeName = string.Empty;
+                    }
+                }
+                else if (string.Equals(normalizedTargetRole, "vice", StringComparison.OrdinalIgnoreCase))
+                {
+                    teachingClass.ViceRepresentativeUserId = student.UserId;
+                    teachingClass.ViceRepresentativeName = student.Name;
+                    if (string.Equals(teachingClass.RepresentativeUserId, student.UserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        teachingClass.RepresentativeUserId = string.Empty;
+                        teachingClass.RepresentativeName = string.Empty;
+                    }
+                }
+                else
+                {
+                    if (string.Equals(teachingClass.RepresentativeUserId, student.UserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        teachingClass.RepresentativeUserId = string.Empty;
+                        teachingClass.RepresentativeName = string.Empty;
+                    }
+
+                    if (string.Equals(teachingClass.ViceRepresentativeUserId, student.UserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        teachingClass.ViceRepresentativeUserId = string.Empty;
+                        teachingClass.ViceRepresentativeName = string.Empty;
+                    }
+                }
+
+                foreach (var member in teachingClass.StudentSummaries)
+                {
+                    if (string.Equals(member.UserId, teachingClass.RepresentativeUserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        member.Role = "leader";
+                    }
+                    else if (string.Equals(member.UserId, teachingClass.ViceRepresentativeUserId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        member.Role = "vice";
+                    }
+                    else
+                    {
+                        member.Role = "student";
+                    }
+                }
+            }
+
+            void RenderStudentCards()
+            {
+                studentsHost.Children.Clear();
+
+                if (teachingClass.StudentSummaries.Count == 0)
+                {
+                    studentsHost.Children.Add(CreateSearchSlideInfoCard(
+                        "Sem alunos ainda",
+                        "Compartilhe o código da turma com a sala ou adicione alunos diretamente nesta página para começar a presença docente."));
+                    return;
+                }
+
+                foreach (var student in teachingClass.StudentSummaries.OrderBy(item => item.Name))
+                {
+                    var currentRole = NormalizeTeachingClassMemberRole(student.Role);
+                    var roleBrush = GetTeachingClassMemberRoleAccentBrush(currentRole);
+
+                    var cardStack = new StackPanel();
+                    cardStack.Children.Add(new TextBlock
+                    {
+                        Text = student.Name,
+                        FontSize = 13,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                    });
+                    cardStack.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(student.Registration)
+                            ? (string.IsNullOrWhiteSpace(student.Email) ? "Aluno sem matrícula visível" : student.Email)
+                            : $"Matrícula {student.Registration}" + (string.IsNullOrWhiteSpace(student.Email) ? string.Empty : $" • {student.Email}"),
+                        Margin = new Thickness(0, 4, 0, 0),
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+
+                    var metaWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+                    metaWrap.Children.Add(CreateStaticTeamChip(
+                        GetTeachingClassMemberRoleLabel(currentRole),
+                        CreateSoftAccentBrush(roleBrush, 24),
+                        roleBrush));
+                    metaWrap.Children.Add(CreateStaticTeamChip(
+                        student.JoinedAt == default ? "Sem data" : $"Entrou em {student.JoinedAt:dd/MM/yyyy}",
+                        GetThemeBrush("CardBackgroundBrush"),
+                        GetThemeBrush("PrimaryTextBrush")));
+                    cardStack.Children.Add(metaWrap);
+
+                    if (canManage)
+                    {
+                        var actionWrap = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+
+                        if (!string.Equals(currentRole, "leader", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var representativeButton = CreateTeachingClassMiniActionButton(
+                                "Representante",
+                                GetTeachingClassMemberRoleAccentBrush("leader"),
+                                CreateSoftAccentBrush(GetTeachingClassMemberRoleAccentBrush("leader"), 18),
+                                Brushes.Transparent,
+                                118);
+                            representativeButton.Margin = new Thickness(0, 0, 8, 8);
+                            representativeButton.Click += async (_, __) =>
+                            {
+                                var previousRepresentativeId = teachingClass.RepresentativeUserId;
+                                var previousRepresentativeName = teachingClass.RepresentativeName;
+                                var previousViceId = teachingClass.ViceRepresentativeUserId;
+                                var previousViceName = teachingClass.ViceRepresentativeName;
+                                var previousRoles = teachingClass.StudentSummaries.ToDictionary(member => member.UserId, member => member.Role, StringComparer.OrdinalIgnoreCase);
+
+                                ApplyLeadershipSelection(student, "leader");
+                                if (!await PersistRosterMutationAsync($"{student.Name} agora é o representante de {teachingClass.ClassName}."))
+                                {
+                                    teachingClass.RepresentativeUserId = previousRepresentativeId;
+                                    teachingClass.RepresentativeName = previousRepresentativeName;
+                                    teachingClass.ViceRepresentativeUserId = previousViceId;
+                                    teachingClass.ViceRepresentativeName = previousViceName;
+                                    foreach (var member in teachingClass.StudentSummaries)
+                                    {
+                                        if (previousRoles.TryGetValue(member.UserId, out var role))
+                                        {
+                                            member.Role = role;
+                                        }
+                                    }
+                                }
+
+                                RefreshLeadershipSummary();
+                                RenderStudentCards();
+                            };
+                            actionWrap.Children.Add(representativeButton);
+                        }
+
+                        if (!string.Equals(currentRole, "vice", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var viceButton = CreateTeachingClassMiniActionButton(
+                                "Vice",
+                                GetTeachingClassMemberRoleAccentBrush("vice"),
+                                CreateSoftAccentBrush(GetTeachingClassMemberRoleAccentBrush("vice"), 18),
+                                Brushes.Transparent,
+                                82);
+                            viceButton.Margin = new Thickness(0, 0, 8, 8);
+                            viceButton.Click += async (_, __) =>
+                            {
+                                var previousRepresentativeId = teachingClass.RepresentativeUserId;
+                                var previousRepresentativeName = teachingClass.RepresentativeName;
+                                var previousViceId = teachingClass.ViceRepresentativeUserId;
+                                var previousViceName = teachingClass.ViceRepresentativeName;
+                                var previousRoles = teachingClass.StudentSummaries.ToDictionary(member => member.UserId, member => member.Role, StringComparer.OrdinalIgnoreCase);
+
+                                ApplyLeadershipSelection(student, "vice");
+                                if (!await PersistRosterMutationAsync($"{student.Name} agora é o vice-representante de {teachingClass.ClassName}."))
+                                {
+                                    teachingClass.RepresentativeUserId = previousRepresentativeId;
+                                    teachingClass.RepresentativeName = previousRepresentativeName;
+                                    teachingClass.ViceRepresentativeUserId = previousViceId;
+                                    teachingClass.ViceRepresentativeName = previousViceName;
+                                    foreach (var member in teachingClass.StudentSummaries)
+                                    {
+                                        if (previousRoles.TryGetValue(member.UserId, out var role))
+                                        {
+                                            member.Role = role;
+                                        }
+                                    }
+                                }
+
+                                RefreshLeadershipSummary();
+                                RenderStudentCards();
+                            };
+                            actionWrap.Children.Add(viceButton);
+                        }
+
+                        if (!string.Equals(currentRole, "student", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var revertButton = CreateTeachingClassMiniActionButton(
+                                "Aluno",
+                                GetThemeBrush("PrimaryTextBrush"),
+                                GetThemeBrush("CardBackgroundBrush"),
+                                GetThemeBrush("CardBorderBrush"),
+                                82);
+                            revertButton.Margin = new Thickness(0, 0, 8, 8);
+                            revertButton.Click += async (_, __) =>
+                            {
+                                var previousRepresentativeId = teachingClass.RepresentativeUserId;
+                                var previousRepresentativeName = teachingClass.RepresentativeName;
+                                var previousViceId = teachingClass.ViceRepresentativeUserId;
+                                var previousViceName = teachingClass.ViceRepresentativeName;
+                                var previousRoles = teachingClass.StudentSummaries.ToDictionary(member => member.UserId, member => member.Role, StringComparer.OrdinalIgnoreCase);
+
+                                ApplyLeadershipSelection(student, "student");
+                                if (!await PersistRosterMutationAsync($"{student.Name} voltou ao papel de aluno na turma {teachingClass.ClassName}."))
+                                {
+                                    teachingClass.RepresentativeUserId = previousRepresentativeId;
+                                    teachingClass.RepresentativeName = previousRepresentativeName;
+                                    teachingClass.ViceRepresentativeUserId = previousViceId;
+                                    teachingClass.ViceRepresentativeName = previousViceName;
+                                    foreach (var member in teachingClass.StudentSummaries)
+                                    {
+                                        if (previousRoles.TryGetValue(member.UserId, out var role))
+                                        {
+                                            member.Role = role;
+                                        }
+                                    }
+                                }
+
+                                RefreshLeadershipSummary();
+                                RenderStudentCards();
+                            };
+                            actionWrap.Children.Add(revertButton);
+                        }
+
+                        var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        var removeButton = CreateTeachingClassMiniActionButton(
+                            "Remover",
+                            deleteBrush,
+                            CreateSoftAccentBrush(deleteBrush, 14),
+                            Brushes.Transparent,
+                            96);
+                        removeButton.Margin = new Thickness(0, 0, 0, 8);
+                        removeButton.Click += async (_, __) =>
+                        {
+                            if (!ShowStyledConfirmationDialog(
+                                    "DOCÊNCIA",
+                                    "Remover aluno",
+                                    $"{student.Name} será removido da turma {teachingClass.ClassName}.",
+                                    "Remover",
+                                    deleteBrush))
+                            {
+                                return;
+                            }
+
+                            var removedStudent = new TeachingClassMemberInfo
+                            {
+                                UserId = student.UserId,
+                                Name = student.Name,
+                                Email = student.Email,
+                                Registration = student.Registration,
+                                Role = student.Role,
+                                JoinedAt = student.JoinedAt
+                            };
+                            var previousRepresentativeId = teachingClass.RepresentativeUserId;
+                            var previousRepresentativeName = teachingClass.RepresentativeName;
+                            var previousViceId = teachingClass.ViceRepresentativeUserId;
+                            var previousViceName = teachingClass.ViceRepresentativeName;
+
+                            teachingClass.StudentIds.RemoveAll(userId => string.Equals(userId, student.UserId, StringComparison.OrdinalIgnoreCase));
+                            teachingClass.StudentSummaries.RemoveAll(member => string.Equals(member.UserId, student.UserId, StringComparison.OrdinalIgnoreCase));
+                            ApplyLeadershipSelection(removedStudent, "student");
+
+                            if (!await PersistRosterMutationAsync($"{student.Name} foi removido da turma {teachingClass.ClassName}."))
+                            {
+                                if (!teachingClass.StudentIds.Contains(removedStudent.UserId, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    teachingClass.StudentIds.Add(removedStudent.UserId);
+                                }
+                                teachingClass.StudentSummaries.Add(removedStudent);
+                                teachingClass.RepresentativeUserId = previousRepresentativeId;
+                                teachingClass.RepresentativeName = previousRepresentativeName;
+                                teachingClass.ViceRepresentativeUserId = previousViceId;
+                                teachingClass.ViceRepresentativeName = previousViceName;
+                            }
+
+                            RefreshLeadershipSummary();
+                            RenderStudentCards();
+                        };
+                        actionWrap.Children.Add(removeButton);
+                        cardStack.Children.Add(actionWrap);
+                    }
+
+                    studentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(14),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(16),
+                        Child = cardStack
+                    });
+                }
+            }
+
+            rosterStack.Children.Add(leadershipSummary);
+            rosterStack.Children.Add(statusText);
+
+            if (canManage)
+            {
+                var queryBox = new TextBox { Height = 42 };
+                var resultsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+                var confirmButton = new Button
+                {
+                    Content = "Adicionar aluno",
+                    Width = 154,
+                    Height = 38,
+                    Margin = new Thickness(10, 0, 0, 0),
+                    Background = accentBrush,
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand,
+                    IsEnabled = false
+                };
+                UserInfo? selectedUser = null;
+                Button? selectedResultButton = null;
+
+                ApplyDialogInputStyle(queryBox);
+
+                var searchButton = new Button
+                {
+                    Content = "Buscar aluno",
+                    Width = 132,
+                    Height = 38,
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    FontWeight = FontWeights.SemiBold,
+                    Cursor = Cursors.Hand
+                };
+                searchButton.Click += async (_, __) =>
+                {
+                    var query = NormalizeTeamValue(queryBox.Text);
+                    if (string.IsNullOrWhiteSpace(query))
+                    {
+                        statusText.Text = "Digite nome, matrícula ou email para localizar um aluno.";
+                        statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                        return;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(_idToken))
+                    {
+                        statusText.Text = "A sessão atual não possui token para consultar alunos.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    searchButton.IsEnabled = false;
+                    confirmButton.IsEnabled = false;
+                    selectedUser = null;
+                    selectedResultButton = null;
+                    resultsHost.Children.Clear();
+                    statusText.Text = "Buscando alunos disponíveis...";
+                    statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                    try
+                    {
+                        var searchService = new UserSearchService(_idToken);
+                        var results = await searchService.SearchUsersAsync(query);
+                        var filtered = results
+                            .Where(user => !TeamPermissionService.IsFacultyRole(user.Role))
+                            .Where(user => !string.IsNullOrWhiteSpace(user.UserId))
+                            .Where(user => !teachingClass.StudentIds.Contains(user.UserId, StringComparer.OrdinalIgnoreCase))
+                            .Take(16)
+                            .ToList();
+
+                        if (filtered.Count == 0)
+                        {
+                            statusText.Text = "Nenhum aluno elegível encontrado para essa busca.";
+                            return;
+                        }
+
+                        statusText.Text = $"{filtered.Count} aluno(s) encontrado(s). Selecione um para concluir a matrícula.";
+                        foreach (var user in filtered)
+                        {
+                            var resultButton = new Button
+                            {
+                                Margin = new Thickness(0, 0, 0, 10),
+                                Padding = new Thickness(14),
+                                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                BorderThickness = new Thickness(1),
+                                HorizontalContentAlignment = HorizontalAlignment.Left,
+                                Cursor = Cursors.Hand,
+                                Tag = user,
+                                Content = new StackPanel
+                                {
+                                    Children =
+                                    {
+                                        new TextBlock
+                                        {
+                                            Text = user.Name,
+                                            FontSize = 13,
+                                            FontWeight = FontWeights.Bold,
+                                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                                        },
+                                        new TextBlock
+                                        {
+                                            Text = string.IsNullOrWhiteSpace(user.Registration)
+                                                ? (string.IsNullOrWhiteSpace(user.Email) ? "Aluno sem matrícula disponível" : user.Email)
+                                                : $"Matrícula {user.Registration}" + (string.IsNullOrWhiteSpace(user.Email) ? string.Empty : $" • {user.Email}"),
+                                            Margin = new Thickness(0, 4, 0, 0),
+                                            FontSize = 11,
+                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                            TextWrapping = TextWrapping.Wrap
+                                        }
+                                    }
+                                }
+                            };
+                            resultButton.Click += (_, __) =>
+                            {
+                                if (selectedResultButton != null)
+                                {
+                                    selectedResultButton.Background = GetThemeBrush("MutedCardBackgroundBrush");
+                                    selectedResultButton.BorderBrush = GetThemeBrush("CardBorderBrush");
+                                }
+
+                                selectedResultButton = resultButton;
+                                selectedResultButton.Background = CreateSoftAccentBrush(accentBrush, 24);
+                                selectedResultButton.BorderBrush = accentBrush;
+                                selectedUser = (UserInfo?)resultButton.Tag;
+                                confirmButton.IsEnabled = selectedUser != null;
+                                statusText.Text = selectedUser == null
+                                    ? statusText.Text
+                                    : $"Aluno selecionado: {selectedUser.Name}. Clique em Adicionar aluno para concluir.";
+                            };
+                            resultsHost.Children.Add(resultButton);
+                        }
+                    }
+                    finally
+                    {
+                        searchButton.IsEnabled = true;
+                    }
+                };
+
+                confirmButton.Click += async (_, __) =>
+                {
+                    if (selectedUser == null)
+                    {
+                        return;
+                    }
+
+                    if (teachingClass.StudentIds.Contains(selectedUser.UserId, StringComparer.OrdinalIgnoreCase))
+                    {
+                        statusText.Text = $"{selectedUser.Name} já faz parte desta turma docente.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    confirmButton.IsEnabled = false;
+                    searchButton.IsEnabled = false;
+                    statusText.Text = $"Matriculando {selectedUser.Name} na turma...";
+                    statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                    var newStudent = new TeachingClassMemberInfo
+                    {
+                        UserId = selectedUser.UserId,
+                        Name = selectedUser.Name,
+                        Email = selectedUser.Email,
+                        Registration = selectedUser.Registration,
+                        Role = "student",
+                        JoinedAt = DateTime.Now
+                    };
+
+                    teachingClass.StudentIds.Add(selectedUser.UserId);
+                    teachingClass.StudentSummaries.Add(newStudent);
+
+                    if (!await PersistRosterMutationAsync($"{selectedUser.Name} foi adicionado à turma {teachingClass.ClassName}."))
+                    {
+                        teachingClass.StudentIds.RemoveAll(userId => string.Equals(userId, selectedUser.UserId, StringComparison.OrdinalIgnoreCase));
+                        teachingClass.StudentSummaries.RemoveAll(member => string.Equals(member.UserId, selectedUser.UserId, StringComparison.OrdinalIgnoreCase));
+                        searchButton.IsEnabled = true;
+                        confirmButton.IsEnabled = true;
+                        return;
+                    }
+
+                    selectedUser = null;
+                    selectedResultButton = null;
+                    queryBox.Clear();
+                    resultsHost.Children.Clear();
+                    confirmButton.IsEnabled = false;
+                    searchButton.IsEnabled = true;
+                    RefreshLeadershipSummary();
+                    RenderStudentCards();
+                };
+
+                var expanderBody = new StackPanel();
+                expanderBody.Children.Add(CreateDialogFieldLabel("Buscar aluno"));
+                expanderBody.Children.Add(queryBox);
+                expanderBody.Children.Add(resultsHost);
+                expanderBody.Children.Add(new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Margin = new Thickness(0, 14, 0, 0),
+                    Children = { searchButton, confirmButton }
+                });
+
+                rosterStack.Children.Add(new Expander
+                {
+                    Header = "Matricular aluno agora",
+                    Margin = new Thickness(0, 16, 0, 0),
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(14, 10, 14, 10),
+                    Content = expanderBody,
+                    IsExpanded = false
+                });
+            }
+
+            rosterStack.Children.Add(studentsHost);
+
+            RefreshLeadershipSummary();
+            RenderStudentCards();
+
+            return CreateDialogSectionCard(
+                "Alunos inscritos",
+                canManage
+                    ? "Gerencie matrícula, representante, vice e remoções diretamente nesta operação docente."
+                    : "Lista atual da turma docente.",
+                accentBrush,
+                rosterStack,
+                new Thickness(0, 0, 0, 0));
+        }
+
+        private StackPanel CreateTeachingClassOperationalSidebar(TeachingClassInfo teachingClass, Brush accentBrush)
+        {
+            var sidebar = new StackPanel();
+
+            var activityPosts = teachingClass.HomePosts
+                .Where(post => string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(post => post.ActivityDueAt ?? post.PublishedAt)
+                .ToList();
+            var totalComments = teachingClass.HomePosts.Sum(post => post.Comments?.Count ?? 0);
+            var totalReactions = teachingClass.HomePosts.Sum(post => post.Reactions?.Count ?? 0);
+
+            sidebar.Children.Add(CreateDialogSectionCard(
+                "Pulso do mural",
+                "Leitura rápida do ritmo da Página Inicial que está ativa agora.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new WrapPanel
+                        {
+                            Children =
+                            {
+                                CreateStaticTeamChip($"{teachingClass.HomePosts.Count} publicação(ões)", CreateSoftAccentBrush(accentBrush, 24), accentBrush),
+                                CreateStaticTeamChip($"{activityPosts.Count} atividade(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                CreateStaticTeamChip($"{totalComments} comentário(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                CreateStaticTeamChip($"{totalReactions} reação(ões)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                            }
+                        },
+                        new TextBlock
+                        {
+                            Text = _teachingClassHomeFeedLoadInFlight && string.Equals(_teachingClassHomeFeedLoadingClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase)
+                                ? "O mural está sendo sincronizado com o Firebase neste momento."
+                                : "A lateral acompanha o que está acontecendo no feed sem roubar o foco da timeline principal.",
+                            Margin = new Thickness(0, 12, 0, 0),
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            LineHeight = 18
+                        }
+                    }
+                },
+                new Thickness(0, 0, 0, 14)));
+
+            var facultyStack = new StackPanel();
+            if (teachingClass.ProfessorNames.Count == 0)
+            {
+                facultyStack.Children.Add(new TextBlock
+                {
+                    Text = "Nenhum docente adicional registrado além da autoria desta turma.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                });
+            }
+            else
+            {
+                foreach (var professor in teachingClass.ProfessorNames.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name))
+                {
+                    facultyStack.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = new TextBlock
+                        {
+                            Text = professor,
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    });
+                }
+            }
+
+            var activityStack = new StackPanel();
+            if (activityPosts.Count == 0)
+            {
+                activityStack.Children.Add(new TextBlock
+                {
+                    Text = "Nenhuma atividade foi publicada ainda no mural desta turma.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                foreach (var activity in activityPosts.Take(4))
+                {
+                    activityStack.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = new StackPanel
+                        {
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text = string.IsNullOrWhiteSpace(activity.Title) ? "Atividade sem título" : activity.Title,
+                                    FontSize = 12,
+                                    FontWeight = FontWeights.SemiBold,
+                                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                    TextWrapping = TextWrapping.Wrap
+                                },
+                                new TextBlock
+                                {
+                                    Text = activity.ActivityDueAt.HasValue
+                                        ? $"Prazo: {activity.ActivityDueAt.Value:dd/MM/yyyy}"
+                                        : $"Publicada em {activity.PublishedAt:dd/MM HH:mm}",
+                                    Margin = new Thickness(0, 4, 0, 0),
+                                    FontSize = 10,
+                                    Foreground = GetThemeBrush("TertiaryTextBrush")
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            sidebar.Children.Add(CreateDialogSectionCard(
+                "Próximas atividades",
+                "Itens pedagógicos que já entraram na Página Inicial como posts do tipo atividade.",
+                accentBrush,
+                activityStack,
+                new Thickness(0, 0, 0, 14)));
+
+            var studentPreview = new StackPanel();
+            if (teachingClass.StudentSummaries.Count == 0)
+            {
+                studentPreview.Children.Add(new TextBlock
+                {
+                    Text = "Nenhum aluno inscrito ainda nesta turma.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                foreach (var student in teachingClass.StudentSummaries.OrderBy(item => item.Name).Take(6))
+                {
+                    studentPreview.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(10),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(12),
+                        Child = new TextBlock
+                        {
+                            Text = student.Name,
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    });
+                }
+
+                if (teachingClass.StudentSummaries.Count > 6)
+                {
+                    studentPreview.Children.Add(new TextBlock
+                    {
+                        Text = $"+ {teachingClass.StudentSummaries.Count - 6} aluno(s) adicional(is) já vinculado(s).",
+                        Margin = new Thickness(0, 4, 0, 0),
+                        FontSize = 10,
+                        Foreground = GetThemeBrush("TertiaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                }
+            }
+
+            sidebar.Children.Add(CreateDialogSectionCard(
+                "Operação docente",
+                "Resumo rápido da sala, dos responsáveis e da composição da turma.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = string.IsNullOrWhiteSpace(teachingClass.Description)
+                                ? "Sem descrição pedagógica registrada ainda."
+                                : teachingClass.Description,
+                            FontSize = 12,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            LineHeight = 20
+                        },
+                        new Border
+                        {
+                            Margin = new Thickness(0, 14, 0, 0),
+                            Child = new WrapPanel
+                            {
+                                Children =
+                                {
+                                    CreateStaticTeamChip($"Criada em {teachingClass.CreatedAt:dd/MM/yyyy}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                    CreateStaticTeamChip($"Atualizada em {teachingClass.UpdatedAt:dd/MM/yyyy}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                    CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                                }
+                            }
+                        },
+                        new TextBlock
+                        {
+                            Text = "Prévia da sala",
+                            Margin = new Thickness(0, 14, 0, 8),
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        studentPreview
+                    }
+                }));
+
+            sidebar.Children.Add(CreateDialogSectionCard(
+                "Código e responsáveis",
+                "Compartilhe o código com a sala e acompanhe quem responde por esta turma.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        new Border
+                        {
+                            Padding = new Thickness(14),
+                            Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                            BorderBrush = GetThemeBrush("CardBorderBrush"),
+                            BorderThickness = new Thickness(1),
+                            CornerRadius = new CornerRadius(16),
+                            Child = new StackPanel
+                            {
+                                Children =
+                                {
+                                    new TextBlock
+                                    {
+                                        Text = "Código de entrada",
+                                        FontSize = 11,
+                                        FontWeight = FontWeights.SemiBold,
+                                        Foreground = GetThemeBrush("SecondaryTextBrush")
+                                    },
+                                    new TextBlock
+                                    {
+                                        Text = teachingClass.JoinCode,
+                                        Margin = new Thickness(0, 8, 0, 0),
+                                        FontSize = 22,
+                                        FontWeight = FontWeights.ExtraBold,
+                                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                        FontFamily = new FontFamily("Consolas")
+                                    },
+                                    new TextBlock
+                                    {
+                                        Text = "Use este código para autoingresso dos alunos na sala docente. O trabalho de projeto continua separado nas equipes.",
+                                        Margin = new Thickness(0, 8, 0, 0),
+                                        FontSize = 11,
+                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                        TextWrapping = TextWrapping.Wrap,
+                                        LineHeight = 18
+                                    }
+                                }
+                            }
+                        },
+                        new TextBlock
+                        {
+                            Text = "Docentes responsáveis",
+                            Margin = new Thickness(0, 14, 0, 8),
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        facultyStack
+                    }
+                },
+                new Thickness(0, 14, 0, 0)));
+
+            return sidebar;
         }
 
         private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
@@ -15120,7 +21196,7 @@ namespace MeuApp
                     || teachingClass.ProfessorUserIds.Contains(GetCurrentUserId(), StringComparer.OrdinalIgnoreCase));
         }
 
-        private async void CreateTeachingClass_Click(object sender, RoutedEventArgs e)
+        private void CreateTeachingClass_Click(object sender, RoutedEventArgs e)
         {
             if (_teachingClassService == null)
             {
@@ -15128,22 +21204,7 @@ namespace MeuApp
                 return;
             }
 
-            var teachingClass = ShowCreateTeachingClassDialog();
-            if (teachingClass == null)
-            {
-                return;
-            }
-
-            var result = await _teachingClassService.SaveClassAsync(teachingClass);
-            if (!result.Success)
-            {
-                ShowStyledAlertDialog("DOCÊNCIA", "Falha ao criar turma", result.ErrorMessage ?? "Não foi possível salvar a turma docente agora.", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
-                return;
-            }
-
-            TrackTeachingClassLocally(teachingClass);
-            ProfessorDashboardStatusText.Text = $"Turma docente {teachingClass.ClassName} criada com sucesso. Código de entrada: {teachingClass.JoinCode}.";
-            ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            OpenTeachingClassComposer();
         }
 
         private TeachingClassInfo? ShowCreateTeachingClassDialog()
@@ -15271,7 +21332,7 @@ namespace MeuApp
                 return;
             }
 
-            ShowTeachingClassDetailsDialog(teachingClass);
+            OpenTeachingClassWorkspace(teachingClass);
         }
 
         private void ShowTeachingClassDetailsDialog(TeachingClassInfo teachingClass)
@@ -19897,6 +25958,11 @@ namespace MeuApp
                         ShowTeamsSection();
                         break;
                     case "Professor":
+                        if (!_teachingClassComposerOpen)
+                        {
+                            _activeTeachingClass = null;
+                            _teachingClassEditingClassId = string.Empty;
+                        }
                         ShowProfessorDashboardSection();
                         break;
                     case "Calendario":
@@ -20363,6 +26429,29 @@ namespace MeuApp
                     return null;
                 }
 
+                return TryCreateCompressedImageDataUri(source, maxSide, quality);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ProfileImage] Falha ao converter imagem em data URI: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string? TryCreateCompressedImageDataUriFromDataUri(string? dataUri, int maxSide, int quality)
+        {
+            if (TryCreateImageSourceFromDataUri(dataUri) is not BitmapSource source)
+            {
+                return null;
+            }
+
+            return TryCreateCompressedImageDataUri(source, maxSide, quality);
+        }
+
+        private string? TryCreateCompressedImageDataUri(BitmapSource source, int maxSide, int quality)
+        {
+            try
+            {
                 BitmapSource normalizedSource = source;
                 var largestSide = Math.Max(source.PixelWidth, source.PixelHeight);
                 if (largestSide > maxSide)
@@ -20424,6 +26513,41 @@ namespace MeuApp
             {
                 DebugHelper.WriteLine($"[ProfileImage] Falha ao abrir data URI do perfil: {ex.Message}");
                 return null;
+            }
+        }
+
+        private (bool Success, byte[] Bytes, string MimeType) TryExtractDataUriPayload(string? dataUri)
+        {
+            if (string.IsNullOrWhiteSpace(dataUri))
+            {
+                return (false, Array.Empty<byte>(), string.Empty);
+            }
+
+            try
+            {
+                var normalized = dataUri.Trim();
+                var commaIndex = normalized.IndexOf(',');
+                if (commaIndex < 0 || commaIndex >= normalized.Length - 1)
+                {
+                    return (false, Array.Empty<byte>(), string.Empty);
+                }
+
+                var metadata = normalized.Substring(0, commaIndex);
+                var mimeType = metadata.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                    ? metadata[5..].Split(';', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "application/octet-stream"
+                    : "application/octet-stream";
+                var bytes = Convert.FromBase64String(normalized[(commaIndex + 1)..]);
+                if (bytes.Length == 0)
+                {
+                    return (false, Array.Empty<byte>(), string.Empty);
+                }
+
+                return (true, bytes, mimeType);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ProfileImage] Falha ao extrair payload do data URI: {ex.Message}");
+                return (false, Array.Empty<byte>(), string.Empty);
             }
         }
 
@@ -21936,14 +28060,29 @@ namespace MeuApp
             _teachingClassLoadInFlight = true;
             try
             {
+                var localFeedState = _teachingClasses
+                    .Where(item => item != null && !string.IsNullOrWhiteSpace(item.ClassId))
+                    .ToDictionary(item => item.ClassId, item => item, StringComparer.OrdinalIgnoreCase);
                 var classes = await _teachingClassService.LoadClassesAsync();
                 _teachingClasses.Clear();
                 _teachingClasses.AddRange(classes
-                    .Where(item => item != null)
+                    .OfType<TeachingClassInfo>()
+                    .Select(item =>
+                    {
+                        if (localFeedState.TryGetValue(item.ClassId, out var existing))
+                        {
+                            item.HomePosts = existing.HomePosts ?? new List<TeachingClassHomePostInfo>();
+                            item.HomeFeedReady = existing.HomeFeedReady;
+                            item.HomeFeedLoadedAt = existing.HomeFeedLoadedAt;
+                        }
+
+                        return item;
+                    })
                     .OrderBy(item => item.Course)
                     .ThenBy(item => item.ClassName));
 
                 _lastTeachingClassLoadAt = DateTime.UtcNow;
+                SynchronizeTeachingClassWorkspaceState();
                 UpdateTeamsViewState();
                 RenderTeamsList();
                 RenderProfessorDashboard();
@@ -21986,6 +28125,12 @@ namespace MeuApp
                     : string.Compare(left.ClassName, right.ClassName, StringComparison.OrdinalIgnoreCase);
             });
 
+            if (_activeTeachingClass != null && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase))
+            {
+                _activeTeachingClass = teachingClass;
+            }
+
+            SynchronizeTeachingClassWorkspaceState();
             UpdateTeamsViewState();
             RenderTeamsList();
             RenderProfessorDashboard();
