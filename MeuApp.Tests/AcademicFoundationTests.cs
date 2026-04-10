@@ -254,4 +254,40 @@ public class AppConfigTests
         StringAssert.Contains(documentUrl, AppConfig.FirebaseProjectId);
         StringAssert.Contains(queryUrl, "/documents:runQuery");
     }
+
+    [TestMethod]
+    public void FirebaseStorageHelpers_BuildExpectedUrls()
+    {
+        var uploadUrl = AppConfig.BuildFirebaseStorageUploadUrl("team-assets/team-01/team/user-01/asset-01/v0001/briefing.pdf");
+        var downloadUrl = AppConfig.BuildFirebaseStorageDownloadUrl("team-assets/team-01/team/user-01/asset-01/v0001/briefing.pdf");
+
+        StringAssert.Contains(uploadUrl, AppConfig.FirebaseStorageBucket);
+        StringAssert.Contains(uploadUrl, "uploadType=media");
+        StringAssert.Contains(downloadUrl, "alt=media");
+    }
+}
+
+[TestClass]
+public class TeachingClassServiceTests
+{
+    [TestMethod]
+    public void NormalizeJoinCode_StripsSpacesAndUppercases()
+    {
+        Assert.AreEqual("AB12CD34", TeachingClassService.NormalizeJoinCode(" ab12 cd34 "));
+    }
+
+    [TestMethod]
+    public void NormalizeClassCode_RemovesPathSeparators()
+    {
+        Assert.AreEqual("power-b.i-(t-109-2026)", TeachingClassService.NormalizeClassCode(" Power B.I (T-109/2026) "));
+    }
+
+    [TestMethod]
+    public void GenerateJoinCode_ReturnsEightCharacterCode()
+    {
+        var joinCode = TeachingClassService.GenerateJoinCode();
+
+        Assert.AreEqual(8, joinCode.Length);
+        Assert.IsTrue(joinCode.All(character => char.IsUpper(character) || char.IsDigit(character)));
+    }
 }

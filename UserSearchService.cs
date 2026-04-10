@@ -134,6 +134,11 @@ namespace MeuApp
     {
         private readonly string _idToken;
         private static readonly HttpClient httpClient = new HttpClient();
+        private static readonly object UserDirectoryCacheLock = new object();
+        private static readonly TimeSpan UserDirectoryCacheTtl = TimeSpan.FromMinutes(3);
+        private static DateTime _cachedUserDirectoryAt = DateTime.MinValue;
+        private static List<UserInfo> _cachedUserDirectory = new List<UserInfo>();
+        private static Task<List<UserInfo>>? _cachedUserDirectoryTask;
 
         public UserSearchService(string idToken)
         {
@@ -186,103 +191,24 @@ namespace MeuApp
         private async Task<List<UserInfo>> SearchAllUsersAsync(string query)
         {
             var results = new List<UserInfo>();
-            var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
-
-            Debug.WriteLine($"[SearchAllUsersAsync] Iniciando GET em: {endpoint}");
-
             try
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-                
-                Debug.WriteLine("[SearchAllUsersAsync] Enviando requisição com header Authorization...");
+                var directory = await LoadUserDirectoryAsync();
+                results = directory
+                    .Where(user =>
+                        user.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.Email.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.Registration.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.Course.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.ProfessionalTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.AcademicDepartment.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        user.AcademicFocus.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        TeamPermissionService.GetRoleLabel(user.Role).Contains(query, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(user => user.Name)
+                    .Take(40)
+                    .ToList();
 
-                var response = await httpClient.SendAsync(request);
-                
-                Debug.WriteLine($"[SearchAllUsersAsync] Status HTTP: {response.StatusCode}");
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    Debug.WriteLine($"[SearchAllUsersAsync] ERRO: Resposta sem sucesso ({response.StatusCode})");
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    Debug.WriteLine($"[SearchAllUsersAsync] Erro detalhado: {errorContent}");
-                    return results;
-                }
-
-                var content = await response.Content.ReadAsStringAsync();
-                Debug.WriteLine($"[SearchAllUsersAsync] Tamanho da resposta: {content.Length} caracteres");
-
-                if (string.IsNullOrEmpty(content))
-                {
-                    Debug.WriteLine("[SearchAllUsersAsync] Resposta vazia do Firestore");
-                    return results;
-                }
-
-                Debug.WriteLine($"[SearchAllUsersAsync] Primeiros 500 caracteres da resposta:\n{content.Substring(0, Math.Min(500, content.Length))}");
-
-                using (var doc = JsonDocument.Parse(content))
-                {
-                    var root = doc.RootElement;
-                    Debug.WriteLine($"[SearchAllUsersAsync] Tipo do elemento raiz: {root.ValueKind}");
-
-                    if (root.TryGetProperty("documents", out var documents))
-                    {
-                        Debug.WriteLine($"[SearchAllUsersAsync] Encontrada propriedade 'documents'");
-                        
-                        var documentCount = 0;
-                        foreach (var userDoc in documents.EnumerateArray())
-                        {
-                            documentCount++;
-                            try
-                            {
-                                var user = ExtractUserInfo(userDoc, documentCount);
-                                
-                                if (user != null && !string.IsNullOrEmpty(user.UserId))
-                                {
-                                    // Log do usuário extraído
-                                    Debug.WriteLine($"[SearchAllUsersAsync] Usuário #{documentCount}: {user.Name} ({user.Registration}) - {user.Email}");
-
-                                    // Filtrar por query (nome, matrícula ou email)
-                                    bool matches = user.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.Email.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.Registration.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.Course.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.ProfessionalTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.AcademicDepartment.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   user.AcademicFocus.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                                                   TeamPermissionService.GetRoleLabel(user.Role).Contains(query, StringComparison.OrdinalIgnoreCase);
-
-                                    if (matches)
-                                    {
-                                        Debug.WriteLine($"[SearchAllUsersAsync] ✓ MATCH! Adicionando: {user.Name}");
-                                        results.Add(user);
-                                    }
-                                    else
-                                    {
-                                        Debug.WriteLine($"[SearchAllUsersAsync] ✗ Sem match. Nome: '{user.Name.ToLower()}' | Email: '{user.Email.ToLower()}' | Reg: '{user.Registration.ToLower()}' | Query: '{query}'");
-                                    }
-                                }
-                                else
-                                {
-                                    Debug.WriteLine($"[SearchAllUsersAsync] Usuário #{documentCount}: Inválido ou sem ID");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[SearchAllUsersAsync] Erro ao processar usuário #{documentCount}: {ex.Message}");
-                            }
-                        }
-
-                        Debug.WriteLine($"[SearchAllUsersAsync] Total de documentos processados: {documentCount}");
-                    }
-                    else
-                    {
-                        Debug.WriteLine("[SearchAllUsersAsync] ERRO: Resposta não contém propriedade 'documents'");
-                        Debug.WriteLine($"[SearchAllUsersAsync] Propriedades disponíveis: {string.Join(", ", root.EnumerateObject().Select(p => p.Name))}");
-                    }
-                }
-
-                Debug.WriteLine($"[SearchAllUsersAsync] Retornando {results.Count} resultados");
+                Debug.WriteLine($"[SearchAllUsersAsync] Retornando {results.Count} resultados filtrados em cache local.");
                 return results;
             }
             catch (Exception ex)
@@ -290,6 +216,90 @@ namespace MeuApp
                 Debug.WriteLine($"[SearchAllUsersAsync] Exceção: {ex.GetType().Name}: {ex.Message}");
                 Debug.WriteLine($"[SearchAllUsersAsync] Stack: {ex.StackTrace}");
                 return results;
+            }
+        }
+
+        private Task<List<UserInfo>> LoadUserDirectoryAsync(bool forceRefresh = false)
+        {
+            lock (UserDirectoryCacheLock)
+            {
+                if (!forceRefresh &&
+                    _cachedUserDirectory.Count > 0 &&
+                    DateTime.UtcNow - _cachedUserDirectoryAt < UserDirectoryCacheTtl)
+                {
+                    Debug.WriteLine("[UserDirectoryCache] Reutilizando diretório de usuários em cache.");
+                    return Task.FromResult(_cachedUserDirectory.ToList());
+                }
+
+                if (!forceRefresh && _cachedUserDirectoryTask != null)
+                {
+                    Debug.WriteLine("[UserDirectoryCache] Requisição em andamento; reutilizando task atual.");
+                    return _cachedUserDirectoryTask;
+                }
+
+                _cachedUserDirectoryTask = FetchUserDirectoryAsync();
+                return _cachedUserDirectoryTask;
+            }
+        }
+
+        private async Task<List<UserInfo>> FetchUserDirectoryAsync()
+        {
+            var endpoint = AppConfig.BuildFirestoreDocumentUrl("users");
+            var users = new List<UserInfo>();
+
+            Debug.WriteLine($"[UserDirectoryCache] Atualizando diretório de usuários via {endpoint}");
+
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+                var response = await httpClient.SendAsync(request);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Debug.WriteLine($"[UserDirectoryCache] HTTP {(int)response.StatusCode}: {content}");
+                    return users;
+                }
+
+                using var doc = JsonDocument.Parse(content);
+                if (!doc.RootElement.TryGetProperty("documents", out var documents))
+                {
+                    return users;
+                }
+
+                var documentIndex = 0;
+                foreach (var userDoc in documents.EnumerateArray())
+                {
+                    documentIndex++;
+                    var user = ExtractUserInfo(userDoc, documentIndex);
+                    if (user != null && !string.IsNullOrWhiteSpace(user.UserId))
+                    {
+                        users.Add(user);
+                    }
+                }
+
+                lock (UserDirectoryCacheLock)
+                {
+                    _cachedUserDirectory = users
+                        .GroupBy(user => user.UserId, StringComparer.OrdinalIgnoreCase)
+                        .Select(group => group.First())
+                        .OrderBy(user => user.Name)
+                        .ToList();
+                    _cachedUserDirectoryAt = DateTime.UtcNow;
+                    _cachedUserDirectoryTask = null;
+                    return _cachedUserDirectory.ToList();
+                }
+            }
+            catch
+            {
+                lock (UserDirectoryCacheLock)
+                {
+                    _cachedUserDirectoryTask = null;
+                }
+
+                throw;
             }
         }
 

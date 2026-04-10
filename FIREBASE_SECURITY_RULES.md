@@ -9,12 +9,14 @@ O modelo atual protege três áreas em conjunto:
 - `teams/{teamId}`: documento principal da equipe com membros, metadados do workspace, colunas do board, assets e índices derivados por papel.
 - `teams/{teamId}/taskCards/{cardId}`: cards do board em subcoleção com autorização fina para estrutura versus colaboração.
 - `teams/{teamId}/milestones/{milestoneId}`: entregas/marcos em subcoleção com autorização fina para revisão versus colaboração.
+- `teachingClasses/{classId}`: turma docente separada da equipe de projeto, com código de entrada, docentes responsáveis e alunos inscritos.
+- `userClassEnrollments/{userId}_{classId}`: referência rápida para carregar turmas docentes do usuário.
 - `userTeams/{userId}_{teamId}`: referência rápida para carregar as equipes visíveis ao usuário.
-- `teamAssetFiles/{teamId}_{assetId}_v{n}`: conteúdo remoto versionado dos arquivos sincronizados pelo hub e pelos anexos de cards/milestones.
+- `team-assets/{teamId}/{permissionScope}/{ownerUserId}/{assetId}/{versionId}/{fileName}` no Firebase Storage: conteúdo remoto versionado dos arquivos sincronizados pelo hub e pelos anexos de cards/milestones.
 
 ### **Configuração Recomendada para Desenvolvimento**
 
-O arquivo fonte das regras agora está em `firestore.rules` na raiz do projeto. Publique exatamente esse conteúdo no Firestore para manter as coleções `teams`, `userTeams` e `teamAssetFiles` alinhadas com o código atual.
+Os arquivos fonte das regras agora estão em `Firebase/firestore.rules` e `Firebase/storage.rules`. Publique exatamente esses conteúdos para manter as coleções `teams`, `teachingClasses`, `userTeams`, `userClassEnrollments` e o bucket do Storage alinhados com o código atual.
 
 ```javascript
 // Use o conteúdo completo de firestore.rules.
@@ -24,7 +26,8 @@ O arquivo fonte das regras agora está em `firestore.rules` na raiz do projeto. 
 // - updates de aluno no documento principal ficam limitados à superfície colaborativa remanescente (assets/notificações/chat);
 // - cards do board e milestones agora ficam em subcoleções próprias, com rules separando colaboração de mudança estrutural;
 // - userTeams aceita escrita de quem pode gerir membros na equipe;
-// - o conteúdo remoto dos arquivos fica em teamAssetFiles e é protegido por papel + permissionScope.
+// - teachingClasses e userClassEnrollments isolam o espaço docente da equipe de projeto;
+// - o conteúdo remoto dos arquivos agora fica no Firebase Storage, protegido por papel + permissionScope via path.
 ```
 
 ### Ponto crítico desta implementação

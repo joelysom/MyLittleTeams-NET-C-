@@ -1,0 +1,127 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function requesterProfile() {
+      return signedIn()
+        ? firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data
+        : null;
+    }
+
+    function requesterRole() {
+      return requesterProfile() == null
+        ? ''
+        : requesterProfile().role;
+    }
+
+    function requesterIsProfessorLike() {
+      let role = requesterRole();
+      return role == 'professor'
+        || role == 'teacher'
+        || role == 'advisor'
+        || role == 'orientador';
+    }
+
+    function requesterIsCoordinatorLike() {
+      let role = requesterRole();
+      return role == 'coordinator'
+        || role == 'course-coordinator'
+        || role == 'academic-coordinator'
+        || role == 'coordenador';
+    }
+
+    function requesterHasProfessorDiscovery() {
+      return requesterIsProfessorLike() || requesterIsCoordinatorLike();
+    }
+
+    function validPermissionScope(scope) {
+      return scope == 'team'
+        || scope == 'course'
+        || scope == 'leadership'
+        || scope == 'private';
+    }
+
+    function teamDocument(teamId) {
+      return firestore.get(/databases/(default)/documents/teams/$(teamId));
+    }
+
+    function teamExists(teamId) {
+      return teamDocument(teamId).data != null;
+    }
+
+    function isTeamLeader(data) {
+      return signedIn()
+        && (data.leaderIds is list && request.auth.uid in data.leaderIds);
+    }
+
+    function isTeamProfessor(data) {
+      return signedIn()
+        && (data.professorIds is list && request.auth.uid in data.professorIds);
+    }
+
+    function isTeamCoordinator(data) {
+      return signedIn()
+        && (data.coordinatorIds is list && request.auth.uid in data.coordinatorIds);
+    }
+
+    function teamVisible(data) {
+      return signedIn() && (
+        data.createdBy == request.auth.uid ||
+        (data.memberIds is list && request.auth.uid in data.memberIds) ||
+        isTeamLeader(data) ||
+        isTeamProfessor(data) ||
+        isTeamCoordinator(data) ||
+        requesterHasProfessorDiscovery()
+      );
+    }
+
+    function canViewScopedTeamAsset(data, permissionScope, ownerUserId) {
+      return teamVisible(data)
+        && (
+          !validPermissionScope(permissionScope) ||
+          permissionScope == 'team' ||
+          permissionScope == 'course' ||
+          isTeamLeader(data) ||
+          isTeamProfessor(data) ||
+          isTeamCoordinator(data) ||
+          (permissionScope == 'private' && ownerUserId == request.auth.uid)
+        );
+    }
+
+    function canWriteTeamAsset(data, ownerUserId, permissionScope) {
+      return signedIn()
+        && request.auth.uid == ownerUserId
+        && validPermissionScope(permissionScope)
+        && teamVisible(data);
+    }
+
+    function canDeleteTeamAsset(data, ownerUserId) {
+      return signedIn()
+        && (
+          ownerUserId == request.auth.uid ||
+          data.createdBy == request.auth.uid ||
+          isTeamProfessor(data) ||
+          isTeamCoordinator(data)
+        );
+    }
+
+    match /team-assets/{teamId}/{permissionScope}/{ownerUserId}/{assetId}/{versionId}/{fileName} {
+      allow read: if teamExists(teamId)
+        && canViewScopedTeamAsset(teamDocument(teamId).data, permissionScope, ownerUserId);
+
+      allow write: if teamExists(teamId)
+        && canWriteTeamAsset(teamDocument(teamId).data, ownerUserId, permissionScope);
+
+      allow delete: if teamExists(teamId)
+        && canDeleteTeamAsset(teamDocument(teamId).data, ownerUserId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

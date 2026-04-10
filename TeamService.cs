@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -1035,7 +1036,7 @@ namespace MeuApp
                         mimeType = new { stringValue = asset.MimeType ?? "" },
                         folderPath = new { stringValue = asset.FolderPath ?? "" },
                         permissionScope = new { stringValue = asset.PermissionScope ?? "team" },
-                        storageKind = new { stringValue = asset.StorageKind ?? "firestore-preview" },
+                        storageKind = new { stringValue = asset.StorageKind ?? "firebase-storage" },
                         storageReference = new { stringValue = asset.StorageReference ?? "" },
                         sizeBytes = new { integerValue = asset.SizeBytes.ToString() },
                         version = new { integerValue = asset.Version.ToString() },
@@ -1233,7 +1234,7 @@ namespace MeuApp
                             fileName = new { stringValue = version.FileName ?? "" },
                             mimeType = new { stringValue = version.MimeType ?? "" },
                             permissionScope = new { stringValue = version.PermissionScope ?? "team" },
-                            storageKind = new { stringValue = version.StorageKind ?? "firestore-document" },
+                            storageKind = new { stringValue = version.StorageKind ?? "firebase-storage" },
                             storageReference = new { stringValue = version.StorageReference ?? "" },
                             sizeBytes = new { integerValue = version.SizeBytes.ToString() },
                             changedAt = new { timestampValue = ToFirestoreTimestamp(version.ChangedAt == default ? DateTime.UtcNow : version.ChangedAt) }
@@ -1533,40 +1534,17 @@ namespace MeuApp
                 var normalizedTeamId = NormalizeTeamCode(teamId);
                 var safeAssetId = string.IsNullOrWhiteSpace(assetId) ? Guid.NewGuid().ToString("N") : assetId.Trim();
                 var versionNumber = Math.Max(1, version.VersionNumber);
-                var documentId = $"{normalizedTeamId}_{safeAssetId}_v{versionNumber}";
-                var documentPath = $"teamAssetFiles/{documentId}";
-                var payload = new
-                {
-                    fields = new
-                    {
-                        teamId = new { stringValue = normalizedTeamId },
-                        assetId = new { stringValue = safeAssetId },
-                        versionNumber = new { integerValue = versionNumber.ToString() },
-                        fileName = new { stringValue = version.FileName ?? string.Empty },
-                        mimeType = new { stringValue = version.MimeType ?? string.Empty },
-                        permissionScope = new { stringValue = TeamPermissionService.NormalizePermissionScope(version.PermissionScope) },
-                        storageKind = new { stringValue = string.IsNullOrWhiteSpace(version.StorageKind) ? "firestore-document" : version.StorageKind },
-                        sizeBytes = new { integerValue = fileBytes.Length.ToString() },
-                        uploadedByUserId = new { stringValue = version.ChangedByUserId ?? string.Empty },
-                        uploadedAt = new { timestampValue = ToFirestoreTimestamp(version.ChangedAt == default ? DateTime.UtcNow : version.ChangedAt) },
-                        contentBase64 = new { stringValue = Convert.ToBase64String(fileBytes) }
-                    }
-                };
+                var permissionScope = TeamPermissionService.NormalizePermissionScope(version.PermissionScope);
+                var ownerUserId = string.IsNullOrWhiteSpace(version.ChangedByUserId) ? _currentUserId : version.ChangedByUserId;
+                var objectPath = BuildTeamAssetStorageObjectPath(normalizedTeamId, permissionScope, ownerUserId, safeAssetId, versionNumber, version.FileName);
 
-                var request = new HttpRequestMessage(new HttpMethod("PATCH"), AppConfig.BuildFirestoreDocumentUrl(documentPath));
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-                request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-
-                var response = await httpClient.SendAsync(request);
-                var responseBody = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode)
+                var uploadResult = await UploadTeamAssetToStorageAsync(objectPath, version.MimeType, fileBytes);
+                if (!uploadResult.Success)
                 {
-                    var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
-                    DebugHelper.WriteLine($"[TeamService.SaveTeamAssetContent] Erro: {errorMessage}");
-                    return TeamAssetStorageResult.Fail(errorMessage);
+                    return uploadResult;
                 }
 
-                return TeamAssetStorageResult.Ok(documentPath, documentId);
+                return TeamAssetStorageResult.Ok(objectPath, objectPath);
             }
             catch (Exception ex)
             {
@@ -1579,51 +1557,9 @@ namespace MeuApp
         {
             try
             {
-                var documentPath = NormalizeFirestoreDocumentPath(storageReference);
-                if (string.IsNullOrWhiteSpace(documentPath))
-                {
-                    return TeamAssetDownloadResult.Fail("Referência remota do arquivo está vazia.");
-                }
-
-                var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl(documentPath));
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-
-                var response = await httpClient.SendAsync(request);
-                var responseBody = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode)
-                {
-                    var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
-                    DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContent] Erro: {errorMessage}");
-                    return TeamAssetDownloadResult.Fail(errorMessage);
-                }
-
-                using var doc = JsonDocument.Parse(responseBody);
-                if (!doc.RootElement.TryGetProperty("fields", out var fields))
-                {
-                    return TeamAssetDownloadResult.Fail("Documento remoto do arquivo retornou sem campos legíveis.");
-                }
-
-                var contentBase64 = GetString(fields, "contentBase64");
-                if (string.IsNullOrWhiteSpace(contentBase64))
-                {
-                    return TeamAssetDownloadResult.Fail("Conteúdo remoto do arquivo está vazio.");
-                }
-
-                return TeamAssetDownloadResult.Ok(new TeamAssetContentPayload
-                {
-                    TeamId = GetString(fields, "teamId"),
-                    AssetId = GetString(fields, "assetId"),
-                    FileName = GetString(fields, "fileName"),
-                    MimeType = GetString(fields, "mimeType"),
-                    PermissionScope = GetString(fields, "permissionScope"),
-                    StorageKind = GetString(fields, "storageKind"),
-                    VersionNumber = Math.Max(1, GetInt(fields, "versionNumber")),
-                    SizeBytes = GetLong(fields, "sizeBytes"),
-                    UploadedByUserId = GetString(fields, "uploadedByUserId"),
-                    UploadedAt = GetTimestamp(fields, "uploadedAt"),
-                    Bytes = Convert.FromBase64String(contentBase64),
-                    StorageReference = documentPath
-                });
+                return IsLegacyFirestoreAssetReference(storageReference)
+                    ? await LoadTeamAssetContentFromFirestoreAsync(storageReference)
+                    : await LoadTeamAssetContentFromStorageAsync(storageReference);
             }
             catch (Exception ex)
             {
@@ -1636,25 +1572,9 @@ namespace MeuApp
         {
             try
             {
-                var documentPath = NormalizeFirestoreDocumentPath(storageReference);
-                if (string.IsNullOrWhiteSpace(documentPath))
-                {
-                    return TeamOperationResult.Ok();
-                }
-
-                var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirestoreDocumentUrl(documentPath));
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
-
-                var response = await httpClient.SendAsync(request);
-                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    return TeamOperationResult.Ok();
-                }
-
-                var responseBody = await response.Content.ReadAsStringAsync();
-                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
-                DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContent] Erro: {errorMessage}");
-                return TeamOperationResult.Fail(errorMessage);
+                return IsLegacyFirestoreAssetReference(storageReference)
+                    ? await DeleteTeamAssetContentFromFirestoreAsync(storageReference)
+                    : await DeleteTeamAssetContentFromStorageAsync(storageReference);
             }
             catch (Exception ex)
             {
@@ -1705,6 +1625,226 @@ namespace MeuApp
             }
 
             return normalized.Trim('/');
+        }
+
+        private static bool IsLegacyFirestoreAssetReference(string? storageReference)
+        {
+            var normalized = NormalizeFirestoreDocumentPath(storageReference);
+            return normalized.StartsWith("teamAssetFiles/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string BuildTeamAssetStorageObjectPath(string teamId, string permissionScope, string ownerUserId, string assetId, int versionNumber, string? fileName)
+        {
+            var normalizedTeamId = SanitizeStorageSegment(teamId);
+            var normalizedScope = TeamPermissionService.NormalizePermissionScope(permissionScope);
+            var normalizedOwner = SanitizeStorageSegment(string.IsNullOrWhiteSpace(ownerUserId) ? _currentUserId : ownerUserId);
+            var normalizedAssetId = SanitizeStorageSegment(assetId);
+            var normalizedFileName = SanitizeStorageFileName(fileName);
+            return $"team-assets/{normalizedTeamId}/{normalizedScope}/{normalizedOwner}/{normalizedAssetId}/v{versionNumber:D4}/{normalizedFileName}";
+        }
+
+        private static string SanitizeStorageSegment(string? value)
+        {
+            var normalized = (value ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return "unknown";
+            }
+
+            var builder = new StringBuilder(normalized.Length);
+            foreach (var character in normalized)
+            {
+                if (char.IsLetterOrDigit(character) || character == '-' || character == '_')
+                {
+                    builder.Append(char.ToLowerInvariant(character));
+                }
+                else
+                {
+                    builder.Append('-');
+                }
+            }
+
+            return builder.ToString().Trim('-');
+        }
+
+        private static string SanitizeStorageFileName(string? fileName)
+        {
+            var candidate = string.IsNullOrWhiteSpace(fileName) ? "arquivo.bin" : fileName.Trim();
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var builder = new StringBuilder(candidate.Length);
+            foreach (var character in candidate)
+            {
+                builder.Append(Array.IndexOf(invalidChars, character) >= 0 || character == '/' || character == '\\'
+                    ? '-'
+                    : character);
+            }
+
+            var sanitized = builder.ToString().Replace(' ', '-');
+            return string.IsNullOrWhiteSpace(sanitized) ? "arquivo.bin" : sanitized;
+        }
+
+        private async Task<TeamAssetStorageResult> UploadTeamAssetToStorageAsync(string objectPath, string? mimeType, byte[] fileBytes)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, AppConfig.BuildFirebaseStorageUploadUrl(objectPath));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+            request.Content = new ByteArrayContent(fileBytes);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(mimeType) ? "application/octet-stream" : mimeType);
+
+            var response = await httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                DebugHelper.WriteLine($"[TeamService.UploadTeamAssetToStorage] Erro: {errorMessage}");
+                return TeamAssetStorageResult.Fail(errorMessage);
+            }
+
+            return TeamAssetStorageResult.Ok(objectPath, objectPath);
+        }
+
+        private async Task<TeamAssetDownloadResult> LoadTeamAssetContentFromStorageAsync(string storageReference)
+        {
+            var normalizedReference = (storageReference ?? string.Empty).Trim().Trim('/');
+            if (string.IsNullOrWhiteSpace(normalizedReference))
+            {
+                return TeamAssetDownloadResult.Fail("Referência remota do arquivo está vazia.");
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirebaseStorageDownloadUrl(normalizedReference));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var responseBody = await response.Content.ReadAsStringAsync();
+                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContentFromStorage] Erro: {errorMessage}");
+                return TeamAssetDownloadResult.Fail(errorMessage);
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            var segments = normalizedReference.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var versionSegment = segments.Length >= 2 ? segments[^2] : "v0001";
+            var fileName = segments.Length >= 1 ? segments[^1] : "arquivo.bin";
+            var versionNumber = versionSegment.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(versionSegment.Substring(1), out var parsedVersion)
+                    ? parsedVersion
+                    : 1;
+            var teamId = segments.Length >= 6 ? segments[1] : string.Empty;
+            var permissionScope = segments.Length >= 6 ? segments[2] : "team";
+            var ownerUserId = segments.Length >= 6 ? segments[3] : string.Empty;
+            var assetId = segments.Length >= 6 ? segments[4] : string.Empty;
+
+            return TeamAssetDownloadResult.Ok(new TeamAssetContentPayload
+            {
+                TeamId = teamId,
+                AssetId = assetId,
+                FileName = fileName,
+                MimeType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream",
+                PermissionScope = permissionScope,
+                StorageKind = "firebase-storage",
+                StorageReference = normalizedReference,
+                VersionNumber = Math.Max(1, versionNumber),
+                SizeBytes = bytes.LongLength,
+                UploadedByUserId = ownerUserId,
+                UploadedAt = DateTime.Now,
+                Bytes = bytes
+            });
+        }
+
+        private async Task<TeamAssetDownloadResult> LoadTeamAssetContentFromFirestoreAsync(string storageReference)
+        {
+            var documentPath = NormalizeFirestoreDocumentPath(storageReference);
+            if (string.IsNullOrWhiteSpace(documentPath))
+            {
+                return TeamAssetDownloadResult.Fail("Referência remota do arquivo está vazia.");
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl(documentPath));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+                DebugHelper.WriteLine($"[TeamService.LoadTeamAssetContentFromFirestore] Erro: {errorMessage}");
+                return TeamAssetDownloadResult.Fail(errorMessage);
+            }
+
+            using var doc = JsonDocument.Parse(responseBody);
+            if (!doc.RootElement.TryGetProperty("fields", out var fields))
+            {
+                return TeamAssetDownloadResult.Fail("Documento remoto do arquivo retornou sem campos legíveis.");
+            }
+
+            var contentBase64 = GetString(fields, "contentBase64");
+            if (string.IsNullOrWhiteSpace(contentBase64))
+            {
+                return TeamAssetDownloadResult.Fail("Conteúdo remoto do arquivo está vazio.");
+            }
+
+            return TeamAssetDownloadResult.Ok(new TeamAssetContentPayload
+            {
+                TeamId = GetString(fields, "teamId"),
+                AssetId = GetString(fields, "assetId"),
+                FileName = GetString(fields, "fileName"),
+                MimeType = GetString(fields, "mimeType"),
+                PermissionScope = GetString(fields, "permissionScope"),
+                StorageKind = GetString(fields, "storageKind"),
+                VersionNumber = Math.Max(1, GetInt(fields, "versionNumber")),
+                SizeBytes = GetLong(fields, "sizeBytes"),
+                UploadedByUserId = GetString(fields, "uploadedByUserId"),
+                UploadedAt = GetTimestamp(fields, "uploadedAt"),
+                Bytes = Convert.FromBase64String(contentBase64),
+                StorageReference = documentPath
+            });
+        }
+
+        private async Task<TeamOperationResult> DeleteTeamAssetContentFromStorageAsync(string storageReference)
+        {
+            var normalizedReference = (storageReference ?? string.Empty).Trim().Trim('/');
+            if (string.IsNullOrWhiteSpace(normalizedReference))
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirebaseStorageMetadataUrl(normalizedReference));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+            DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContentFromStorage] Erro: {errorMessage}");
+            return TeamOperationResult.Fail(errorMessage);
+        }
+
+        private async Task<TeamOperationResult> DeleteTeamAssetContentFromFirestoreAsync(string storageReference)
+        {
+            var documentPath = NormalizeFirestoreDocumentPath(storageReference);
+            if (string.IsNullOrWhiteSpace(documentPath))
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Delete, AppConfig.BuildFirestoreDocumentUrl(documentPath));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return TeamOperationResult.Ok();
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync();
+            var errorMessage = $"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}";
+            DebugHelper.WriteLine($"[TeamService.DeleteTeamAssetContentFromFirestore] Erro: {errorMessage}");
+            return TeamOperationResult.Fail(errorMessage);
         }
 
         private static bool TeamMatchesQuery(TeamWorkspaceInfo team, string query)
@@ -2818,7 +2958,7 @@ namespace MeuApp
         public string FileName { get; set; } = string.Empty;
         public string MimeType { get; set; } = string.Empty;
         public string PermissionScope { get; set; } = "team";
-        public string StorageKind { get; set; } = "firestore-document";
+        public string StorageKind { get; set; } = "firebase-storage";
         public string StorageReference { get; set; } = string.Empty;
         public int VersionNumber { get; set; } = 1;
         public long SizeBytes { get; set; }

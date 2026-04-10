@@ -76,7 +76,7 @@ namespace MeuApp
         public string MimeType { get; set; } = string.Empty;
         public string FolderPath { get; set; } = string.Empty;
         public string PermissionScope { get; set; } = "team";
-        public string StorageKind { get; set; } = "firestore-preview";
+        public string StorageKind { get; set; } = "firebase-storage";
         public string StorageReference { get; set; } = string.Empty;
         public long SizeBytes { get; set; }
         public int Version { get; set; } = 1;
@@ -215,9 +215,39 @@ namespace MeuApp
         public string FileName { get; set; } = string.Empty;
         public string MimeType { get; set; } = string.Empty;
         public string PermissionScope { get; set; } = "team";
-        public string StorageKind { get; set; } = "firestore-document";
+        public string StorageKind { get; set; } = "firebase-storage";
         public string StorageReference { get; set; } = string.Empty;
         public long SizeBytes { get; set; }
         public DateTime ChangedAt { get; set; } = DateTime.Now;
+    }
+
+    /// <summary>
+    /// Turma docente separada das equipes de projeto integrador.
+    /// </summary>
+    public class TeachingClassInfo
+    {
+        public string ClassId { get; set; } = string.Empty;
+        public string ClassName { get; set; } = string.Empty;
+        public string Course { get; set; } = string.Empty;
+        public string AcademicTerm { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string JoinCode { get; set; } = string.Empty;
+        public string CreatedBy { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public DateTime UpdatedAt { get; set; } = DateTime.Now;
+        public List<string> ProfessorUserIds { get; set; } = new List<string>();
+        public List<string> ProfessorNames { get; set; } = new List<string>();
+        public List<string> StudentIds { get; set; } = new List<string>();
+        public List<TeachingClassMemberInfo> StudentSummaries { get; set; } = new List<TeachingClassMemberInfo>();
+    }
+
+    public class TeachingClassMemberInfo
+    {
+        public string UserId { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Registration { get; set; } = string.Empty;
+        public string Role { get; set; } = "student";
+        public DateTime JoinedAt { get; set; } = DateTime.Now;
     }
 }
