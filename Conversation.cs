@@ -8,6 +8,7 @@ namespace MeuApp
         public string ConversationId { get; set; } = "";
         public string ContactId { get; set; } = "";
         public string ContactName { get; set; } = "";
+        public string ContactProfilePhotoDataUri { get; set; } = "";
         public string ContactAvatarBody { get; set; } = "";
         public string ContactAvatarHair { get; set; } = "";
         public string ContactAvatarHat { get; set; } = "";

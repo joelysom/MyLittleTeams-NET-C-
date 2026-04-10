@@ -37,6 +37,8 @@ namespace MeuApp
     {
         private const int MaxProfileGalleryImages = 6;
         private const int ProfileGalleryImageMaxSide = 720;
+        private const int ProfilePhotoOutputSize = 720;
+        private const int ProfilePhotoJpegQuality = 84;
         private const int TeamLogoOutputSize = 420;
         private const int TeamLogoJpegQuality = 86;
         private const int TeachingClassIconPreviewSize = 320;
@@ -650,35 +652,7 @@ namespace MeuApp
             _teachingClasses.Clear();
             _lastTeamLoadAt = DateTime.MinValue;
             _lastTeachingClassLoadAt = DateTime.MinValue;
-            if (!string.IsNullOrWhiteSpace(profile.UserId))
-            {
-                _userProfileCache[profile.UserId] = Task.FromResult<UserProfile?>(profile);
-                _userInfoCache[profile.UserId] = Task.FromResult<UserInfo?>(new UserInfo
-                {
-                    UserId = profile.UserId,
-                    Name = profile.Name,
-                    Email = profile.Email,
-                    Registration = profile.Registration,
-                    Course = profile.Course,
-                    Phone = profile.Phone,
-                    Role = profile.Role,
-                    AcademicDepartment = profile.AcademicDepartment,
-                    AcademicFocus = profile.AcademicFocus,
-                    OfficeHours = profile.OfficeHours,
-                    Nickname = profile.Nickname,
-                    ProfessionalTitle = profile.ProfessionalTitle,
-                    Bio = profile.Bio,
-                    Skills = profile.Skills,
-                    ProgrammingLanguages = profile.ProgrammingLanguages,
-                    PortfolioLink = profile.PortfolioLink,
-                    LinkedInLink = profile.LinkedInLink,
-                    AvatarBody = profile.AvatarBody,
-                    AvatarHair = profile.AvatarHair,
-                    AvatarHat = profile.AvatarHat,
-                    AvatarAccessory = profile.AvatarAccessory,
-                    AvatarClothing = profile.AvatarClothing
-                });
-            }
+            RefreshCurrentUserCaches(profile);
 
             WelcomeText.Text = $"Bem-vindo, {profile.Name}";
             SidebarUserName.Text = profile.Name;
@@ -694,6 +668,17 @@ namespace MeuApp
             {
                 RenderFilesHub();
             }
+        }
+
+        private void RefreshCurrentUserCaches(UserProfile profile)
+        {
+            if (profile == null || string.IsNullOrWhiteSpace(profile.UserId))
+            {
+                return;
+            }
+
+            _userProfileCache[profile.UserId] = Task.FromResult<UserProfile?>(profile);
+            _userInfoCache[profile.UserId] = Task.FromResult<UserInfo?>(CreateUserInfoFromProfile(profile));
         }
 
         private void UpdateRoleAwareShellState(UserProfile? profile)
@@ -741,9 +726,19 @@ namespace MeuApp
 
             if (ProfessorNavButton != null)
             {
+                var teachingNavigationLabel = TeamPermissionService.IsProfessorLike(normalizedRole)
+                    ? "Docência"
+                    : "Turma";
+
                 ProfessorNavButton.Visibility = profile != null
                     ? Visibility.Visible
                     : Visibility.Collapsed;
+                ProfessorNavButton.ToolTip = teachingNavigationLabel;
+
+                if (ProfessorNavLabel != null)
+                {
+                    ProfessorNavLabel.Text = teachingNavigationLabel;
+                }
             }
         }
 
@@ -3905,6 +3900,7 @@ namespace MeuApp
                 ProgrammingLanguages = source.ProgrammingLanguages,
                 PortfolioLink = source.PortfolioLink,
                 LinkedInLink = source.LinkedInLink,
+                ProfilePhotoDataUri = source.ProfilePhotoDataUri,
                 Role = TeamPermissionService.NormalizeRole(string.IsNullOrWhiteSpace(overrideRole) ? source.Role : overrideRole),
                 AvatarBody = source.AvatarBody,
                 AvatarHair = source.AvatarHair,
@@ -4078,6 +4074,35 @@ namespace MeuApp
                 invalidImageMessage: "Não foi possível abrir a imagem selecionada para a galeria do currículo.",
                 exportErrorTitle: "Falha ao gerar recorte",
                 exportErrorMessage: "O recorte da imagem da galeria não pôde ser exportado. Tente novamente.");
+        }
+
+        private string? ShowProfilePhotoCropperDialog(string filePath)
+        {
+            return ShowImageCropperDialog(
+                filePath,
+                eyebrow: "PERFIL",
+                dialogTitle: "Ajustar foto do perfil",
+                headerTitle: "Enquadre sua foto principal",
+                description: "Posicione a imagem do jeito que ela vai aparecer no perfil e no avatar lateral antes de publicar.",
+                workspaceHint: "A foto final sai em quadrado para manter definição, mas as prévias mostram o resultado no card do perfil e no avatar circular da navegação.",
+                previewDescription: "A primeira prévia simula a bolha circular da sidebar. A segunda mostra a imagem maior do perfil profissional.",
+                firstPreviewLabel: "Sidebar",
+                firstPreviewCircular: true,
+                secondPreviewLabel: "Perfil profissional",
+                secondPreviewCircular: false,
+                tipText: "Dica: mantenha rosto e ombros mais próximos do centro para a leitura continuar forte na sidebar e nas listas.",
+                saveButtonLabel: "Aplicar foto",
+                accentColor: GetThemeBrush("AccentBrush").Color,
+                outputSize: ProfilePhotoOutputSize,
+                quality: ProfilePhotoJpegQuality,
+                invalidImageTitle: "Imagem inválida",
+                invalidImageMessage: "Não foi possível abrir a foto selecionada para o perfil.",
+                exportErrorTitle: "Falha ao gerar foto",
+                exportErrorMessage: "A foto de perfil não pôde ser gerada. Tente ajustar a imagem novamente.",
+                firstPreviewWidth: 88,
+                firstPreviewHeight: 88,
+                secondPreviewWidth: 132,
+                secondPreviewHeight: 132);
         }
 
             private string? ShowTeachingClassImageCropperDialog(string filePath)
@@ -4658,6 +4683,7 @@ namespace MeuApp
                 ProgrammingLanguages = _currentProfile.ProgrammingLanguages,
                 PortfolioLink = _currentProfile.PortfolioLink,
                 LinkedInLink = _currentProfile.LinkedInLink,
+                ProfilePhotoDataUri = _currentProfile.ProfilePhotoDataUri,
                 AvatarBody = _currentProfile.AvatarBody,
                 AvatarHair = _currentProfile.AvatarHair,
                 AvatarHat = _currentProfile.AvatarHat,
@@ -7711,12 +7737,19 @@ namespace MeuApp
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var backButton = CreateTeamWorkspaceActionButton("Voltar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click, PackIconMaterialKind.ArrowLeft);
+            backButton.Margin = new Thickness(0, 0, 12, 10);
+            backButton.VerticalAlignment = VerticalAlignment.Top;
+            grid.Children.Add(backButton);
 
             var logoBadge = CreateTeamLogoBadge(team, 84, circular: true, fontSize: 24);
             logoBadge.Margin = new Thickness(0, 0, 18, 0);
             logoBadge.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(logoBadge, 1);
             grid.Children.Add(logoBadge);
 
             var titleStack = new StackPanel
@@ -7766,7 +7799,7 @@ namespace MeuApp
             metadataWrap.Children.Add(CreateStaticTeamChip(BuildTeamLeadershipLabel(team), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             metadataWrap.Children.Add(CreateStaticTeamChip(BuildTeamBalanceLabel(team), GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
             titleStack.Children.Add(metadataWrap);
-            Grid.SetColumn(titleStack, 1);
+            Grid.SetColumn(titleStack, 2);
             grid.Children.Add(titleStack);
 
             var actions = new WrapPanel
@@ -7797,9 +7830,8 @@ namespace MeuApp
             {
                 actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace, PackIconMaterialKind.DeleteOutline));
             }
-            actions.Children.Add(CreateTeamWorkspaceActionButton("Fechar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click, PackIconMaterialKind.Close));
 
-            Grid.SetColumn(actions, 2);
+            Grid.SetColumn(actions, 3);
             grid.Children.Add(actions);
 
             border.Child = grid;
@@ -10875,22 +10907,21 @@ namespace MeuApp
         {
             TeamEntryOptionsPopup.IsOpen = false;
             var hasProjectTeams = _teamWorkspaces.Count > 0;
+            var hasActiveWorkspace = _activeTeamWorkspace != null;
 
-            TeamsEmptyStateCard.Visibility = !hasProjectTeams && _teamEntryMode == TeamEntryMode.None
+            TeamsEmptyStateCard.Visibility = !hasProjectTeams && _teamEntryMode == TeamEntryMode.None && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamJoinCard.Visibility = _teamEntryMode == TeamEntryMode.Join
+            TeamJoinCard.Visibility = _teamEntryMode == TeamEntryMode.Join && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create
+            TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamListCard.Visibility = (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || CurrentViewerCanManageTeachingClasses())
+            TeamListCard.Visibility = !hasActiveWorkspace && (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || CurrentViewerCanManageTeachingClasses())
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamWorkspaceCard.Visibility = _activeTeamWorkspace == null
-                ? Visibility.Collapsed
-                : Visibility.Visible;
+            TeamWorkspaceCard.Visibility = hasActiveWorkspace ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void PopulateProfessionalProfileFields(UserProfile profile)
@@ -11941,10 +11972,18 @@ namespace MeuApp
             RenderSidebarAvatarPreview(profile);
 
             var hasAvatar = HasCustomAvatar(profile);
+            var hasPhoto = HasProfilePhoto(profile);
             AvatarActionButton.Content = hasAvatar ? "Editar avatar" : "Criar seu ícone";
-            AvatarEditorHintText.Text = hasAvatar
-                ? "Seu avatar já está configurado. Ajuste personagem, cabelo, hat, acessório e roupa quando quiser."
-                : "Monte seu personagem com pele, cabelo, hat e roupa. O acessório continua opcional.";
+            ProfilePhotoActionButton.Content = hasPhoto ? "Trocar foto" : "Adicionar foto";
+            RemoveProfilePhotoButton.Visibility = hasPhoto ? Visibility.Visible : Visibility.Collapsed;
+            AvatarEditorHintText.Text = hasPhoto
+                ? "Sua foto está ativa no perfil. O avatar continua salvo e volta a aparecer se a foto for removida."
+                : hasAvatar
+                    ? "Seu avatar já está configurado. Ajuste personagem, cabelo, hat, acessório e roupa quando quiser."
+                    : "Monte seu personagem com pele, cabelo, hat e roupa. O acessório continua opcional.";
+            AvatarEditorSupportText.Text = hasPhoto
+                ? "Use 'Trocar foto' para atualizar a imagem principal. Se preferir voltar ao personagem, remova a foto e o avatar salvo assume de novo."
+                : "Monte seu avatar por camadas: corpo e cabelo são obrigatórios, acessório é opcional. Se quiser, você também pode usar uma foto sem apagar o personagem.";
         }
 
         private void RenderProfileAvatarPreview(UserProfile profile)
@@ -11964,14 +12003,29 @@ namespace MeuApp
             return user != null && IsValidAvatarSelection(user.AvatarBody, user.AvatarHair, user.AvatarHat, user.AvatarAccessory, user.AvatarClothing);
         }
 
+        private bool HasProfilePhoto(UserInfo? user)
+        {
+            return !string.IsNullOrWhiteSpace(user?.ProfilePhotoDataUri);
+        }
+
         private bool HasCustomAvatar(Conversation? conversation)
         {
             return conversation != null && IsValidAvatarSelection(conversation.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarHat, conversation.ContactAvatarAccessory, conversation.ContactAvatarClothing);
         }
 
+        private bool HasProfilePhoto(Conversation? conversation)
+        {
+            return !string.IsNullOrWhiteSpace(conversation?.ContactProfilePhotoDataUri);
+        }
+
         private bool HasCustomAvatar(UserProfile? profile)
         {
             return profile != null && IsValidAvatarSelection(profile.AvatarBody, profile.AvatarHair, profile.AvatarHat, profile.AvatarAccessory, profile.AvatarClothing);
+        }
+
+        private bool HasProfilePhoto(UserProfile? profile)
+        {
+            return !string.IsNullOrWhiteSpace(profile?.ProfilePhotoDataUri);
         }
 
         private bool IsValidAvatarSelection(string? body, string? hair, string? hat, string? accessory, string? clothing)
@@ -12059,6 +12113,12 @@ namespace MeuApp
 
         private UIElement CreateProfileAvatarVisual(UserProfile? profile)
         {
+            var photoVisual = TryCreateProfilePhotoVisual(profile?.ProfilePhotoDataUri, 132, new CornerRadius(22), showBorder: true);
+            if (photoVisual != null)
+            {
+                return photoVisual;
+            }
+
             if (!HasCustomAvatar(profile))
             {
                 var placeholder = new Border
@@ -12103,6 +12163,12 @@ namespace MeuApp
 
         private UIElement CreateSidebarAvatarVisual(UserProfile? profile)
         {
+            var photoVisual = TryCreateProfilePhotoVisual(profile?.ProfilePhotoDataUri, 40, new CornerRadius(20), showBorder: false);
+            if (photoVisual != null)
+            {
+                return photoVisual;
+            }
+
             if (HasCustomAvatar(profile))
             {
                 return CreateAvatarCompositeVisual(profile!, 40, new CornerRadius(20), showBorder: false);
@@ -12136,6 +12202,31 @@ namespace MeuApp
             });
 
             return grid;
+        }
+
+        private Border? TryCreateProfilePhotoVisual(string? photoDataUri, double size, CornerRadius cornerRadius, bool showBorder)
+        {
+            var photoSource = TryCreateImageSourceFromDataUri(photoDataUri);
+            if (photoSource == null)
+            {
+                return null;
+            }
+
+            return new Border
+            {
+                Width = size,
+                Height = size,
+                CornerRadius = cornerRadius,
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = showBorder ? GetThemeBrush("CardBorderBrush") : Brushes.Transparent,
+                BorderThickness = showBorder ? new Thickness(1) : new Thickness(0),
+                ClipToBounds = true,
+                Child = new Image
+                {
+                    Source = photoSource,
+                    Stretch = Stretch.UniformToFill
+                }
+            };
         }
 
         private Border CreateAvatarCompositeVisual(UserProfile profile, double size, CornerRadius cornerRadius, bool showBorder)
@@ -12190,6 +12281,12 @@ namespace MeuApp
 
         private UIElement CreateUserAvatarVisual(UserInfo? user, double size, bool showBorder = false)
         {
+            var photoVisual = TryCreateProfilePhotoVisual(user?.ProfilePhotoDataUri, size, new CornerRadius(size / 2), showBorder);
+            if (photoVisual != null)
+            {
+                return photoVisual;
+            }
+
             if (HasCustomAvatar(user))
             {
                 return CreateAvatarCompositeVisual(user!.AvatarBody, user.AvatarHair, user.AvatarHat, user.AvatarAccessory, user.AvatarClothing, size, new CornerRadius(size / 2), showBorder);
@@ -12200,6 +12297,12 @@ namespace MeuApp
 
         private UIElement CreateConversationAvatarVisual(Conversation? conversation, double size, bool showBorder = false)
         {
+            var photoVisual = TryCreateProfilePhotoVisual(conversation?.ContactProfilePhotoDataUri, size, new CornerRadius(size / 2), showBorder);
+            if (photoVisual != null)
+            {
+                return photoVisual;
+            }
+
             if (HasCustomAvatar(conversation))
             {
                 return CreateAvatarCompositeVisual(conversation!.ContactAvatarBody, conversation.ContactAvatarHair, conversation.ContactAvatarHat, conversation.ContactAvatarAccessory, conversation.ContactAvatarClothing, size, new CornerRadius(size / 2), showBorder);
@@ -12286,6 +12389,7 @@ namespace MeuApp
                     ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
                     PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
                     LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
+                    ProfilePhotoDataUri = GetFirestoreStringValue(fields, "profilePhotoDataUri"),
                     AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
                     AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
                     AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
@@ -12332,6 +12436,7 @@ namespace MeuApp
                 ProgrammingLanguages = GetFirestoreStringValue(fields, "programmingLanguages"),
                 PortfolioLink = GetFirestoreStringValue(fields, "portfolioLink"),
                 LinkedInLink = GetFirestoreStringValue(fields, "linkedInLink"),
+                ProfilePhotoDataUri = GetFirestoreStringValue(fields, "profilePhotoDataUri"),
                 AvatarBody = GetFirestoreStringValue(fields, "avatarBody"),
                 AvatarHair = GetFirestoreStringValue(fields, "avatarHair"),
                 AvatarHat = GetFirestoreStringValue(fields, "avatarHat"),
@@ -12765,6 +12870,7 @@ namespace MeuApp
             profile.ProgrammingLanguages = string.IsNullOrWhiteSpace(profile.ProgrammingLanguages) ? summaryUser.ProgrammingLanguages : profile.ProgrammingLanguages;
             profile.PortfolioLink = string.IsNullOrWhiteSpace(profile.PortfolioLink) ? summaryUser.PortfolioLink : profile.PortfolioLink;
             profile.LinkedInLink = string.IsNullOrWhiteSpace(profile.LinkedInLink) ? summaryUser.LinkedInLink : profile.LinkedInLink;
+            profile.ProfilePhotoDataUri = string.IsNullOrWhiteSpace(profile.ProfilePhotoDataUri) ? summaryUser.ProfilePhotoDataUri : profile.ProfilePhotoDataUri;
             profile.AvatarBody = string.IsNullOrWhiteSpace(profile.AvatarBody) ? summaryUser.AvatarBody : profile.AvatarBody;
             profile.AvatarHair = string.IsNullOrWhiteSpace(profile.AvatarHair) ? summaryUser.AvatarHair : profile.AvatarHair;
             profile.AvatarHat = string.IsNullOrWhiteSpace(profile.AvatarHat) ? summaryUser.AvatarHat : profile.AvatarHat;
@@ -12796,6 +12902,7 @@ namespace MeuApp
                 Email = profile.Email,
                 Registration = profile.Registration,
                 Course = profile.Course,
+                ProfilePhotoDataUri = profile.ProfilePhotoDataUri,
                 AvatarBody = profile.AvatarBody,
                 AvatarHair = profile.AvatarHair,
                 AvatarHat = profile.AvatarHat,
@@ -12915,6 +13022,7 @@ namespace MeuApp
                 existingMember.AcademicDepartment = professor.AcademicDepartment;
                 existingMember.AcademicFocus = professor.AcademicFocus;
                 existingMember.OfficeHours = professor.OfficeHours;
+                existingMember.ProfilePhotoDataUri = professor.ProfilePhotoDataUri;
                 existingMember.AvatarBody = professor.AvatarBody;
                 existingMember.AvatarHair = professor.AvatarHair;
                 existingMember.AvatarHat = professor.AvatarHat;
@@ -13091,7 +13199,7 @@ namespace MeuApp
         private async Task EnrichConversationAvatarsAsync(List<Conversation> conversations)
         {
             var pendingConversations = conversations
-                .Where(conversation => !HasCustomAvatar(conversation) && !string.IsNullOrWhiteSpace(conversation.ContactId))
+                .Where(conversation => !HasProfilePhoto(conversation) && !HasCustomAvatar(conversation) && !string.IsNullOrWhiteSpace(conversation.ContactId))
                 .ToList();
 
             if (pendingConversations.Count == 0)
@@ -13118,6 +13226,7 @@ namespace MeuApp
                     continue;
                 }
 
+                conversation.ContactProfilePhotoDataUri = user.ProfilePhotoDataUri;
                 conversation.ContactAvatarBody = user.AvatarBody;
                 conversation.ContactAvatarHair = user.AvatarHair;
                 conversation.ContactAvatarHat = user.AvatarHat;
@@ -13161,6 +13270,7 @@ namespace MeuApp
                 member.Email = string.IsNullOrWhiteSpace(user.Email) ? member.Email : user.Email;
                 member.Registration = string.IsNullOrWhiteSpace(user.Registration) ? member.Registration : user.Registration;
                 member.Course = string.IsNullOrWhiteSpace(user.Course) ? member.Course : user.Course;
+                member.ProfilePhotoDataUri = user.ProfilePhotoDataUri;
                 member.AvatarBody = user.AvatarBody;
                 member.AvatarHair = user.AvatarHair;
                 member.AvatarHat = user.AvatarHat;
@@ -13191,6 +13301,7 @@ namespace MeuApp
                     member.Email = string.IsNullOrWhiteSpace(profile.Email) ? member.Email : profile.Email;
                     member.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? member.Registration : profile.Registration;
                     member.Course = string.IsNullOrWhiteSpace(profile.Course) ? member.Course : profile.Course;
+                    member.ProfilePhotoDataUri = profile.ProfilePhotoDataUri;
                     member.AvatarBody = profile.AvatarBody;
                     member.AvatarHair = profile.AvatarHair;
                     member.AvatarHat = profile.AvatarHat;
@@ -13211,6 +13322,7 @@ namespace MeuApp
                 member.Email = string.IsNullOrWhiteSpace(profile.Email) ? member.Email : profile.Email;
                 member.Registration = string.IsNullOrWhiteSpace(profile.Registration) ? member.Registration : profile.Registration;
                 member.Course = string.IsNullOrWhiteSpace(profile.Course) ? member.Course : profile.Course;
+                member.ProfilePhotoDataUri = profile.ProfilePhotoDataUri;
                 member.AvatarBody = profile.AvatarBody;
                 member.AvatarHair = profile.AvatarHair;
                 member.AvatarHat = profile.AvatarHat;
@@ -14165,6 +14277,8 @@ namespace MeuApp
                 _currentProfile.AvatarClothing = selectedClothing;
                 NormalizeProfileAvatarSelection(_currentProfile);
                 RefreshAvatarUi(_currentProfile);
+                RefreshCurrentUserCaches(_currentProfile);
+                SyncCurrentUserAvatarAcrossTeams(_currentProfile);
 
                 applyButton.IsEnabled = false;
                 cancelButton.IsEnabled = false;
@@ -14227,6 +14341,62 @@ namespace MeuApp
 
             dialog.Content = root;
             dialog.ShowDialog();
+        }
+
+        private void OpenPrimaryProfileIdentity_Click(object sender, RoutedEventArgs e)
+        {
+            if (HasProfilePhoto(_currentProfile))
+            {
+                UploadProfilePhoto_Click(sender, e);
+                return;
+            }
+
+            OpenAvatarEditor_Click(sender, e);
+        }
+
+        private void UploadProfilePhoto_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProfile == null)
+            {
+                return;
+            }
+
+            var dialog = new OpenFileDialog
+            {
+                Filter = "Arquivos de imagem|*.png;*.jpg;*.jpeg;*.webp;*.bmp",
+                Title = "Selecionar foto do perfil"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            var croppedDataUri = ShowProfilePhotoCropperDialog(dialog.FileName);
+            if (string.IsNullOrWhiteSpace(croppedDataUri))
+            {
+                return;
+            }
+
+            _currentProfile.ProfilePhotoDataUri = croppedDataUri;
+            RefreshAvatarUi(_currentProfile);
+            RefreshCurrentUserCaches(_currentProfile);
+            SyncCurrentUserAvatarAcrossTeams(_currentProfile);
+            MarkProfessionalProfileDirty("Foto de perfil pronta. Clique em salvar para publicar a nova imagem.");
+        }
+
+        private void RemoveProfilePhoto_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentProfile == null || string.IsNullOrWhiteSpace(_currentProfile.ProfilePhotoDataUri))
+            {
+                return;
+            }
+
+            _currentProfile.ProfilePhotoDataUri = string.Empty;
+            RefreshAvatarUi(_currentProfile);
+            RefreshCurrentUserCaches(_currentProfile);
+            SyncCurrentUserAvatarAcrossTeams(_currentProfile);
+            MarkProfessionalProfileDirty("Foto removida. O avatar salvo voltou a ser a imagem principal do perfil.");
         }
 
         private StackPanel CreateAvatarSectionHeader(string title, string description)
@@ -19704,6 +19874,7 @@ namespace MeuApp
                 ProgrammingLanguages = profile.ProgrammingLanguages,
                 PortfolioLink = profile.PortfolioLink,
                 LinkedInLink = profile.LinkedInLink,
+                ProfilePhotoDataUri = profile.ProfilePhotoDataUri,
                 AvatarBody = profile.AvatarBody,
                 AvatarHair = profile.AvatarHair,
                 AvatarHat = profile.AvatarHat,
@@ -21680,6 +21851,7 @@ namespace MeuApp
         {
             _activeTeamWorkspace = null;
             TeamWorkspaceHost.Content = null;
+            RenderTeamsList();
             UpdateTeamsViewState();
         }
 
@@ -26257,6 +26429,8 @@ namespace MeuApp
             NormalizeProfileAvatarSelection(_currentProfile);
             NormalizeProfileCollections(_currentProfile);
             UpdateRoleAwareShellState(_currentProfile);
+            RefreshCurrentUserCaches(_currentProfile);
+            SyncCurrentUserAvatarAcrossTeams(_currentProfile);
 
             try
             {
@@ -26324,6 +26498,7 @@ namespace MeuApp
                     programmingLanguages = new { stringValue = profile.ProgrammingLanguages },
                     portfolioLink = new { stringValue = profile.PortfolioLink },
                     linkedInLink = new { stringValue = profile.LinkedInLink },
+                    profilePhotoDataUri = new { stringValue = profile.ProfilePhotoDataUri },
                     avatarBody = new { stringValue = profile.AvatarBody },
                     avatarHair = new { stringValue = profile.AvatarHair },
                     avatarHat = new { stringValue = profile.AvatarHat },
@@ -26611,6 +26786,7 @@ namespace MeuApp
                         ConversationId = Guid.NewGuid().ToString(),
                         ContactId = contactUser.UserId,
                         ContactName = contactUser.Name,
+                        ContactProfilePhotoDataUri = contactUser.ProfilePhotoDataUri,
                         ContactAvatarBody = contactUser.AvatarBody,
                         ContactAvatarHair = contactUser.AvatarHair,
                         ContactAvatarHat = contactUser.AvatarHat,
@@ -26625,6 +26801,13 @@ namespace MeuApp
                 }
                 else
                 {
+                    existing.ContactName = contactUser.Name;
+                    existing.ContactProfilePhotoDataUri = contactUser.ProfilePhotoDataUri;
+                    existing.ContactAvatarBody = contactUser.AvatarBody;
+                    existing.ContactAvatarHair = contactUser.AvatarHair;
+                    existing.ContactAvatarHat = contactUser.AvatarHat;
+                    existing.ContactAvatarAccessory = contactUser.AvatarAccessory;
+                    existing.ContactAvatarClothing = contactUser.AvatarClothing;
                     _selectedConversation = existing;
                 }
                 

@@ -750,6 +750,7 @@ namespace MeuApp
                     programmingLanguages = new { stringValue = profile.ProgrammingLanguages ?? string.Empty },
                     portfolioLink = new { stringValue = profile.PortfolioLink ?? string.Empty },
                     linkedInLink = new { stringValue = profile.LinkedInLink ?? string.Empty },
+                    profilePhotoDataUri = new { stringValue = profile.ProfilePhotoDataUri ?? string.Empty },
                     avatarBody = new { stringValue = profile.AvatarBody ?? string.Empty },
                     avatarHair = new { stringValue = profile.AvatarHair ?? string.Empty },
                     avatarHat = new { stringValue = profile.AvatarHat ?? string.Empty },
@@ -815,6 +816,7 @@ namespace MeuApp
                 ProgrammingLanguages = TryGetStringField(fields, "programmingLanguages"),
                 PortfolioLink = TryGetStringField(fields, "portfolioLink"),
                 LinkedInLink = TryGetStringField(fields, "linkedInLink"),
+                ProfilePhotoDataUri = TryGetStringField(fields, "profilePhotoDataUri"),
                 AvatarBody = TryGetStringField(fields, "avatarBody"),
                 AvatarHair = TryGetStringField(fields, "avatarHair"),
                 AvatarHat = TryGetStringField(fields, "avatarHat"),
@@ -988,6 +990,7 @@ namespace MeuApp
         public string ProgrammingLanguages { get; set; } = string.Empty;
         public string PortfolioLink { get; set; } = string.Empty;
         public string LinkedInLink { get; set; } = string.Empty;
+        public string ProfilePhotoDataUri { get; set; } = string.Empty;
         public string AvatarBody { get; set; } = string.Empty;
         public string AvatarHair { get; set; } = string.Empty;
         public string AvatarHat { get; set; } = string.Empty;

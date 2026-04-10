@@ -29,6 +29,7 @@ namespace MeuApp
         public string ProgrammingLanguages { get; set; } = "";
         public string PortfolioLink { get; set; } = "";
         public string LinkedInLink { get; set; } = "";
+        public string ProfilePhotoDataUri { get; set; } = "";
         public string? Role { get; set; } = "student";
         public string AvatarBody { get; set; } = "";
         public string AvatarHair { get; set; } = "";
@@ -355,6 +356,7 @@ namespace MeuApp
                     user.AcademicFocus = ExtractField(fields, "academicFocus", documentIndex) ?? "";
                     user.OfficeHours = ExtractField(fields, "officeHours", documentIndex) ?? "";
 
+                    user.ProfilePhotoDataUri = ExtractField(fields, "profilePhotoDataUri", documentIndex) ?? "";
                     user.AvatarBody = ExtractField(fields, "avatarBody", documentIndex) ?? "";
                     user.AvatarHair = ExtractField(fields, "avatarHair", documentIndex) ?? "";
                     user.AvatarHat = ExtractField(fields, "avatarHat", documentIndex) ?? "";
