@@ -14,7 +14,7 @@ using MahApps.Metro.Controls;
 
 namespace MeuApp
 {
-    public partial class LoginWindow : Window
+    public partial class LoginWindow : ChromeWindow
     {
         private enum LoginDialogAction
         {
@@ -32,11 +32,254 @@ namespace MeuApp
         }
 
         private static readonly HttpClient httpClient = new HttpClient();
+        private bool _loginDarkModeEnabled;
 
         public LoginWindow()
         {
             InitializeComponent();
+            _loginDarkModeEnabled = AccessibilityPreferences.DarkModeEnabled;
+            ApplyLoginTheme();
             UpdateProfessorSignupFieldsVisibility();
+            UpdateTabVisualState();
+            UpdateLoginAccessibilityPanelState();
+        }
+
+        protected override void OnAccessibilitySettingsChanged(AccessibilitySettings settings)
+        {
+            _loginDarkModeEnabled = settings.DarkModeEnabled;
+            ApplyLoginTheme();
+            UpdateLoginAccessibilityPanelState();
+        }
+
+        private void ApplyLoginTheme()
+        {
+            if (AccessibilityPreferences.HighContrastEnabled)
+            {
+                SetBrushResource("LoginAccentBrush", Color.FromRgb(125, 211, 252));
+                SetBrushResource("LoginAccentHoverBrush", Color.FromRgb(56, 189, 248));
+                SetBrushResource("LoginAccentPressedBrush", Color.FromRgb(14, 165, 233));
+                SetBrushResource("LoginWindowBackgroundBrush", Color.FromRgb(2, 6, 23));
+                SetBrushResource("LoginSurfaceBrush", Color.FromRgb(4, 9, 24));
+                SetBrushResource("LoginSurfaceAltBrush", Color.FromRgb(11, 18, 32));
+                SetBrushResource("LoginInputBackgroundBrush", Color.FromRgb(0, 0, 0));
+                SetBrushResource("LoginBorderBrush", Color.FromRgb(56, 189, 248));
+                SetBrushResource("LoginPrimaryTextBrush", Color.FromRgb(248, 250, 252));
+                SetBrushResource("LoginSecondaryTextBrush", Color.FromRgb(203, 213, 225));
+                SetBrushResource("LoginMutedTextBrush", Color.FromRgb(226, 232, 240));
+                SetBrushResource("LoginDividerBrush", Color.FromRgb(56, 189, 248));
+                SetBrushResource("LoginInfoCardBrush", Color.FromRgb(10, 33, 58));
+                SetBrushResource("LoginInfoCardBorderBrush", Color.FromRgb(125, 211, 252));
+                SetBrushResource("LoginInfoCardTextBrush", Color.FromRgb(224, 242, 254));
+                SetBrushResource("LoginAccessibilityCardBrush", Color.FromRgb(4, 9, 24));
+                SetBrushResource("LoginAccessibilityCardBorderBrush", Color.FromRgb(56, 189, 248));
+                SetBrushResource("LoginAccessibilityMutedBrush", Color.FromRgb(11, 18, 32));
+                Resources["LoginHeroBackgroundBrush"] = CreateHeroBrush(
+                    Color.FromRgb(0, 0, 0),
+                    Color.FromRgb(9, 30, 66),
+                    Color.FromRgb(8, 145, 178));
+            }
+            else if (_loginDarkModeEnabled)
+            {
+                SetBrushResource("LoginAccentBrush", Color.FromRgb(96, 165, 250));
+                SetBrushResource("LoginAccentHoverBrush", Color.FromRgb(59, 130, 246));
+                SetBrushResource("LoginAccentPressedBrush", Color.FromRgb(37, 99, 235));
+                SetBrushResource("LoginWindowBackgroundBrush", Color.FromRgb(8, 17, 31));
+                SetBrushResource("LoginSurfaceBrush", Color.FromRgb(15, 23, 42));
+                SetBrushResource("LoginSurfaceAltBrush", Color.FromRgb(22, 32, 51));
+                SetBrushResource("LoginInputBackgroundBrush", Color.FromRgb(17, 28, 46));
+                SetBrushResource("LoginBorderBrush", Color.FromRgb(51, 65, 85));
+                SetBrushResource("LoginPrimaryTextBrush", Color.FromRgb(226, 232, 240));
+                SetBrushResource("LoginSecondaryTextBrush", Color.FromRgb(148, 163, 184));
+                SetBrushResource("LoginMutedTextBrush", Color.FromRgb(203, 213, 225));
+                SetBrushResource("LoginDividerBrush", Color.FromRgb(36, 50, 71));
+                SetBrushResource("LoginInfoCardBrush", Color.FromRgb(17, 35, 58));
+                SetBrushResource("LoginInfoCardBorderBrush", Color.FromRgb(30, 58, 95));
+                SetBrushResource("LoginInfoCardTextBrush", Color.FromRgb(191, 219, 254));
+                SetBrushResource("LoginAccessibilityCardBrush", Color.FromRgb(15, 23, 42));
+                SetBrushResource("LoginAccessibilityCardBorderBrush", Color.FromRgb(51, 65, 85));
+                SetBrushResource("LoginAccessibilityMutedBrush", Color.FromRgb(17, 28, 46));
+                Resources["LoginHeroBackgroundBrush"] = CreateHeroBrush(
+                    Color.FromRgb(4, 11, 24),
+                    Color.FromRgb(10, 29, 62),
+                    Color.FromRgb(29, 78, 216));
+            }
+            else
+            {
+                SetBrushResource("LoginAccentBrush", Color.FromRgb(0, 120, 212));
+                SetBrushResource("LoginAccentHoverBrush", Color.FromRgb(16, 110, 190));
+                SetBrushResource("LoginAccentPressedBrush", Color.FromRgb(0, 99, 177));
+                SetBrushResource("LoginWindowBackgroundBrush", Color.FromRgb(255, 255, 255));
+                SetBrushResource("LoginSurfaceBrush", Color.FromRgb(255, 255, 255));
+                SetBrushResource("LoginSurfaceAltBrush", Color.FromRgb(248, 250, 252));
+                SetBrushResource("LoginInputBackgroundBrush", Color.FromRgb(255, 255, 255));
+                SetBrushResource("LoginBorderBrush", Color.FromRgb(229, 231, 235));
+                SetBrushResource("LoginPrimaryTextBrush", Color.FromRgb(31, 31, 31));
+                SetBrushResource("LoginSecondaryTextBrush", Color.FromRgb(113, 113, 113));
+                SetBrushResource("LoginMutedTextBrush", Color.FromRgb(102, 102, 102));
+                SetBrushResource("LoginDividerBrush", Color.FromRgb(224, 224, 224));
+                SetBrushResource("LoginInfoCardBrush", Color.FromRgb(247, 250, 255));
+                SetBrushResource("LoginInfoCardBorderBrush", Color.FromRgb(215, 231, 255));
+                SetBrushResource("LoginInfoCardTextBrush", Color.FromRgb(36, 80, 122));
+                SetBrushResource("LoginAccessibilityCardBrush", Color.FromRgb(255, 255, 255));
+                SetBrushResource("LoginAccessibilityCardBorderBrush", Color.FromRgb(229, 231, 235));
+                SetBrushResource("LoginAccessibilityMutedBrush", Color.FromRgb(248, 250, 252));
+                Resources["LoginHeroBackgroundBrush"] = CreateHeroBrush(
+                    Color.FromRgb(8, 18, 35),
+                    Color.FromRgb(13, 42, 82),
+                    Color.FromRgb(29, 78, 216));
+            }
+
+            Background = GetThemeBrushFromResources("LoginWindowBackgroundBrush", Color.FromRgb(255, 255, 255));
+            UpdateTabVisualState();
+        }
+
+        private void SetBrushResource(string key, Color color)
+        {
+            if (Resources[key] is SolidColorBrush brush)
+            {
+                if (brush.IsFrozen)
+                {
+                    var clonedBrush = brush.CloneCurrentValue();
+                    clonedBrush.Color = color;
+                    Resources[key] = clonedBrush;
+                    return;
+                }
+
+                brush.Color = color;
+                return;
+            }
+
+            Resources[key] = new SolidColorBrush(color);
+        }
+
+        private Brush GetThemeBrushFromResources(string key, Color fallback)
+        {
+            return TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
+        }
+
+        private static LinearGradientBrush CreateHeroBrush(Color start, Color middle, Color end)
+        {
+            return new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(start, 0),
+                    new GradientStop(middle, 0.45),
+                    new GradientStop(end, 1)
+                },
+                new Point(0, 0),
+                new Point(1, 1));
+        }
+
+        private void UpdateTabVisualState()
+        {
+            var accentBrush = GetThemeBrushFromResources("LoginAccentBrush", Color.FromRgb(0, 120, 212));
+            var secondaryBrush = GetThemeBrushFromResources("LoginSecondaryTextBrush", Color.FromRgb(113, 113, 113));
+
+            if (LoginContent.Visibility == Visibility.Visible)
+            {
+                LoginTabButton.Foreground = accentBrush;
+                LoginTabButton.FontWeight = FontWeights.ExtraBold;
+                SignupTabButton.Foreground = secondaryBrush;
+                SignupTabButton.FontWeight = FontWeights.Normal;
+            }
+            else
+            {
+                SignupTabButton.Foreground = accentBrush;
+                SignupTabButton.FontWeight = FontWeights.ExtraBold;
+                LoginTabButton.Foreground = secondaryBrush;
+                LoginTabButton.FontWeight = FontWeights.Normal;
+            }
+
+            UpdateHeroCopyState();
+        }
+
+        private void UpdateHeroCopyState()
+        {
+            if (LoginHeroBadgeText == null || LoginHeroTitleText == null || LoginHeroBodyText == null)
+            {
+                return;
+            }
+
+            if (LoginContent.Visibility == Visibility.Visible)
+            {
+                LoginHeroBadgeText.Text = "ACESSO";
+                LoginHeroTitleText.Text = "Entre no observatório";
+                LoginHeroBodyText.Text = "Acompanhe turmas, equipes, arquivos e conversas em um workspace acadêmico mais organizado.";
+                return;
+            }
+
+            LoginHeroBadgeText.Text = "CADASTRO";
+            LoginHeroTitleText.Text = "Monte seu perfil acadêmico";
+            LoginHeroBodyText.Text = "Defina seu papel, curso e contexto docente para abrir a experiência certa já no primeiro acesso.";
+        }
+
+        private void UpdateLoginAccessibilityPanelState()
+        {
+            if (LoginDarkModeToggle != null)
+            {
+                LoginDarkModeToggle.IsChecked = _loginDarkModeEnabled;
+            }
+
+            if (LoginHighContrastToggle != null)
+            {
+                LoginHighContrastToggle.IsChecked = AccessibilityPreferences.HighContrastEnabled;
+            }
+
+            if (LoginReduceAnimationsToggle != null)
+            {
+                LoginReduceAnimationsToggle.IsChecked = AccessibilityPreferences.ReduceAnimations;
+            }
+
+            if (LoginTextScalePercentText != null)
+            {
+                LoginTextScalePercentText.Text = $"({AccessibilityPreferences.TextScalePercent})%";
+            }
+
+            if (DecreaseTextScaleButton != null)
+            {
+                DecreaseTextScaleButton.IsEnabled = AccessibilityPreferences.TextScalePercent > AccessibilityPreferences.MinTextScalePercent;
+            }
+
+            if (IncreaseTextScaleButton != null)
+            {
+                IncreaseTextScaleButton.IsEnabled = AccessibilityPreferences.TextScalePercent < AccessibilityPreferences.MaxTextScalePercent;
+            }
+        }
+
+        private void AccessibilityButton_Click(object sender, RoutedEventArgs e)
+        {
+            LoginAccessibilityPanel.Visibility = LoginAccessibilityPanel.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+            UpdateLoginAccessibilityPanelState();
+        }
+
+        private void LoginDarkModeToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            AccessibilityPreferences.SetDarkModeEnabled(LoginDarkModeToggle.IsChecked == true);
+        }
+
+        private void LoginHighContrastToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            AccessibilityPreferences.SetHighContrastEnabled(LoginHighContrastToggle.IsChecked == true);
+        }
+
+        private void LoginReduceAnimationsToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            AccessibilityPreferences.SetReduceAnimations(LoginReduceAnimationsToggle.IsChecked == true);
+        }
+
+        private void DecreaseTextScaleButton_Click(object sender, RoutedEventArgs e)
+        {
+            AccessibilityPreferences.AdjustTextScale(-AccessibilityPreferences.TextScaleStepPercent);
+            UpdateLoginAccessibilityPanelState();
+        }
+
+        private void IncreaseTextScaleButton_Click(object sender, RoutedEventArgs e)
+        {
+            AccessibilityPreferences.AdjustTextScale(AccessibilityPreferences.TextScaleStepPercent);
+            UpdateLoginAccessibilityPanelState();
         }
 
         private void SwitchTab_Click(object sender, RoutedEventArgs e)
@@ -49,20 +292,14 @@ namespace MeuApp
                 {
                     LoginContent.Visibility = Visibility.Visible;
                     SignupContent.Visibility = Visibility.Collapsed;
-                    LoginTabButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 212));
-                    LoginTabButton.FontWeight = FontWeights.ExtraBold;
-                    SignupTabButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(153, 153, 153));
-                    SignupTabButton.FontWeight = FontWeights.Normal;
                 }
                 else if (tag == "Signup")
                 {
                     LoginContent.Visibility = Visibility.Collapsed;
                     SignupContent.Visibility = Visibility.Visible;
-                    SignupTabButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0, 120, 212));
-                    SignupTabButton.FontWeight = FontWeights.ExtraBold;
-                    LoginTabButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(153, 153, 153));
-                    LoginTabButton.FontWeight = FontWeights.Normal;
                 }
+
+                UpdateTabVisualState();
             }
         }
 

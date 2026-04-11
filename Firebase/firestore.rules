@@ -85,6 +85,48 @@ service cloud.firestore {
       return data.get('isDeleted', false) == true || messageTypeOf(data) == 'deleted';
     }
 
+    function validCreatableConversationMessageType(messageType) {
+      return messageType == 'text'
+        || messageType == 'sticker'
+        || messageType == 'image'
+        || messageType == 'video'
+        || messageType == 'audio'
+        || messageType == 'file';
+    }
+
+    function hasConversationAttachmentFields(data) {
+      return hasOptionalString(data, 'attachmentFileName')
+        && hasOptionalString(data, 'attachmentContentType')
+        && hasOptionalString(data, 'attachmentStoragePath')
+        && hasOptionalInt(data, 'attachmentSizeBytes');
+    }
+
+    function hasConversationLinkPreviewFields(data) {
+      return hasOptionalString(data, 'linkUrl')
+        && hasOptionalString(data, 'linkTitle')
+        && hasOptionalString(data, 'linkDescription')
+        && hasOptionalString(data, 'linkImageUrl')
+        && hasOptionalString(data, 'linkSiteName');
+    }
+
+    function validConversationAttachmentPayload(data) {
+      return hasConversationAttachmentFields(data)
+        && (
+          messageTypeOf(data) == 'image'
+          || messageTypeOf(data) == 'video'
+          || messageTypeOf(data) == 'audio'
+          || messageTypeOf(data) == 'file'
+            ? data.attachmentFileName is string
+              && data.attachmentFileName.size() > 0
+              && data.attachmentContentType is string
+              && data.attachmentStoragePath is string
+              && data.attachmentStoragePath.size() > 0
+              && data.attachmentSizeBytes is int
+              && data.attachmentSizeBytes >= 0
+            : true
+        );
+    }
+
     function validPermissionScope(scope) {
       return scope == 'team'
         || scope == 'course'
@@ -101,7 +143,10 @@ service cloud.firestore {
         && data.recipientId is string
         && data.content is string
         && data.messageType is string
+        && validCreatableConversationMessageType(data.messageType)
         && data.stickerAsset is string
+        && hasConversationLinkPreviewFields(data)
+        && validConversationAttachmentPayload(data)
         && data.isEdited is bool
         && data.isEdited == false
         && data.isDeleted is bool
@@ -121,12 +166,18 @@ service cloud.firestore {
       return newData.diff(oldData).affectedKeys().hasOnly([
           'content',
           'isEdited',
-          'editedAt'
+          'editedAt',
+          'linkUrl',
+          'linkTitle',
+          'linkDescription',
+          'linkImageUrl',
+          'linkSiteName'
         ])
         && messageTypeOf(oldData) == 'text'
         && !messageIsDeleted(oldData)
         && newData.content is string
         && newData.content.size() > 0
+        && hasConversationLinkPreviewFields(newData)
         && messageStickerAssetOf(newData) == messageStickerAssetOf(oldData)
         && messageIsEdited(newData)
         && newData.editedAt is timestamp
@@ -139,6 +190,15 @@ service cloud.firestore {
           'content',
           'messageType',
           'stickerAsset',
+          'attachmentFileName',
+          'attachmentContentType',
+          'attachmentStoragePath',
+          'attachmentSizeBytes',
+          'linkUrl',
+          'linkTitle',
+          'linkDescription',
+          'linkImageUrl',
+          'linkSiteName',
           'isDeleted',
           'deletedAt'
         ])
@@ -147,6 +207,24 @@ service cloud.firestore {
         && newData.messageType == 'deleted'
         && newData.stickerAsset is string
         && newData.stickerAsset == ''
+        && newData.attachmentFileName is string
+        && newData.attachmentFileName == ''
+        && newData.attachmentContentType is string
+        && newData.attachmentContentType == ''
+        && newData.attachmentStoragePath is string
+        && newData.attachmentStoragePath == ''
+        && newData.attachmentSizeBytes is int
+        && newData.attachmentSizeBytes == 0
+        && newData.linkUrl is string
+        && newData.linkUrl == ''
+        && newData.linkTitle is string
+        && newData.linkTitle == ''
+        && newData.linkDescription is string
+        && newData.linkDescription == ''
+        && newData.linkImageUrl is string
+        && newData.linkImageUrl == ''
+        && newData.linkSiteName is string
+        && newData.linkSiteName == ''
         && messageIsDeleted(newData)
         && newData.deletedAt is timestamp
         && messageIsEdited(newData) == messageIsEdited(oldData)

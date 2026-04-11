@@ -1,0 +1,457 @@
+<UserControl x:Class="MeuApp.WindowTitleBar"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:MeuApp"
+             xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
+             x:Name="Root"
+             MinHeight="{Binding TitleBarMinHeight, ElementName=Root}">
+    <UserControl.Resources>
+        <Style x:Key="WindowCommandButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CommandButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CommandButtonBorder"
+                                        Property="Background"
+                                        Value="{Binding CommandHoverBrush, ElementName=Root}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="CommandButtonBorder" Property="Opacity" Value="0.86"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="CloseWindowCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource WindowCommandButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="CloseButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="CloseButtonBorder"
+                                        Property="Background"
+                                        Value="{Binding CloseHoverBrush, ElementName=Root}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="CloseButtonBorder" Property="Opacity" Value="0.86"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuickActionMenuButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="QuickActionButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="16">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="QuickActionButtonBorder" Property="Background" Value="{Binding EffectiveQuickActionsHoverBrush, ElementName=Root}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="QuickActionButtonBorder" Property="Opacity" Value="0.9"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="QuickActionMiniButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Background" Value="{Binding EffectiveQuickActionsMutedSurfaceBrush, ElementName=Root}"/>
+            <Setter Property="BorderBrush" Value="{Binding EffectiveQuickActionsBorderBrush, ElementName=Root}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="MiniButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="MiniButtonBorder" Property="Background" Value="{Binding EffectiveQuickActionsAccentMutedBrush, ElementName=Root}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="MiniButtonBorder" Property="Opacity" Value="0.9"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="MiniButtonBorder" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Border x:Name="TitleBarScaleHost"
+                Background="{Binding Background, ElementName=Root}"
+                BorderBrush="{Binding BorderBrush, ElementName=Root}"
+                BorderThickness="{Binding BorderThickness, ElementName=Root}"
+                Padding="{Binding InnerPadding, ElementName=Root}">
+            <Grid Background="Transparent" PreviewMouseLeftButtonDown="TitleBarRoot_PreviewMouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <ContentPresenter Grid.Column="0"
+                                  Content="{Binding HeaderContent, ElementName=Root}"
+                                  VerticalAlignment="Center"/>
+
+                <Border Grid.Column="1" Background="Transparent"/>
+
+                <ContentPresenter Grid.Column="2"
+                                  Margin="16,0,0,0"
+                                  Content="{Binding CenterContent, ElementName=Root}"
+                                  VerticalAlignment="Center"/>
+
+                <ContentPresenter Grid.Column="3"
+                                  Margin="16,0,0,0"
+                                  Content="{Binding RightContent, ElementName=Root}"
+                                  VerticalAlignment="Center"/>
+
+                <Border x:Name="WindowCommandsHost"
+                        Grid.Column="4"
+                        Margin="16,0,0,0"
+                        Padding="{Binding WindowCommandsPadding, ElementName=Root}"
+                        Background="{Binding WindowCommandsBackground, ElementName=Root}"
+                        BorderBrush="{Binding WindowCommandsBorderBrush, ElementName=Root}"
+                        BorderThickness="1"
+                        CornerRadius="{Binding WindowCommandsCornerRadius, ElementName=Root}"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="QuickActionsButton"
+                                Style="{StaticResource WindowCommandButtonStyle}"
+                                ToolTip="Ações rápidas"
+                                Click="QuickActionsButton_Click">
+                            <iconPacks:PackIconMaterial Kind="DotsHorizontal"
+                                                        Width="18"
+                                                        Height="18"
+                                                        Foreground="{Binding MutedForegroundBrush, ElementName=Root}"/>
+                        </Button>
+
+                        <Button x:Name="MinimizeButton"
+                                Style="{StaticResource WindowCommandButtonStyle}"
+                                ToolTip="Minimizar"
+                                Click="MinimizeButton_Click">
+                            <iconPacks:PackIconMaterial Kind="WindowMinimize"
+                                                        Width="16"
+                                                        Height="16"
+                                                        Foreground="{Binding MutedForegroundBrush, ElementName=Root}"/>
+                        </Button>
+
+                        <Button x:Name="WindowStateButton"
+                                Style="{StaticResource WindowCommandButtonStyle}"
+                                ToolTip="Maximizar"
+                                Click="WindowStateButton_Click">
+                            <iconPacks:PackIconMaterial x:Name="WindowStateIcon"
+                                                        Kind="WindowMaximize"
+                                                        Width="16"
+                                                        Height="16"
+                                                        Foreground="{Binding MutedForegroundBrush, ElementName=Root}"/>
+                        </Button>
+
+                        <Button x:Name="CloseButton"
+                                Style="{StaticResource CloseWindowCommandButtonStyle}"
+                                ToolTip="Fechar"
+                                Click="CloseButton_Click">
+                            <iconPacks:PackIconMaterial Kind="Close"
+                                                        Width="16"
+                                                        Height="16"
+                                                        Foreground="{Binding CloseForegroundBrush, ElementName=Root}"/>
+                        </Button>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Popup x:Name="QuickActionsPopup"
+               AllowsTransparency="True"
+               StaysOpen="False"
+               Placement="Bottom"
+               PlacementTarget="{Binding ElementName=QuickActionsButton}"
+               HorizontalOffset="-272"
+               VerticalOffset="12"
+               Closed="QuickActionsPopup_Closed">
+            <Border Width="320"
+                    Background="{Binding EffectiveQuickActionsBackgroundBrush, ElementName=Root}"
+                    BorderBrush="{Binding EffectiveQuickActionsBorderBrush, ElementName=Root}"
+                    BorderThickness="1"
+                    CornerRadius="24"
+                    Padding="18">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28"
+                                      ShadowDepth="10"
+                                      Opacity="0.18"
+                                      Color="#FF0F172A"/>
+                </Border.Effect>
+
+                <StackPanel>
+                    <TextBlock Text="Ações rápidas"
+                               FontFamily="{StaticResource AppDisplayFontFamily}"
+                               FontSize="18"
+                               FontWeight="ExtraBold"
+                               Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                    <TextBlock Text="Janela, acessibilidade, atalhos e suporte no mesmo menu compartilhado."
+                               Margin="0,6,0,0"
+                               FontSize="11"
+                               TextWrapping="Wrap"
+                               Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+
+                    <Border Margin="0,16,0,16"
+                            Height="1"
+                            Background="{Binding EffectiveQuickActionsBorderBrush, ElementName=Root}"/>
+
+                    <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                            Click="ToggleKeepOnTopQuickAction_Click">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel>
+                                <TextBlock Text="Manter janela no topo"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock Text="Ctrl+Shift+T"
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="KeepOnTopQuickActionStatusText"
+                                       Grid.Column="1"
+                                       Margin="16,0,0,0"
+                                       VerticalAlignment="Center"
+                                       FontSize="11"
+                                       FontWeight="Bold"
+                                       Foreground="{Binding EffectiveQuickActionsAccentBrush, ElementName=Root}"
+                                       Text="Desativado"/>
+                        </Grid>
+                    </Button>
+
+                    <Button x:Name="ProfileQuickActionButton"
+                            Style="{StaticResource QuickActionMenuButtonStyle}"
+                            Click="OpenProfileQuickAction_Click"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Perfil"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                            <TextBlock Text="Abrir as configurações de perfil e de sessão desta área principal."
+                                       Margin="0,4,0,0"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Border Margin="0,0,0,8"
+                            Padding="14"
+                            Background="{Binding EffectiveQuickActionsMutedSurfaceBrush, ElementName=Root}"
+                            BorderBrush="{Binding EffectiveQuickActionsBorderBrush, ElementName=Root}"
+                            BorderThickness="1"
+                            CornerRadius="18">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel>
+                                <TextBlock Text="Tamanho do texto"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock Text="Escala global da interface para leitura, projeção e foco."
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Margin="16,0,0,0">
+                                <Button x:Name="DecreaseTextScaleButton"
+                                        Style="{StaticResource QuickActionMiniButtonStyle}"
+                                        Click="DecreaseTextScaleButton_Click"
+                                        Content="-"
+                                        FontSize="18"
+                                        FontWeight="SemiBold"
+                                        Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock x:Name="TextScalePercentText"
+                                           Width="68"
+                                           Margin="10,0"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center"
+                                           FontSize="12"
+                                           FontWeight="Bold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"
+                                           Text="(100)%"/>
+                                <Button x:Name="IncreaseTextScaleButton"
+                                        Style="{StaticResource QuickActionMiniButtonStyle}"
+                                        Click="IncreaseTextScaleButton_Click"
+                                        Content="+"
+                                        FontSize="18"
+                                        FontWeight="SemiBold"
+                                        Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                            Click="ToggleHelpQuickAction_Click">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel>
+                                <TextBlock Text="Ajuda"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock Text="Guias rápidos, contexto do shell e acesso ao log atual."
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+
+                            <iconPacks:PackIconMaterial x:Name="HelpChevronIcon"
+                                                        Grid.Column="1"
+                                                        Width="18"
+                                                        Height="18"
+                                                        Margin="16,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Kind="ChevronRight"
+                                                        Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                        </Grid>
+                    </Button>
+
+                    <StackPanel x:Name="HelpMenuPanel"
+                                Margin="12,-2,0,8"
+                                Visibility="Collapsed">
+                        <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                                Margin="0,0,0,6"
+                                Padding="12,10"
+                                Click="OpenQuickGuideQuickAction_Click">
+                            <StackPanel>
+                                <TextBlock Text="Guia rápido"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock Text="Resumo dos controles rápidos, da navegação e do comportamento do shell."
+                                           Margin="0,4,0,0"
+                                           FontSize="10"
+                                           TextWrapping="Wrap"
+                                           Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                                Margin="0"
+                                Padding="12,10"
+                                Click="OpenApplicationLogQuickAction_Click">
+                            <StackPanel>
+                                <TextBlock Text="Abrir log do app"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                                <TextBlock Text="Abra o arquivo de diagnóstico atual sem sair da janela."
+                                           Margin="0,4,0,0"
+                                           FontSize="10"
+                                           TextWrapping="Wrap"
+                                           Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                            Click="ShowKeyboardShortcutsQuickAction_Click">
+                        <StackPanel>
+                            <TextBlock Text="Atalhos do teclado"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                            <TextBlock Text="Ctrl+."
+                                       Margin="0,4,0,0"
+                                       FontSize="11"
+                                       Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource QuickActionMenuButtonStyle}"
+                            Margin="0"
+                            Click="OpenAccessibilityQuickAction_Click">
+                        <StackPanel>
+                            <TextBlock Text="Acessibilidade"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="{Binding EffectiveQuickActionsPrimaryBrush, ElementName=Root}"/>
+                            <TextBlock Text="Alto contraste, tamanho do texto e redução de animações."
+                                       Margin="0,4,0,0"
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Foreground="{Binding EffectiveQuickActionsSecondaryBrush, ElementName=Root}"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

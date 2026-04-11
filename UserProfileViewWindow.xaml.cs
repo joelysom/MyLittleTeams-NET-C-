@@ -12,7 +12,7 @@ using MahApps.Metro.Controls;
 
 namespace MeuApp
 {
-    public partial class UserProfileViewWindow : Window
+    public partial class UserProfileViewWindow : ChromeWindow
     {
         private readonly UserProfile _profile;
         private readonly UserProfile? _viewerProfile;

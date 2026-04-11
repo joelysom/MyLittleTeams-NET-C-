@@ -64,7 +64,7 @@ namespace MeuApp
         }
     }
 
-    public partial class DebugConsoleWindow : Window
+    public partial class DebugConsoleWindow : ChromeWindow
     {
         private const int MaxStoredEntries = 6000;
         private const int MaxVisibleEntries = 2000;

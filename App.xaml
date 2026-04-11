@@ -26,6 +26,12 @@
             <Setter Property="Background" Value="{StaticResource BrandSurfaceBrush}"/>
         </Style>
 
+        <Style TargetType="{x:Type local:ChromeWindow}">
+            <Setter Property="Icon" Value="pack://application:,,,/img/favicon.ico"/>
+            <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
+            <Setter Property="Background" Value="{StaticResource BrandSurfaceBrush}"/>
+        </Style>
+
         <Style TargetType="{x:Type mah:MetroWindow}">
             <Setter Property="Icon" Value="pack://application:,,,/img/favicon.ico"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>

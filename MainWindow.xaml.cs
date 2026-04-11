@@ -33,8 +33,21 @@ using W = DocumentFormat.OpenXml.Wordprocessing;
 
 namespace MeuApp
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : ChromeWindow
     {
+        private enum ChatConversationFilterMode
+        {
+            Favorites,
+            AllChats
+        }
+
+        private enum ChatConversationSortMode
+        {
+            Custom,
+            MostRecent,
+            UnreadOnly
+        }
+
         private const int MaxProfileGalleryImages = 6;
         private const int ProfileGalleryImageMaxSide = 720;
         private const int ProfilePhotoOutputSize = 720;
@@ -47,6 +60,8 @@ namespace MeuApp
         private const int TeachingClassIconUploadQuality = 84;
         private const int MaxRemoteTeamAssetBytes = 26214400;
         private const string TeachingClassModuleHome = "home";
+        private const string SelfChatPlaceholderText = "Aqui é o seu chat próprio para notas, lembretes, fotos e arquivos rápidos.";
+        private const string SelfChatPreviewText = "Seus lembretes, fotos e arquivos ficam aqui.";
         private static readonly HttpClient httpClient = new HttpClient();
         private static readonly string[] KnownProgrammingLanguages =
         {
@@ -229,6 +244,9 @@ namespace MeuApp
         private TeamWorkspaceInfo? _activeTeamWorkspace = null;
         private TeamEntryMode _teamEntryMode = TeamEntryMode.None;
         private string _chatListFilter = string.Empty;
+        private ChatConversationFilterMode _activeConversationFilter = ChatConversationFilterMode.AllChats;
+        private ChatConversationSortMode _activeConversationSortMode = ChatConversationSortMode.Custom;
+        private readonly Dictionary<string, DateTime> _mutedConversationUntil = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private const double ExpandedSidebarWidth = 288;
         private const double CollapsedSidebarWidth = 96;
         private bool _appDarkModeEnabled = false;
@@ -374,17 +392,44 @@ namespace MeuApp
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetCursorPos(out NativePoint point);
 
+        private TextBlock WelcomeText => FindRequiredTitleBarElement<TextBlock>("MainWindow.WelcomeText");
+
+        private TextBox SearchFriendsBox => FindRequiredTitleBarElement<TextBox>("MainWindow.SearchFriendsBox");
+
+        private Button TestFirebaseButton => FindRequiredTitleBarElement<Button>("MainWindow.TestFirebaseButton");
+
         public MainWindow()
         {
             InitializeComponent();
+            _appDarkModeEnabled = AccessibilityPreferences.DarkModeEnabled;
             ProgrammingLanguageInput.ItemsSource = KnownProgrammingLanguages.OrderBy(language => language).ToList();
             InitializeTeamsUi();
             InitializeRealtimeSync();
             ApplyAppTheme();
+            SyncThemeToggleState();
             ApplySidebarState();
             SetActiveNavigation("Chats");
             this.KeyDown += MainWindow_KeyDown;
             this.Loaded += MainWindow_Loaded;
+        }
+
+        private void SyncThemeToggleState()
+        {
+            if (ChatDarkModeToggle != null)
+            {
+                ChatDarkModeToggle.IsChecked = _appDarkModeEnabled;
+            }
+        }
+
+        private T FindRequiredTitleBarElement<T>(string tag) where T : FrameworkElement
+        {
+            var element = MainWindowTitleBar?.FindTaggedContentElement<T>(tag);
+            if (element != null)
+            {
+                return element;
+            }
+
+            throw new InvalidOperationException($"Elemento da title bar não encontrado: {tag}");
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -662,6 +707,12 @@ namespace MeuApp
             RefreshAvatarUi(profile);
             SyncCurrentUserAvatarAcrossTeams(profile);
             SyncTeamDefaultsWithProfile(profile);
+            NormalizeChatConversations(_conversations);
+            if (_selectedConversation == null)
+            {
+                _selectedConversation = _conversations.FirstOrDefault(conversation => conversation.IsSelfConversation)
+                    ?? _conversations.FirstOrDefault();
+            }
             RenderProfessorDashboard();
 
             if (FilesContent.Visibility == Visibility.Visible)
@@ -3020,9 +3071,10 @@ namespace MeuApp
             {
                 "projeto" => 0,
                 "sessao" => 1,
-                "trabalho" => 2,
-                "atividade" => 3,
-                _ => 4
+                "chat" => 2,
+                "trabalho" => 3,
+                "atividade" => 4,
+                _ => 5
             };
         }
 
@@ -3032,6 +3084,7 @@ namespace MeuApp
             {
                 "projeto" => Color.FromRgb(37, 99, 235),
                 "sessao" => Color.FromRgb(14, 165, 233),
+                "chat" => Color.FromRgb(0, 168, 132),
                 "trabalho" => Color.FromRgb(16, 185, 129),
                 "atividade" => Color.FromRgb(245, 158, 11),
                 _ => Color.FromRgb(124, 58, 237)
@@ -3044,6 +3097,7 @@ namespace MeuApp
             {
                 "projeto" => "Base mais ampla da entrega ou do produto.",
                 "sessao" => "Rodada, aula ou encontro com recorte especifico.",
+                "chat" => "Material preparado a partir do composer e das conversas do chat.",
                 "trabalho" => "Entrega formal com objetivo fechado.",
                 "atividade" => "Apoio pontual para tarefa ou checklist.",
                 _ => "Material avulso aguardando uma trilha melhor."
@@ -4278,6 +4332,7 @@ namespace MeuApp
                 TickFrequency = 0.05,
                 IsSnapToTickEnabled = false
             };
+            ApplyDialogSliderStyle(zoomSlider);
             workspaceStack.Children.Add(zoomSlider);
 
             var zoomHints = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -8470,6 +8525,7 @@ namespace MeuApp
         private Border CreateTaskCard(TeamWorkspaceInfo team, TeamTaskColumnInfo column, TeamTaskCardInfo card, bool compactMode)
         {
             var isOverdue = card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today;
+            var dangerBrush = GetThemeBrush("DangerBrush");
             var priorityColor = card.Priority switch
             {
                 "Alta" => Color.FromRgb(220, 38, 38),
@@ -8488,9 +8544,9 @@ namespace MeuApp
             var cardBorder = new Border
             {
                 Background = isOverdue
-                    ? new SolidColorBrush(Color.FromRgb(254, 242, 242))
-                    : Brushes.White,
-                BorderBrush = new SolidColorBrush(isOverdue ? Color.FromRgb(220, 38, 38) : Color.FromRgb(226, 232, 240)),
+                    ? CreateSoftAccentBrush(dangerBrush, 24)
+                    : GetElevatedSurfaceBrush(),
+                BorderBrush = isOverdue ? dangerBrush : GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(18),
                 Padding = compactMode ? new Thickness(14) : new Thickness(16),
@@ -16232,6 +16288,7 @@ namespace MeuApp
                 var isSelected = !_teachingClassComposerOpen
                     && _activeTeachingClass != null
                     && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
+                var selectedChipBackground = _appDarkModeEnabled ? GetElevatedSurfaceBrush() : Brushes.White;
 
                 var button = new Button
                 {
@@ -16275,8 +16332,8 @@ namespace MeuApp
                     Margin = new Thickness(0, 10, 0, 0),
                     Children =
                     {
-                        CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
-                        CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
+                        CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? selectedChipBackground : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
+                        CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? selectedChipBackground : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
                     }
                 });
                 tile.Children.Add(identity);
@@ -17139,6 +17196,8 @@ namespace MeuApp
             var accentSolid = accentBrush as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(124, 58, 237));
             var isSelected = string.Equals(_teachingClassGallerySelectionId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
             var coverSource = TryCreateImageSourceFromDataUri(teachingClass.IconPreviewImageDataUri);
+            var coverChipBackground = GetOverlayContrastBrush(118, 150);
+            var selectedCoverChipBackground = _appDarkModeEnabled ? GetOverlayContrastBrush(255, 204) : Brushes.White;
             var idleBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 14) : GetThemeBrush("MutedCardBackgroundBrush");
             var hoverBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 22) : CreateSoftAccentBrush(accentBrush, 10);
             var idleBorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush");
@@ -17230,11 +17289,11 @@ namespace MeuApp
             coverTopRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             coverTopRow.Children.Add(CreateStaticTeamChip(
                 string.IsNullOrWhiteSpace(teachingClass.AcademicTerm) ? teachingClass.Course : teachingClass.AcademicTerm,
-                new SolidColorBrush(Color.FromArgb(118, 255, 255, 255)),
+                coverChipBackground,
                 Brushes.White));
             var stateChip = CreateStaticTeamChip(
                 isSelected ? "Última aberta" : "Abrir turma",
-                isSelected ? Brushes.White : new SolidColorBrush(Color.FromArgb(112, 255, 255, 255)),
+                isSelected ? selectedCoverChipBackground : coverChipBackground,
                 isSelected ? accentBrush : Brushes.White);
             Grid.SetColumn(stateChip, 1);
             coverTopRow.Children.Add(stateChip);
@@ -17357,7 +17416,7 @@ namespace MeuApp
             iconBadge.Margin = new Thickness(18, 0, 0, -36);
             iconBadge.HorizontalAlignment = HorizontalAlignment.Left;
             iconBadge.VerticalAlignment = VerticalAlignment.Bottom;
-            iconBadge.BorderBrush = Brushes.White;
+            iconBadge.BorderBrush = _appDarkModeEnabled ? GetElevatedSurfaceBrush() : Brushes.White;
             iconBadge.BorderThickness = new Thickness(3);
             Grid.SetRow(iconBadge, 0);
             rootGrid.Children.Add(iconBadge);
@@ -17542,6 +17601,7 @@ namespace MeuApp
         {
             var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
             var selectionBrush = CreateSoftAccentBrush(accentBrush, 26);
+            var selectedChipBackground = _appDarkModeEnabled ? GetElevatedSurfaceBrush() : Brushes.White;
 
             var button = new Button
             {
@@ -17581,8 +17641,8 @@ namespace MeuApp
                 Margin = new Thickness(0, 10, 0, 0),
                 Children =
                 {
-                    CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
-                    CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? Brushes.White : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
+                    CreateStaticTeamChip($"Código {teachingClass.JoinCode}", isSelected ? selectedChipBackground : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip($"{teachingClass.StudentIds.Count} aluno(s)", isSelected ? selectedChipBackground : GetThemeBrush("CardBackgroundBrush"), isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"))
                 }
             });
             contentGrid.Children.Add(identityStack);
@@ -22077,6 +22137,7 @@ namespace MeuApp
             var team = dragInfo.Team;
             var column = dragInfo.Column;
             var isOverdue = card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today;
+            var dangerBrush = GetThemeBrush("DangerBrush");
             var priorityColor = card.Priority switch
             {
                 "Alta" => Color.FromRgb(220, 38, 38),
@@ -22167,9 +22228,9 @@ namespace MeuApp
                 Width = 260,
                 MaxWidth = 260,
                 Background = isOverdue
-                    ? new SolidColorBrush(Color.FromRgb(254, 242, 242))
-                    : Brushes.White,
-                BorderBrush = new SolidColorBrush(isOverdue ? Color.FromRgb(220, 38, 38) : column.AccentColor),
+                    ? CreateSoftAccentBrush(dangerBrush, 24)
+                    : GetElevatedSurfaceBrush(),
+                BorderBrush = isOverdue ? dangerBrush : new SolidColorBrush(column.AccentColor),
                 BorderThickness = new Thickness(2),
                 CornerRadius = new CornerRadius(18),
                 Padding = new Thickness(16),
@@ -23838,10 +23899,50 @@ namespace MeuApp
             };
         }
 
+        private Brush GetElevatedSurfaceBrush()
+        {
+            return _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(24, 37, 58))
+                : Brushes.White;
+        }
+
+        private Brush GetOverlayContrastBrush(byte lightAlpha = 118, byte darkAlpha = 156)
+        {
+            return _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromArgb(darkAlpha, 15, 23, 42))
+                : new SolidColorBrush(Color.FromArgb(lightAlpha, 255, 255, 255));
+        }
+
+        private static Color BlendColors(Color background, Color foreground, double foregroundRatio)
+        {
+            var ratio = Math.Clamp(foregroundRatio, 0d, 1d);
+
+            static byte BlendChannel(byte backgroundChannel, byte foregroundChannel, double ratio)
+            {
+                return (byte)Math.Clamp(
+                    (int)Math.Round((backgroundChannel * (1 - ratio)) + (foregroundChannel * ratio)),
+                    0,
+                    255);
+            }
+
+            return Color.FromRgb(
+                BlendChannel(background.R, foreground.R, ratio),
+                BlendChannel(background.G, foreground.G, ratio),
+                BlendChannel(background.B, foreground.B, ratio));
+        }
+
         private Brush CreateSoftAccentBrush(Brush accentBrush, byte alpha = 28)
         {
             if (accentBrush is SolidColorBrush solidBrush)
             {
+                if (_appDarkModeEnabled)
+                {
+                    var surfaceColor = GetThemeBrush("MutedCardBackgroundBrush").Color;
+                    var blendedColor = BlendColors(surfaceColor, solidBrush.Color, 0.34);
+                    var adjustedAlpha = (byte)Math.Clamp(alpha + 28, 52, 112);
+                    return new SolidColorBrush(Color.FromArgb(adjustedAlpha, blendedColor.R, blendedColor.G, blendedColor.B));
+                }
+
                 return new SolidColorBrush(Color.FromArgb(alpha, solidBrush.Color.R, solidBrush.Color.G, solidBrush.Color.B));
             }
 
@@ -24668,6 +24769,7 @@ namespace MeuApp
                 Value = team.ProjectProgress,
                 Margin = new Thickness(0, 16, 0, 8)
             };
+            ApplyDialogSliderStyle(progressSlider);
             var progressMarkers = new UniformGrid
             {
                 Columns = 5,
@@ -26012,6 +26114,17 @@ namespace MeuApp
             SearchSlideOverlay.Visibility = Visibility.Visible;
             SearchSlidePanel.Visibility = Visibility.Visible;
 
+            if (AccessibilityPreferences.ReduceAnimations)
+            {
+                SearchSlidePanel.Opacity = 1;
+                if (SearchSlidePanel.RenderTransform is TranslateTransform reducedMotionTransform)
+                {
+                    reducedMotionTransform.X = 0;
+                }
+
+                return;
+            }
+
             var opacityAnimation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180));
             SearchSlidePanel.BeginAnimation(OpacityProperty, opacityAnimation);
 
@@ -26025,6 +26138,20 @@ namespace MeuApp
         {
             if (SearchSlideOverlay.Visibility != Visibility.Visible)
             {
+                return;
+            }
+
+            if (AccessibilityPreferences.ReduceAnimations)
+            {
+                SearchSlideOverlay.Visibility = Visibility.Collapsed;
+                SearchSlidePanel.Visibility = Visibility.Collapsed;
+                SearchSlideResultsHost.Children.Clear();
+                SearchSlideEmptyStateText.Visibility = Visibility.Collapsed;
+                if (SearchSlidePanel.RenderTransform is TranslateTransform reducedMotionTransform)
+                {
+                    reducedMotionTransform.X = 56;
+                }
+
                 return;
             }
 
@@ -26155,10 +26282,20 @@ namespace MeuApp
 
         private void OpenSettings_Click(object sender, RoutedEventArgs e)
         {
+            ShowSettingsPanel();
+        }
+
+        private void ShowSettingsPanel()
+        {
             ResetNavigation();
             SetActiveNavigation("Configuracoes");
             SettingsContent.Visibility = Visibility.Visible;
             PopulateProfessionalProfileFields(_currentProfile ?? new UserProfile());
+        }
+
+        private void MainWindowTitleBar_ProfileRequested(object sender, RoutedEventArgs e)
+        {
+            ShowSettingsPanel();
         }
 
         private void ResetNavigation()
@@ -26373,8 +26510,23 @@ namespace MeuApp
 
         private void ChatDarkModeToggle_Changed(object sender, RoutedEventArgs e)
         {
-            _appDarkModeEnabled = ChatDarkModeToggle.IsChecked == true;
+            AccessibilityPreferences.SetDarkModeEnabled(ChatDarkModeToggle.IsChecked == true);
+        }
+
+        protected override void OnAccessibilitySettingsChanged(AccessibilitySettings settings)
+        {
+            _appDarkModeEnabled = settings.DarkModeEnabled;
+            SyncThemeToggleState();
             ApplyAppTheme();
+            RefreshVisibleWorkspaceAfterThemeChange();
+        }
+
+        private void RefreshVisibleWorkspaceAfterThemeChange()
+        {
+            if (ChatsContent == null)
+            {
+                return;
+            }
 
             if (ChatsContent.Visibility == Visibility.Visible)
             {
@@ -26728,30 +26880,80 @@ namespace MeuApp
 
         private void ApplyAppTheme()
         {
-            SetThemeBrush("WindowBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(7, 17, 31) : Color.FromRgb(243, 247, 252));
-            SetThemeBrush("SurfaceBrush", _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
-            SetThemeBrush("SidebarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(9, 17, 30) : Color.FromRgb(248, 250, 252));
-            SetThemeBrush("SidebarBorderBrush", _appDarkModeEnabled ? Color.FromRgb(30, 41, 59) : Color.FromRgb(226, 232, 240));
-            SetThemeBrush("TopBarBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
-            SetThemeBrush("MainContentBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(8, 16, 27) : Color.FromRgb(248, 251, 255));
-            SetThemeBrush("SearchBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
-            SetThemeBrush("SearchBorderBrush", _appDarkModeEnabled ? Color.FromRgb(36, 50, 71) : Color.FromRgb(216, 226, 238));
-            SetThemeBrush("PrimaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));
-            SetThemeBrush("SecondaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(71, 85, 105));
-            SetThemeBrush("TertiaryTextBrush", _appDarkModeEnabled ? Color.FromRgb(100, 116, 139) : Color.FromRgb(100, 116, 139));
-            SetThemeBrush("CardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(15, 23, 42) : Colors.White);
-            SetThemeBrush("MutedCardBackgroundBrush", _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
-            SetThemeBrush("CardBorderBrush", _appDarkModeEnabled ? Color.FromRgb(34, 50, 71) : Color.FromRgb(219, 229, 240));
-            SetThemeBrush("AccentBrush", _appDarkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
-            SetThemeBrush("AccentMutedBrush", _appDarkModeEnabled ? Color.FromRgb(16, 38, 69) : Color.FromRgb(232, 238, 255));
-            SetThemeBrush("SidebarHoverBrush", _appDarkModeEnabled ? Color.FromRgb(16, 34, 58) : Color.FromRgb(238, 244, 255));
-            SetThemeBrush("SidebarActiveBrush", _appDarkModeEnabled ? Color.FromRgb(19, 42, 73) : Color.FromRgb(231, 238, 255));
-            SetThemeBrush("SidebarActiveBorderBrush", _appDarkModeEnabled ? Color.FromRgb(59, 130, 246) : Color.FromRgb(191, 219, 254));
-            SetThemeBrush("SuccessBrush", _appDarkModeEnabled ? Color.FromRgb(34, 197, 94) : Color.FromRgb(22, 163, 74));
-            SetThemeBrush("WarningBrush", _appDarkModeEnabled ? Color.FromRgb(245, 158, 11) : Color.FromRgb(245, 158, 11));
-            SetThemeBrush("DangerBrush", _appDarkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
-            SetThemeBrush("ToggleTrackOffBrush", _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
-            SetThemeBrush("ToggleTrackOnBrush", _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
+            var highContrastEnabled = AccessibilityPreferences.HighContrastEnabled;
+
+            SetThemeBrush("WindowBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(3, 7, 18)
+                : _appDarkModeEnabled ? Color.FromRgb(7, 17, 31) : Color.FromRgb(243, 247, 252));
+            SetThemeBrush("SurfaceBrush", highContrastEnabled
+                ? Color.FromRgb(6, 12, 24)
+                : _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+            SetThemeBrush("SidebarBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(0, 0, 0)
+                : _appDarkModeEnabled ? Color.FromRgb(9, 17, 30) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("SidebarBorderBrush", highContrastEnabled
+                ? Color.FromRgb(56, 189, 248)
+                : _appDarkModeEnabled ? Color.FromRgb(30, 41, 59) : Color.FromRgb(226, 232, 240));
+            SetThemeBrush("TopBarBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(6, 12, 24)
+                : _appDarkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+            SetThemeBrush("MainContentBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(4, 9, 18)
+                : _appDarkModeEnabled ? Color.FromRgb(8, 16, 27) : Color.FromRgb(248, 251, 255));
+            SetThemeBrush("SearchBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(11, 18, 32)
+                : _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("SearchBorderBrush", highContrastEnabled
+                ? Color.FromRgb(56, 189, 248)
+                : _appDarkModeEnabled ? Color.FromRgb(36, 50, 71) : Color.FromRgb(216, 226, 238));
+            SetThemeBrush("PrimaryTextBrush", highContrastEnabled
+                ? Color.FromRgb(248, 250, 252)
+                : _appDarkModeEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));
+            SetThemeBrush("SecondaryTextBrush", highContrastEnabled
+                ? Color.FromRgb(203, 213, 225)
+                : _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(71, 85, 105));
+            SetThemeBrush("TertiaryTextBrush", highContrastEnabled
+                ? Color.FromRgb(148, 163, 184)
+                : Color.FromRgb(100, 116, 139));
+            SetThemeBrush("CardBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(6, 12, 24)
+                : _appDarkModeEnabled ? Color.FromRgb(15, 23, 42) : Colors.White);
+            SetThemeBrush("MutedCardBackgroundBrush", highContrastEnabled
+                ? Color.FromRgb(11, 18, 32)
+                : _appDarkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+            SetThemeBrush("CardBorderBrush", highContrastEnabled
+                ? Color.FromRgb(56, 189, 248)
+                : _appDarkModeEnabled ? Color.FromRgb(34, 50, 71) : Color.FromRgb(219, 229, 240));
+            SetThemeBrush("AccentBrush", highContrastEnabled
+                ? Color.FromRgb(125, 211, 252)
+                : _appDarkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
+            SetThemeBrush("AccentMutedBrush", highContrastEnabled
+                ? Color.FromRgb(12, 36, 63)
+                : _appDarkModeEnabled ? Color.FromRgb(16, 38, 69) : Color.FromRgb(232, 238, 255));
+            SetThemeBrush("SidebarHoverBrush", highContrastEnabled
+                ? Color.FromRgb(15, 23, 42)
+                : _appDarkModeEnabled ? Color.FromRgb(16, 34, 58) : Color.FromRgb(238, 244, 255));
+            SetThemeBrush("SidebarActiveBrush", highContrastEnabled
+                ? Color.FromRgb(10, 39, 69)
+                : _appDarkModeEnabled ? Color.FromRgb(19, 42, 73) : Color.FromRgb(231, 238, 255));
+            SetThemeBrush("SidebarActiveBorderBrush", highContrastEnabled
+                ? Color.FromRgb(125, 211, 252)
+                : _appDarkModeEnabled ? Color.FromRgb(59, 130, 246) : Color.FromRgb(191, 219, 254));
+            SetThemeBrush("SuccessBrush", highContrastEnabled
+                ? Color.FromRgb(74, 222, 128)
+                : _appDarkModeEnabled ? Color.FromRgb(34, 197, 94) : Color.FromRgb(22, 163, 74));
+            SetThemeBrush("WarningBrush", highContrastEnabled
+                ? Color.FromRgb(250, 204, 21)
+                : Color.FromRgb(245, 158, 11));
+            SetThemeBrush("DangerBrush", highContrastEnabled
+                ? Color.FromRgb(248, 113, 113)
+                : _appDarkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
+            SetThemeBrush("ToggleTrackOffBrush", highContrastEnabled
+                ? Color.FromRgb(71, 85, 105)
+                : _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
+            SetThemeBrush("ToggleTrackOnBrush", highContrastEnabled
+                ? Color.FromRgb(14, 165, 233)
+                : _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
             SetThemeBrush("ToggleThumbBrush", Colors.White);
 
             Background = GetThemeBrush("WindowBackgroundBrush");
@@ -26810,6 +27012,10 @@ namespace MeuApp
                     existing.ContactAvatarClothing = contactUser.AvatarClothing;
                     _selectedConversation = existing;
                 }
+
+                NormalizeChatConversations(_conversations);
+                _selectedConversation = _conversations.FirstOrDefault(c => string.Equals(c.ContactId, contactUser.UserId, StringComparison.OrdinalIgnoreCase))
+                    ?? _selectedConversation;
                 
                 // Mostrar aba Chats
                 ResetNavigation();
@@ -26882,6 +27088,229 @@ namespace MeuApp
             }
         }
 
+        private string BuildConversationId(string contactId)
+        {
+            if (string.IsNullOrWhiteSpace(contactId))
+            {
+                return Guid.NewGuid().ToString("N");
+            }
+
+            var currentUserId = GetCurrentUserId();
+            if (!string.IsNullOrWhiteSpace(_idToken) && !string.IsNullOrWhiteSpace(currentUserId))
+            {
+                return new ChatService(_idToken, currentUserId).BuildConversationId(contactId);
+            }
+
+            return contactId;
+        }
+
+        private bool IsSelfConversation(string contactId)
+        {
+            var currentUserId = GetCurrentUserId();
+            return !string.IsNullOrWhiteSpace(contactId)
+                && !string.IsNullOrWhiteSpace(currentUserId)
+                && string.Equals(contactId, currentUserId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private Conversation CreateSelfConversationSnapshot()
+        {
+            var currentUserId = GetCurrentUserId();
+            return new Conversation
+            {
+                ConversationId = BuildConversationId(currentUserId),
+                ContactId = currentUserId,
+                ContactName = string.IsNullOrWhiteSpace(_currentProfile?.Name) ? "Você" : _currentProfile?.Name ?? "Você",
+                ContactProfilePhotoDataUri = _currentProfile?.ProfilePhotoDataUri ?? string.Empty,
+                ContactAvatarBody = _currentProfile?.AvatarBody ?? string.Empty,
+                ContactAvatarHair = _currentProfile?.AvatarHair ?? string.Empty,
+                ContactAvatarHat = _currentProfile?.AvatarHat ?? string.Empty,
+                ContactAvatarAccessory = _currentProfile?.AvatarAccessory ?? string.Empty,
+                ContactAvatarClothing = _currentProfile?.AvatarClothing ?? string.Empty,
+                LastMessage = SelfChatPreviewText,
+                LastMessageTime = DateTime.Now,
+                LastSenderId = currentUserId,
+                HasUnread = false,
+                IsFavorite = true,
+                CanRemoveFromFavorites = false,
+                IsSelfConversation = true,
+                CustomSortOrder = 0
+            };
+        }
+
+        private static Conversation CloneConversationSummary(Conversation source)
+        {
+            return new Conversation
+            {
+                ConversationId = source.ConversationId,
+                ContactId = source.ContactId,
+                ContactName = source.ContactName,
+                ContactProfilePhotoDataUri = source.ContactProfilePhotoDataUri,
+                ContactAvatarBody = source.ContactAvatarBody,
+                ContactAvatarHair = source.ContactAvatarHair,
+                ContactAvatarHat = source.ContactAvatarHat,
+                ContactAvatarAccessory = source.ContactAvatarAccessory,
+                ContactAvatarClothing = source.ContactAvatarClothing,
+                LastMessage = source.LastMessage,
+                LastMessageTime = source.LastMessageTime,
+                LastSenderId = source.LastSenderId,
+                LastReadAt = source.LastReadAt,
+                HasUnread = source.HasUnread,
+                IsFavorite = source.IsFavorite,
+                CanRemoveFromFavorites = source.CanRemoveFromFavorites,
+                CustomSortOrder = source.CustomSortOrder,
+                IsSelfConversation = source.IsSelfConversation,
+                Messages = new List<ChatMessage>(source.Messages ?? new List<ChatMessage>())
+            };
+        }
+
+        private void SyncCurrentUserConversationVisuals(Conversation conversation)
+        {
+            if (conversation == null || !conversation.IsSelfConversation || _currentProfile == null)
+            {
+                return;
+            }
+
+            conversation.ContactId = GetCurrentUserId();
+            conversation.ContactName = string.IsNullOrWhiteSpace(_currentProfile.Name) ? "Você" : _currentProfile.Name;
+            conversation.ContactProfilePhotoDataUri = _currentProfile.ProfilePhotoDataUri ?? string.Empty;
+            conversation.ContactAvatarBody = _currentProfile.AvatarBody ?? string.Empty;
+            conversation.ContactAvatarHair = _currentProfile.AvatarHair ?? string.Empty;
+            conversation.ContactAvatarHat = _currentProfile.AvatarHat ?? string.Empty;
+            conversation.ContactAvatarAccessory = _currentProfile.AvatarAccessory ?? string.Empty;
+            conversation.ContactAvatarClothing = _currentProfile.AvatarClothing ?? string.Empty;
+        }
+
+        private void EnsureSelectedConversationEntry(List<Conversation> conversations)
+        {
+            if (_selectedConversation == null || string.IsNullOrWhiteSpace(_selectedConversation.ContactId))
+            {
+                return;
+            }
+
+            var existing = conversations.FirstOrDefault(conversation =>
+                string.Equals(conversation.ContactId, _selectedConversation.ContactId, StringComparison.OrdinalIgnoreCase));
+
+            if (existing == null)
+            {
+                conversations.Insert(0, CloneConversationSummary(_selectedConversation));
+            }
+        }
+
+        private void EnsureSelfConversationEntry(List<Conversation> conversations)
+        {
+            var currentUserId = GetCurrentUserId();
+            if (string.IsNullOrWhiteSpace(currentUserId))
+            {
+                return;
+            }
+
+            var existing = conversations.FirstOrDefault(conversation => IsSelfConversation(conversation.ContactId));
+            if (existing == null)
+            {
+                conversations.Insert(0, CreateSelfConversationSnapshot());
+                return;
+            }
+
+            existing.IsSelfConversation = true;
+            existing.IsFavorite = true;
+            existing.CanRemoveFromFavorites = false;
+            if (string.IsNullOrWhiteSpace(existing.LastMessage))
+            {
+                existing.LastMessage = SelfChatPreviewText;
+                existing.LastMessageTime = DateTime.Now;
+            }
+
+            SyncCurrentUserConversationVisuals(existing);
+        }
+
+        private void NormalizeConversation(Conversation conversation, int fallbackSortOrder)
+        {
+            conversation.IsSelfConversation = conversation.IsSelfConversation || IsSelfConversation(conversation.ContactId);
+            conversation.ConversationId = string.IsNullOrWhiteSpace(conversation.ConversationId)
+                ? BuildConversationId(conversation.ContactId)
+                : conversation.ConversationId;
+
+            conversation.ContactName = string.IsNullOrWhiteSpace(conversation.ContactName)
+                ? (conversation.IsSelfConversation ? _currentProfile?.Name ?? "Você" : "Contato")
+                : conversation.ContactName;
+
+            conversation.LastMessage = string.IsNullOrWhiteSpace(conversation.LastMessage)
+                ? (conversation.IsSelfConversation ? SelfChatPreviewText : "Abra a conversa para continuar.")
+                : conversation.LastMessage;
+
+            if (conversation.LastMessageTime == default)
+            {
+                conversation.LastMessageTime = DateTime.Now.AddMinutes(-fallbackSortOrder);
+            }
+
+            if (conversation.CustomSortOrder <= 0 && !conversation.IsSelfConversation)
+            {
+                conversation.CustomSortOrder = fallbackSortOrder;
+            }
+
+            if (conversation.IsSelfConversation)
+            {
+                conversation.IsFavorite = true;
+                conversation.CanRemoveFromFavorites = false;
+                conversation.CustomSortOrder = 0;
+                SyncCurrentUserConversationVisuals(conversation);
+            }
+        }
+
+        private void NormalizeChatConversations(List<Conversation> conversations)
+        {
+            EnsureSelectedConversationEntry(conversations);
+            EnsureSelfConversationEntry(conversations);
+
+            for (var index = 0; index < conversations.Count; index++)
+            {
+                NormalizeConversation(conversations[index], index + 1);
+            }
+        }
+
+        private void SetConversationFilter(ChatConversationFilterMode filterMode)
+        {
+            if (_activeConversationFilter == filterMode)
+            {
+                return;
+            }
+
+            _activeConversationFilter = filterMode;
+            RefreshChatsUI();
+        }
+
+        private void SetConversationSortMode(ChatConversationSortMode sortMode)
+        {
+            if (_activeConversationSortMode == sortMode)
+            {
+                return;
+            }
+
+            _activeConversationSortMode = sortMode;
+            RefreshChatsUI();
+        }
+
+        private string GetConversationSortStatusText()
+        {
+            return _activeConversationSortMode switch
+            {
+                ChatConversationSortMode.MostRecent => "Mais recentes",
+                ChatConversationSortMode.UnreadOnly => "Somente não lidos",
+                _ => "Personalizada"
+            };
+        }
+
+        private void ToggleConversationFavorite(Conversation conversation)
+        {
+            if (conversation == null || conversation.IsSelfConversation)
+            {
+                return;
+            }
+
+            conversation.IsFavorite = !conversation.IsFavorite;
+            RefreshChatsUI();
+        }
+
         private void RefreshChatsUI()
         {
             try
@@ -26926,18 +27355,36 @@ namespace MeuApp
 
         private IEnumerable<Conversation> GetVisibleConversations()
         {
-            var conversations = _conversations
-                .OrderByDescending(conversation => conversation.LastMessageTime == default ? DateTime.MinValue : conversation.LastMessageTime)
-                .AsEnumerable();
+            IEnumerable<Conversation> conversations = _conversations;
 
-            if (string.IsNullOrWhiteSpace(_chatListFilter))
+            if (_activeConversationFilter == ChatConversationFilterMode.Favorites)
             {
-                return conversations;
+                conversations = conversations.Where(conversation => conversation.IsFavorite);
             }
 
-            return conversations.Where(conversation =>
-                conversation.ContactName.Contains(_chatListFilter, StringComparison.OrdinalIgnoreCase) ||
-                conversation.LastMessage.Contains(_chatListFilter, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(_chatListFilter))
+            {
+                conversations = conversations.Where(conversation =>
+                    (conversation.ContactName ?? string.Empty).Contains(_chatListFilter, StringComparison.OrdinalIgnoreCase) ||
+                    (conversation.LastMessage ?? string.Empty).Contains(_chatListFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return _activeConversationSortMode switch
+            {
+                ChatConversationSortMode.MostRecent => conversations
+                    .OrderByDescending(conversation => conversation.IsSelfConversation)
+                    .ThenByDescending(conversation => conversation.LastMessageTime),
+                ChatConversationSortMode.UnreadOnly => conversations
+                    .Where(conversation => conversation.HasUnread || (_activeConversationFilter == ChatConversationFilterMode.Favorites && conversation.IsSelfConversation))
+                    .OrderByDescending(conversation => conversation.IsSelfConversation)
+                    .ThenByDescending(conversation => conversation.HasUnread)
+                    .ThenByDescending(conversation => conversation.LastMessageTime),
+                _ => conversations
+                    .OrderByDescending(conversation => conversation.IsSelfConversation)
+                    .ThenByDescending(conversation => conversation.IsFavorite)
+                    .ThenBy(conversation => conversation.IsSelfConversation ? 0 : (conversation.CustomSortOrder <= 0 ? int.MaxValue : conversation.CustomSortOrder))
+                    .ThenByDescending(conversation => conversation.LastMessageTime)
+            };
         }
 
         private Border CreateConversationsSidebar(bool isLoading = false)
@@ -26961,6 +27408,7 @@ namespace MeuApp
                 ? new SolidColorBrush(Color.FromRgb(226, 232, 240))
                 : new SolidColorBrush(Color.FromRgb(30, 41, 59));
             var unreadCount = _conversations.Count(conversation => conversation.HasUnread);
+            var favoriteCount = _conversations.Count(conversation => conversation.IsFavorite);
 
             var sidebar = new Border
             {
@@ -26974,38 +27422,101 @@ namespace MeuApp
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             var header = new Border
             {
                 Padding = new Thickness(22, 22, 22, 18),
                 BorderBrush = borderBrush,
-                BorderThickness = new Thickness(0, 0, 0, 1),
-                Child = new StackPanel
+                BorderThickness = new Thickness(0, 0, 0, 1)
+            };
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            headerGrid.Children.Add(new StackPanel
+            {
+                Children =
                 {
-                    Children =
+                    new TextBlock
                     {
-                        new TextBlock
-                        {
-                            Text = "Conversas",
-                            FontSize = 22,
-                            FontWeight = FontWeights.ExtraBold,
-                            Foreground = titleBrush
-                        },
-                        new TextBlock
-                        {
-                            Text = isLoading
-                                ? "Sincronizando historico recente..."
-                                : unreadCount > 0
-                                    ? $"{_conversations.Count} conversa(s) | {unreadCount} com novidades"
-                                    : $"{_conversations.Count} conversa(s) sincronizada(s)",
-                            FontSize = 12,
-                            Margin = new Thickness(0, 6, 0, 0),
-                            Foreground = subtitleBrush
-                        }
+                        Text = "Conversas",
+                        FontSize = 22,
+                        FontWeight = FontWeights.ExtraBold,
+                        Foreground = titleBrush
+                    },
+                    new TextBlock
+                    {
+                        Text = isLoading
+                            ? "Sincronizando histórico recente..."
+                            : unreadCount > 0
+                                ? $"{_conversations.Count} conversa(s) | {unreadCount} com novidades"
+                                : $"{_conversations.Count} conversa(s) sincronizada(s)",
+                        FontSize = 12,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        Foreground = subtitleBrush
                     }
                 }
+            });
+
+            var sortButton = new Button
+            {
+                Width = 36,
+                Height = 36,
+                Padding = new Thickness(0),
+                Margin = new Thickness(12, 0, 0, 0),
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = isLoading ? Cursors.Arrow : Cursors.Hand,
+                Foreground = titleBrush,
+                Content = new TextBlock
+                {
+                    Text = "⋮",
+                    FontSize = 18,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = titleBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextAlignment = TextAlignment.Center
+                },
+                ToolTip = "Classificar conversas",
+                IsEnabled = !isLoading
             };
+
+            var sortMenu = new ContextMenu();
+
+            MenuItem CreateSortItem(string headerText, ChatConversationSortMode mode)
+            {
+                var item = new MenuItem
+                {
+                    Header = headerText,
+                    IsCheckable = true,
+                    IsChecked = _activeConversationSortMode == mode
+                };
+                item.Click += (_, __) => SetConversationSortMode(mode);
+                return item;
+            }
+
+            sortMenu.Items.Add(CreateSortItem("Personalizada", ChatConversationSortMode.Custom));
+            sortMenu.Items.Add(CreateSortItem("Mais recentes", ChatConversationSortMode.MostRecent));
+            sortMenu.Items.Add(CreateSortItem("Somente não lidos", ChatConversationSortMode.UnreadOnly));
+            sortButton.ContextMenu = sortMenu;
+            sortButton.Click += (_, __) =>
+            {
+                if (sortButton.ContextMenu == null)
+                {
+                    return;
+                }
+
+                sortButton.ContextMenu.PlacementTarget = sortButton;
+                sortButton.ContextMenu.IsOpen = true;
+            };
+
+            Grid.SetColumn(sortButton, 1);
+            headerGrid.Children.Add(sortButton);
+            header.Child = headerGrid;
             layout.Children.Add(header);
             Grid.SetRow(header, 0);
 
@@ -27065,6 +27576,63 @@ namespace MeuApp
             layout.Children.Add(searchShell);
             Grid.SetRow(searchShell, 1);
 
+            Button CreateFilterButton(string label, bool isActive, Action action)
+            {
+                var button = new Button
+                {
+                    Content = label,
+                    Background = isActive ? GetThemeBrush("AccentBrush") : searchBackground,
+                    Foreground = isActive ? Brushes.White : titleBrush,
+                    BorderBrush = isActive ? Brushes.Transparent : borderBrush,
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(14, 6, 14, 6),
+                    Margin = new Thickness(0, 0, 8, 0),
+                    Cursor = isLoading ? Cursors.Arrow : Cursors.Hand,
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    IsEnabled = !isLoading
+                };
+                button.Click += (_, __) => action();
+                return button;
+            }
+
+            var filtersStrip = new Border
+            {
+                Margin = new Thickness(18, 0, 18, 12),
+                Padding = new Thickness(12, 10, 12, 10),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16)
+            };
+
+            var filtersGrid = new Grid();
+            filtersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            filtersGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var filtersPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            filtersPanel.Children.Add(CreateFilterButton("Favoritos", _activeConversationFilter == ChatConversationFilterMode.Favorites, () => SetConversationFilter(ChatConversationFilterMode.Favorites)));
+            filtersPanel.Children.Add(CreateFilterButton("Chats", _activeConversationFilter == ChatConversationFilterMode.AllChats, () => SetConversationFilter(ChatConversationFilterMode.AllChats)));
+            filtersGrid.Children.Add(filtersPanel);
+
+            var sortStatus = new TextBlock
+            {
+                Text = GetConversationSortStatusText(),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = subtitleBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0)
+            };
+            Grid.SetColumn(sortStatus, 1);
+            filtersGrid.Children.Add(sortStatus);
+
+            filtersStrip.Child = filtersGrid;
+            layout.Children.Add(filtersStrip);
+            Grid.SetRow(filtersStrip, 2);
+
             var summaryStrip = new Border
             {
                 Margin = new Thickness(18, 0, 18, 12),
@@ -27083,7 +27651,11 @@ namespace MeuApp
 
             summaryGrid.Children.Add(new TextBlock
             {
-                Text = isLoading ? "Atualizando lista..." : "Conversas ativas",
+                Text = isLoading
+                    ? "Atualizando lista..."
+                    : _activeConversationFilter == ChatConversationFilterMode.Favorites
+                        ? $"{favoriteCount} destaque(s), incluindo o chat próprio"
+                        : "Conversas ativas",
                 FontSize = 12,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = titleBrush,
@@ -27099,7 +27671,13 @@ namespace MeuApp
                 Padding = new Thickness(10, 4, 10, 4),
                 Child = new TextBlock
                 {
-                    Text = isLoading ? "..." : unreadCount > 0 ? $"{unreadCount} novas" : "em dia",
+                    Text = isLoading
+                        ? "..."
+                        : unreadCount > 0
+                            ? $"{unreadCount} novas"
+                            : _activeConversationFilter == ChatConversationFilterMode.Favorites
+                                ? "fixos"
+                                : "em dia",
                     FontSize = 10,
                     FontWeight = FontWeights.Bold,
                     Foreground = Brushes.White
@@ -27110,7 +27688,7 @@ namespace MeuApp
 
             summaryStrip.Child = summaryGrid;
             layout.Children.Add(summaryStrip);
-            Grid.SetRow(summaryStrip, 2);
+            Grid.SetRow(summaryStrip, 3);
 
             var listStack = new StackPanel
             {
@@ -27142,7 +27720,9 @@ namespace MeuApp
                         Child = new TextBlock
                         {
                             Text = string.IsNullOrWhiteSpace(_chatListFilter)
-                                ? "As conversas recentes vao aparecer aqui assim que novas mensagens forem sincronizadas."
+                                ? (_activeConversationFilter == ChatConversationFilterMode.Favorites
+                                    ? "Nenhum favorito adicional por aqui. O chat próprio fica fixo para guardar notas e lembretes."
+                                    : "As conversas recentes vão aparecer aqui assim que novas mensagens forem sincronizadas.")
                                 : "Nenhuma conversa combina com esse filtro.",
                             FontSize = 12,
                             TextWrapping = TextWrapping.Wrap,
@@ -27163,7 +27743,7 @@ namespace MeuApp
                 Content = listStack
             };
             layout.Children.Add(scrollViewer);
-            Grid.SetRow(scrollViewer, 3);
+            Grid.SetRow(scrollViewer, 4);
 
             sidebar.Child = layout;
             return sidebar;
@@ -27175,22 +27755,30 @@ namespace MeuApp
             var background = _appDarkModeEnabled
                 ? isSelected
                     ? new SolidColorBrush(Color.FromRgb(15, 43, 64))
+                    : conv.IsSelfConversation
+                        ? new SolidColorBrush(Color.FromRgb(16, 35, 57))
                     : conv.HasUnread
                         ? new SolidColorBrush(Color.FromRgb(22, 31, 49))
                         : new SolidColorBrush(Color.FromRgb(17, 24, 39))
                 : isSelected
                     ? new SolidColorBrush(Color.FromRgb(232, 245, 233))
+                    : conv.IsSelfConversation
+                        ? new SolidColorBrush(Color.FromRgb(239, 246, 255))
                     : conv.HasUnread
                         ? new SolidColorBrush(Color.FromRgb(245, 250, 255))
                         : new SolidColorBrush(Colors.White);
             var borderBrush = _appDarkModeEnabled
                 ? isSelected
                     ? new SolidColorBrush(Color.FromRgb(45, 212, 191))
+                    : conv.IsSelfConversation
+                        ? new SolidColorBrush(Color.FromRgb(96, 165, 250))
                     : conv.HasUnread
                         ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
                         : new SolidColorBrush(Color.FromRgb(51, 65, 85))
                 : isSelected
                     ? new SolidColorBrush(Color.FromRgb(134, 239, 172))
+                    : conv.IsSelfConversation
+                        ? new SolidColorBrush(Color.FromRgb(147, 197, 253))
                     : conv.HasUnread
                         ? new SolidColorBrush(Color.FromRgb(191, 219, 254))
                         : new SolidColorBrush(Color.FromRgb(232, 232, 232));
@@ -27231,20 +27819,44 @@ namespace MeuApp
             Grid.SetColumn(avatarGrid, 0);
             grid.Children.Add(avatarGrid);
 
-            // Conteúdo (nome + mensagem)
             var contentStack = new StackPanel { Orientation = Orientation.Vertical, VerticalAlignment = VerticalAlignment.Center };
-            contentStack.Children.Add(new TextBlock
+            var nameRow = new Grid();
+            nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            nameRow.Children.Add(new TextBlock
             {
-                Text = conv.ContactName,
+                Text = conv.IsSelfConversation ? "Você" : conv.ContactName,
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = primaryText
+                Foreground = primaryText,
+                TextTrimming = TextTrimming.CharacterEllipsis
             });
+
+            if (conv.IsFavorite)
+            {
+                var favoriteBadge = new Border
+                {
+                    Margin = new Thickness(8, 0, 0, 0),
+                    Padding = new Thickness(8, 2, 8, 2),
+                    CornerRadius = new CornerRadius(999),
+                    Background = GetThemeBrush("AccentMutedBrush"),
+                    Child = new TextBlock
+                    {
+                        Text = conv.IsSelfConversation ? "Fixo" : "Favorito",
+                        FontSize = 10,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("AccentBrush")
+                    }
+                };
+                Grid.SetColumn(favoriteBadge, 1);
+                nameRow.Children.Add(favoriteBadge);
+            }
+
+            contentStack.Children.Add(nameRow);
             contentStack.Children.Add(new TextBlock
             {
-                Text = string.IsNullOrWhiteSpace(conv.LastMessage)
-                    ? "Nenhuma mensagem ainda"
-                    : conv.HasUnread ? $"• {conv.LastMessage}" : conv.LastMessage,
+                Text = GetConversationPreviewText(conv),
                 FontSize = 12,
                 Foreground = secondaryText,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -27258,7 +27870,7 @@ namespace MeuApp
             // Horário
             var timeBlock = new TextBlock
             {
-                Text = conv.FormattedTime,
+                Text = GetConversationTimeLabel(conv),
                 FontSize = 11,
                 Foreground = timeText,
                 Margin = new Thickness(12, 0, 0, 0)
@@ -27404,7 +28016,7 @@ namespace MeuApp
                                 },
                                 new TextBlock
                                 {
-                                    Text = "A lista de conversas fica sempre visivel na esquerda, e o painel branco da direita abre a conversa ativa sem tirar voce do contexto.",
+                                    Text = "A lista de conversas fica sempre visível na esquerda, com Favoritos, Chats e seu chat próprio já prontos para uso.",
                                     FontSize = 13,
                                     Foreground = secondaryText,
                                     TextAlignment = TextAlignment.Center,
@@ -27420,7 +28032,7 @@ namespace MeuApp
                                     Padding = new Thickness(18),
                                     Child = new TextBlock
                                     {
-                                        Text = "Use a busca do topo para iniciar novas conversas e acompanhe mensagens, anexos e acoes sem voltar para outra tela.",
+                                        Text = "Use a busca do topo para iniciar novas conversas ou abra o chat próprio para guardar notas, lembretes e arquivos rápidos.",
                                         FontSize = 12,
                                         Foreground = secondaryText,
                                         TextWrapping = TextWrapping.Wrap,
@@ -27506,16 +28118,14 @@ namespace MeuApp
             };
             titleStack.Children.Add(new TextBlock
             {
-                Text = conv.ContactName,
+                Text = conv.IsSelfConversation ? "Você" : conv.ContactName,
                 FontSize = 15,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = primaryText
             });
             titleStack.Children.Add(new TextBlock
             {
-                Text = conv.Messages.Count > 0
-                    ? $"Ultima atividade {conv.FormattedTime}"
-                    : "Conversa pronta para receber novas mensagens",
+                Text = GetConversationWorkspaceSubtitle(conv),
                 FontSize = 11,
                 Margin = new Thickness(0, 3, 0, 0),
                 Foreground = secondaryText
@@ -27529,9 +28139,21 @@ namespace MeuApp
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.PhoneOutline, "Iniciar audio", new SolidColorBrush(Color.FromRgb(14, 165, 233))));
-            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.VideoOutline, "Iniciar video", new SolidColorBrush(Color.FromRgb(236, 72, 153))));
-            actionPanel.Children.Add(CreateHeaderIconButton(PackIconMaterialKind.Magnify, "Buscar na conversa", new SolidColorBrush(Color.FromRgb(99, 102, 241))));
+
+            if (!conv.IsSelfConversation)
+            {
+                var audioCallButton = CreateHeaderIconButton(PackIconMaterialKind.PhoneOutline, "Solicitar audio", new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+                audioCallButton.Click += async (_, __) => await RequestConversationCallAsync(conv, "audio");
+                actionPanel.Children.Add(audioCallButton);
+
+                var videoCallButton = CreateHeaderIconButton(PackIconMaterialKind.VideoOutline, "Solicitar video", new SolidColorBrush(Color.FromRgb(236, 72, 153)));
+                videoCallButton.Click += async (_, __) => await RequestConversationCallAsync(conv, "video");
+                actionPanel.Children.Add(videoCallButton);
+            }
+
+            var searchButton = CreateHeaderIconButton(PackIconMaterialKind.Magnify, "Buscar na conversa", new SolidColorBrush(Color.FromRgb(99, 102, 241)));
+            searchButton.Click += (_, __) => ShowConversationSearchDialog(conv);
+            actionPanel.Children.Add(searchButton);
 
             var menuButton = CreateHeaderIconButton(PackIconMaterialKind.DotsHorizontal, "Mais acoes");
             var actionsPopup = CreateChatActionsPopup(menuButton, conv);
@@ -27545,6 +28167,8 @@ namespace MeuApp
             mainGrid.Children.Add(headerBorder);
             Grid.SetRow(headerBorder, 0);
 
+            TextBox? inputBox = null;
+
             var quickToolsBorder = new Border
             {
                 Background = _appDarkModeEnabled
@@ -27556,37 +28180,42 @@ namespace MeuApp
             };
 
             var quickTools = new WrapPanel();
-            var filesButton = CreateComposerChipButton("Arquivos", PackIconMaterialKind.FolderOutline, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
-            filesButton.Click += (s, e) => MessageBox.Show(
-                $"A central de arquivos da conversa com {conv.ContactName} sera conectada aqui.",
-                "Arquivos da conversa",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            quickTools.Children.Add(filesButton);
+            if (conv.IsSelfConversation)
+            {
+                var notesButton = CreateComposerChipButton("Notas", PackIconMaterialKind.NoteTextOutline, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
+                notesButton.Click += (_, __) => PrefillChatComposer(inputBox, "Nota:\n- ");
+                quickTools.Children.Add(notesButton);
 
-            var mediaButton = CreateComposerChipButton("Midia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
-            mediaButton.Click += (s, e) => MessageBox.Show(
-                $"O historico de midia compartilhada com {conv.ContactName} aparecera aqui.",
-                "Midia compartilhada",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            quickTools.Children.Add(mediaButton);
+                var mediaButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+                mediaButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                quickTools.Children.Add(mediaButton);
 
-            var mentionButton = CreateComposerChipButton("@Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
-            mentionButton.Click += (s, e) => MessageBox.Show(
-                $"Voce podera chamar o professor orientador direto desta conversa com {conv.ContactName}.",
-                "Contato academico",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            quickTools.Children.Add(mentionButton);
+                var filesButton = CreateComposerChipButton("Arquivos", PackIconMaterialKind.FolderOutline, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+                filesButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar arquivos para o chat", "Todos os arquivos|*.*");
+                quickTools.Children.Add(filesButton);
 
-            var exportButton = CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
-            exportButton.Click += (s, e) => MessageBox.Show(
-                $"A exportacao do historico com {conv.ContactName} sera iniciada nesta area.",
-                "Exportar conversa",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-            quickTools.Children.Add(exportButton);
+                var reminderButton = CreateComposerChipButton("Lembretes", PackIconMaterialKind.BellOutline, new SolidColorBrush(Color.FromRgb(245, 158, 11)));
+                reminderButton.Click += (_, __) => PrefillChatComposer(inputBox, "Lembrete:\n- ");
+                quickTools.Children.Add(reminderButton);
+            }
+            else
+            {
+                var filesButton = CreateComposerChipButton("Arquivos", PackIconMaterialKind.FolderOutline, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
+                filesButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar arquivos para compartilhar no chat", "Todos os arquivos|*.*");
+                quickTools.Children.Add(filesButton);
+
+                var mediaButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+                mediaButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                quickTools.Children.Add(mediaButton);
+
+                var mentionButton = CreateComposerChipButton("@Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
+                mentionButton.Click += (_, __) => PrefillChatComposer(inputBox, "@Professor preciso de orientacao sobre: ");
+                quickTools.Children.Add(mentionButton);
+
+                var exportButton = CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+                exportButton.Click += (_, __) => ExportConversationHistory(conv);
+                quickTools.Children.Add(exportButton);
+            }
 
             quickToolsBorder.Child = quickTools;
             mainGrid.Children.Add(quickToolsBorder);
@@ -27599,32 +28228,45 @@ namespace MeuApp
 
             if (conv.Messages.Count == 0)
             {
-                messagesHost.Child = new StackPanel
+                var emptyState = new StackPanel
                 {
                     Width = 360,
                     HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Children =
-                    {
-                        new TextBlock
-                        {
-                            Text = "Nenhuma mensagem por aqui ainda",
-                            FontSize = 20,
-                            FontWeight = FontWeights.Bold,
-                            Foreground = primaryText,
-                            TextAlignment = TextAlignment.Center
-                        },
-                        new TextBlock
-                        {
-                            Text = "Envie a primeira mensagem e mantenha a conversa aberta enquanto acessa as acoes principais acima.",
-                            FontSize = 12,
-                            Margin = new Thickness(0, 10, 0, 0),
-                            Foreground = secondaryText,
-                            TextWrapping = TextWrapping.Wrap,
-                            TextAlignment = TextAlignment.Center
-                        }
-                    }
+                    VerticalAlignment = VerticalAlignment.Center
                 };
+
+                if (conv.IsSelfConversation)
+                {
+                    emptyState.Children.Add(new Image
+                    {
+                        Source = new BitmapImage(new Uri("pack://application:,,,/img/Chat/CheeseOwnChatTransparent.png", UriKind.Absolute)),
+                        Width = 240,
+                        Height = 340,
+                        Stretch = Stretch.Uniform,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 8)
+                    });
+                }
+
+                emptyState.Children.Add(new TextBlock
+                {
+                    Text = conv.IsSelfConversation ? "Seu chat próprio está pronto" : "Nenhuma mensagem por aqui ainda",
+                    FontSize = 20,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = primaryText,
+                    TextAlignment = TextAlignment.Center
+                });
+                emptyState.Children.Add(new TextBlock
+                {
+                    Text = conv.IsSelfConversation ? SelfChatPlaceholderText : "Envie a primeira mensagem e mantenha a conversa aberta enquanto acessa as ações principais acima.",
+                    FontSize = 12,
+                    Margin = new Thickness(0, 10, 0, 0),
+                    Foreground = secondaryText,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center
+                });
+
+                messagesHost.Child = emptyState;
             }
             else
             {
@@ -27661,11 +28303,50 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 0, 0, 12)
             };
-            quickActionPanel.Children.Add(CreateComposerChipButton("Ações rápidas", PackIconMaterialKind.AutoFix, new SolidColorBrush(Color.FromRgb(245, 158, 11))));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Midia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233))));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246))));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237))));
-            quickActionPanel.Children.Add(CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129))));
+            if (conv.IsSelfConversation)
+            {
+                var notesShortcutButton = CreateComposerChipButton("Notas", PackIconMaterialKind.NoteTextOutline, new SolidColorBrush(Color.FromRgb(245, 158, 11)));
+                notesShortcutButton.Click += (_, __) => PrefillChatComposer(inputBox, "Nota:\n- ");
+                quickActionPanel.Children.Add(notesShortcutButton);
+
+                var mediaShortcutButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+                mediaShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                quickActionPanel.Children.Add(mediaShortcutButton);
+
+                var fileShortcutButton = CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
+                fileShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar arquivos para o chat", "Todos os arquivos|*.*");
+                quickActionPanel.Children.Add(fileShortcutButton);
+
+                var checklistButton = CreateComposerChipButton("Checklist", PackIconMaterialKind.FormatListChecks, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
+                checklistButton.Click += (_, __) => PrefillChatComposer(inputBox, "Checklist:\n- ");
+                quickActionPanel.Children.Add(checklistButton);
+
+                var reminderShortcutButton = CreateComposerChipButton("Lembrete", PackIconMaterialKind.BellOutline, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+                reminderShortcutButton.Click += (_, __) => PrefillChatComposer(inputBox, "Lembrete:\n- ");
+                quickActionPanel.Children.Add(reminderShortcutButton);
+            }
+            else
+            {
+                var quickActionButton = CreateComposerChipButton("Ações rápidas", PackIconMaterialKind.AutoFix, new SolidColorBrush(Color.FromRgb(245, 158, 11)));
+                quickActionButton.Click += (_, __) => PrefillChatComposer(inputBox, "Proximo passo:\n- ");
+                quickActionPanel.Children.Add(quickActionButton);
+
+                var mediaShortcutButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+                mediaShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                quickActionPanel.Children.Add(mediaShortcutButton);
+
+                var fileShortcutButton = CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
+                fileShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar arquivos para compartilhar no chat", "Todos os arquivos|*.*");
+                quickActionPanel.Children.Add(fileShortcutButton);
+
+                var professorShortcutButton = CreateComposerChipButton("Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
+                professorShortcutButton.Click += (_, __) => PrefillChatComposer(inputBox, "@Professor preciso de orientacao sobre: ");
+                quickActionPanel.Children.Add(professorShortcutButton);
+
+                var exportShortcutButton = CreateComposerChipButton("Exportar", PackIconMaterialKind.ExportVariant, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+                exportShortcutButton.Click += (_, __) => ExportConversationHistory(conv);
+                quickActionPanel.Children.Add(exportShortcutButton);
+            }
             composerStack.Children.Add(quickActionPanel);
 
             var inputGrid = new Grid();
@@ -27683,7 +28364,7 @@ namespace MeuApp
             attachmentButton.Height = 40;
             attachmentButton.FontSize = 16;
 
-            var inputBox = new TextBox
+            inputBox = new TextBox
             {
                 Background = inputBackground,
                 Foreground = inputForeground,
@@ -27720,7 +28401,8 @@ namespace MeuApp
             Grid.SetColumn(inputBox, 2);
             inputGrid.Children.Add(inputBox);
 
-            var micButton = CreateHeaderIconButton(PackIconMaterialKind.MicrophoneOutline, "Gravar audio", new SolidColorBrush(Color.FromRgb(20, 184, 166)));
+            var micButton = CreateHeaderIconButton(PackIconMaterialKind.MicrophoneOutline, "Adicionar audio", new SolidColorBrush(Color.FromRgb(20, 184, 166)));
+            micButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar audio para o chat", "Arquivos de audio|*.mp3;*.wav;*.m4a;*.aac;*.ogg;*.wma|Todos os arquivos|*.*");
             Grid.SetColumn(micButton, 3);
             inputGrid.Children.Add(micButton);
 
@@ -27770,6 +28452,8 @@ namespace MeuApp
                 IsOwn = true
             };
 
+            ChatMessage messageToAppend = stickerMessage;
+
             if (!string.IsNullOrEmpty(_idToken))
             {
                 var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
@@ -27784,16 +28468,11 @@ namespace MeuApp
                     );
                     return;
                 }
+
+                messageToAppend = NormalizeChatMessageForUi(sendResult.Message ?? stickerMessage);
             }
 
-            conv.Messages.Add(stickerMessage);
-            conv.LastMessage = stickerMessage.ConversationPreview;
-            conv.LastMessageTime = stickerMessage.Timestamp;
-            conv.LastSenderId = stickerMessage.SenderId;
-            conv.LastReadAt = stickerMessage.Timestamp;
-            conv.HasUnread = false;
-            UpdateChatsBadge();
-            RefreshChatsUI();
+            AppendMessagesToConversation(conv, messageToAppend);
         }
 
         private async Task SendConversationMessageAsync(Conversation conv, TextBox inputBox)
@@ -27804,15 +28483,31 @@ namespace MeuApp
                 return;
             }
 
+            if (await SendConversationTextAsync(conv, messageText))
+            {
+                inputBox.Clear();
+            }
+        }
+
+        private async Task<bool> SendConversationTextAsync(Conversation conv, string messageText)
+        {
+            var normalizedMessage = (messageText ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalizedMessage))
+            {
+                return false;
+            }
+
             var newMsg = new ChatMessage
             {
                 SenderId = _currentProfile?.UserId ?? "self",
                 SenderName = _currentProfile?.Name ?? "Voce",
-                Content = messageText,
+                Content = normalizedMessage,
                 MessageType = "text",
                 Timestamp = DateTime.Now,
                 IsOwn = true
             };
+
+            ChatMessage messageToAppend = newMsg;
 
             if (!string.IsNullOrEmpty(_idToken))
             {
@@ -27829,22 +28524,241 @@ namespace MeuApp
                         MessageBoxImage.Warning
                     );
                     DebugHelper.WriteLine($"[SendConversationMessageAsync] Falha ao salvar no Firebase: {sendResult.ErrorMessage}");
-                    return;
+                    return false;
                 }
 
+                messageToAppend = NormalizeChatMessageForUi(sendResult.Message ?? newMsg);
                 DebugHelper.WriteLine("[SendConversationMessageAsync] Mensagem salva no Firebase");
             }
 
-            conv.Messages.Add(newMsg);
-            conv.LastMessage = newMsg.ConversationPreview;
-            conv.LastMessageTime = newMsg.Timestamp;
-            conv.LastSenderId = newMsg.SenderId;
-            conv.LastReadAt = newMsg.Timestamp;
-            conv.HasUnread = false;
+            AppendMessagesToConversation(conv, messageToAppend);
+            return true;
+        }
 
+        private async Task SendConversationAttachmentsAsync(Conversation conv, TextBox? inputBox, string title, string filter)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Multiselect = true,
+                Title = title,
+                Filter = filter
+            };
+
+            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+            {
+                return;
+            }
+
+            var sentMessages = new List<ChatMessage>();
+            var failedFiles = new List<string>();
+            ChatService? chatService = !string.IsNullOrWhiteSpace(_idToken)
+                ? new ChatService(_idToken, _currentProfile?.UserId ?? string.Empty)
+                : null;
+
+            foreach (var filePath in dialog.FileNames)
+            {
+                try
+                {
+                    var localMessage = CreateLocalAttachmentMessage(filePath);
+                    ChatMessage messageToAppend = localMessage;
+
+                    if (chatService != null)
+                    {
+                        var sendResult = await chatService.SendAttachmentMessageAsync(
+                            conv.ContactId,
+                            conv.ContactName,
+                            localMessage.SenderName,
+                            filePath);
+
+                        if (!sendResult.Success)
+                        {
+                            failedFiles.Add($"{IOPath.GetFileName(filePath)} ({sendResult.ErrorMessage})");
+                            continue;
+                        }
+
+                        messageToAppend = NormalizeChatMessageForUi(sendResult.Message ?? localMessage);
+                        if (string.IsNullOrWhiteSpace(messageToAppend.AttachmentLocalPath))
+                        {
+                            messageToAppend.AttachmentLocalPath = localMessage.AttachmentLocalPath;
+                        }
+                    }
+
+                    sentMessages.Add(messageToAppend);
+                }
+                catch (Exception ex)
+                {
+                    DebugHelper.WriteLine($"[ChatAttachment] Falha ao enviar {filePath}: {ex.Message}");
+                    failedFiles.Add($"{IOPath.GetFileName(filePath)} ({ex.Message})");
+                }
+            }
+
+            if (sentMessages.Count > 0)
+            {
+                AppendMessagesToConversation(conv, sentMessages);
+                inputBox?.Focus();
+            }
+
+            if (failedFiles.Count == 0)
+            {
+                return;
+            }
+
+            var failureSummary = string.Join(Environment.NewLine, failedFiles.Take(4));
+            if (failedFiles.Count > 4)
+            {
+                failureSummary += $"{Environment.NewLine}... e mais {failedFiles.Count - 4} arquivo(s).";
+            }
+
+            ShowStyledAlertDialog(
+                "CHAT",
+                sentMessages.Count > 0 ? "Envio parcial" : "Falha ao enviar anexo",
+                sentMessages.Count > 0
+                    ? $"Alguns anexos nao puderam ser enviados:{Environment.NewLine}{Environment.NewLine}{failureSummary}"
+                    : $"Nenhum anexo foi enviado.{Environment.NewLine}{Environment.NewLine}{failureSummary}",
+                "Fechar",
+                new SolidColorBrush(Color.FromRgb(234, 88, 12)));
+        }
+
+        private void AppendMessagesToConversation(Conversation conv, params ChatMessage[] messages)
+        {
+            AppendMessagesToConversation(conv, (IEnumerable<ChatMessage>)messages);
+        }
+
+        private void AppendMessagesToConversation(Conversation conv, IEnumerable<ChatMessage> messages)
+        {
+            if (conv == null || messages == null)
+            {
+                return;
+            }
+
+            var appendedMessages = messages
+                .Where(message => message != null)
+                .Select(NormalizeChatMessageForUi)
+                .ToList();
+            if (appendedMessages.Count == 0)
+            {
+                return;
+            }
+
+            conv.Messages ??= new List<ChatMessage>();
+            foreach (var message in appendedMessages)
+            {
+                conv.Messages.Add(message);
+            }
+
+            var latestMessage = appendedMessages[^1];
+            conv.LastReadAt = latestMessage.Timestamp == default ? DateTime.Now : latestMessage.Timestamp;
+            conv.HasUnread = false;
+            RefreshConversationSummary(conv);
             UpdateChatsBadge();
-            inputBox.Clear();
             RefreshChatsUI();
+        }
+
+        private ChatMessage NormalizeChatMessageForUi(ChatMessage message)
+        {
+            if (message == null)
+            {
+                return new ChatMessage();
+            }
+
+            if (message.Timestamp.Kind == DateTimeKind.Utc)
+            {
+                message.Timestamp = message.Timestamp.ToLocalTime();
+            }
+
+            if (message.EditedAt.HasValue && message.EditedAt.Value.Kind == DateTimeKind.Utc)
+            {
+                message.EditedAt = message.EditedAt.Value.ToLocalTime();
+            }
+
+            if (message.DeletedAt.HasValue && message.DeletedAt.Value.Kind == DateTimeKind.Utc)
+            {
+                message.DeletedAt = message.DeletedAt.Value.ToLocalTime();
+            }
+
+            return message;
+        }
+
+        private ChatMessage CreateLocalAttachmentMessage(string filePath)
+        {
+            var fileInfo = new FileInfo(filePath);
+            var messageType = ResolveConversationAttachmentMessageType(fileInfo.Name);
+            return new ChatMessage
+            {
+                MessageId = Guid.NewGuid().ToString("N"),
+                DocumentId = Guid.NewGuid().ToString("N"),
+                SenderId = _currentProfile?.UserId ?? "self",
+                SenderName = _currentProfile?.Name ?? "Voce",
+                Content = BuildConversationAttachmentPreviewText(messageType, fileInfo.Name),
+                MessageType = messageType,
+                AttachmentFileName = fileInfo.Name,
+                AttachmentContentType = GetConversationAttachmentContentType(fileInfo.Name),
+                AttachmentSizeBytes = fileInfo.Exists ? fileInfo.Length : 0,
+                AttachmentLocalPath = fileInfo.FullName,
+                Timestamp = DateTime.Now,
+                IsOwn = true
+            };
+        }
+
+        private static string ResolveConversationAttachmentMessageType(string fileName)
+        {
+            var extension = IOPath.GetExtension(fileName)?.Trim().ToLowerInvariant() ?? string.Empty;
+            return extension switch
+            {
+                ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp" => "image",
+                ".mp4" or ".mov" or ".avi" or ".mkv" or ".wmv" or ".webm" => "video",
+                ".mp3" or ".wav" or ".m4a" or ".aac" or ".ogg" or ".flac" or ".wma" => "audio",
+                _ => "file"
+            };
+        }
+
+        private static string BuildConversationAttachmentPreviewText(string messageType, string fileName)
+        {
+            var normalizedName = string.IsNullOrWhiteSpace(fileName) ? "anexo" : fileName;
+            return messageType switch
+            {
+                "image" => $"Imagem • {normalizedName}",
+                "video" => $"Video • {normalizedName}",
+                "audio" => $"Audio • {normalizedName}",
+                _ => $"Arquivo • {normalizedName}"
+            };
+        }
+
+        private static string GetConversationAttachmentContentType(string fileName)
+        {
+            var extension = IOPath.GetExtension(fileName)?.Trim().ToLowerInvariant() ?? string.Empty;
+            return extension switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".bmp" => "image/bmp",
+                ".mp4" => "video/mp4",
+                ".mov" => "video/quicktime",
+                ".avi" => "video/x-msvideo",
+                ".mkv" => "video/x-matroska",
+                ".wmv" => "video/x-ms-wmv",
+                ".webm" => "video/webm",
+                ".mp3" => "audio/mpeg",
+                ".wav" => "audio/wav",
+                ".m4a" => "audio/mp4",
+                ".aac" => "audio/aac",
+                ".ogg" => "audio/ogg",
+                ".flac" => "audio/flac",
+                ".wma" => "audio/x-ms-wma",
+                ".pdf" => "application/pdf",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xls" => "application/vnd.ms-excel",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".ppt" => "application/vnd.ms-powerpoint",
+                ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".txt" => "text/plain",
+                ".zip" => "application/zip",
+                ".rar" => "application/vnd.rar",
+                _ => "application/octet-stream"
+            };
         }
 
         private Border CreateMessageBubble(Conversation conv, ChatMessage msg)
@@ -27930,15 +28844,31 @@ namespace MeuApp
             }
             else
             {
-                stack.Children.Add(new TextBlock
+                var messageContent = new StackPanel { Orientation = Orientation.Vertical };
+                if (ShouldShowConversationMessageText(msg))
                 {
-                    Text = msg.Content,
-                    FontSize = 13,
-                    Foreground = msg.IsOwn 
-                        ? ownTextBrush
-                        : otherTextBrush,
-                    TextWrapping = TextWrapping.Wrap
-                });
+                    messageContent.Children.Add(new TextBlock
+                    {
+                        Text = msg.Content,
+                        FontSize = 13,
+                        Foreground = msg.IsOwn
+                            ? ownTextBrush
+                            : otherTextBrush,
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                }
+
+                if (msg.HasAttachment)
+                {
+                    messageContent.Children.Add(CreateConversationAttachmentBubbleContent(msg, msg.IsOwn ? ownTextBrush : otherTextBrush));
+                }
+
+                if (msg.HasLinkPreview)
+                {
+                    messageContent.Children.Add(CreateConversationLinkPreviewContent(msg, msg.IsOwn ? ownTextBrush : otherTextBrush));
+                }
+
+                stack.Children.Add(messageContent);
             }
             stack.Children.Add(new TextBlock
             {
@@ -28026,6 +28956,313 @@ namespace MeuApp
                     }
                 }
             };
+        }
+
+        private bool ShouldShowConversationMessageText(ChatMessage msg)
+        {
+            if (msg == null || msg.IsDeleted || msg.IsSticker)
+            {
+                return false;
+            }
+
+            var normalizedContent = (msg.Content ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalizedContent))
+            {
+                return false;
+            }
+
+            if (!msg.HasAttachment)
+            {
+                return true;
+            }
+
+            return !string.Equals(
+                normalizedContent,
+                BuildConversationAttachmentPreviewText(msg.MessageType, msg.AttachmentFileName),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private UIElement CreateConversationAttachmentBubbleContent(ChatMessage msg, Brush primaryTextBrush)
+        {
+            var cardBackground = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(34, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            var cardBorder = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(68, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(71, 85, 105))
+                    : new SolidColorBrush(Color.FromRgb(203, 213, 225));
+            var secondaryTextBrush = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(204, 255, 255, 255))
+                : GetThemeBrush("SecondaryTextBrush");
+
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                Margin = new Thickness(0, ShouldShowConversationMessageText(msg) ? 8 : 0, 0, 0)
+            };
+
+            var previewSource = TryCreateConversationAttachmentPreviewSource(msg);
+            if (previewSource != null)
+            {
+                content.Children.Add(new Border
+                {
+                    CornerRadius = new CornerRadius(12),
+                    Margin = new Thickness(0, 0, 0, 10),
+                    ClipToBounds = true,
+                    Child = new Image
+                    {
+                        Source = previewSource,
+                        Height = 180,
+                        Stretch = Stretch.UniformToFill
+                    }
+                });
+            }
+
+            content.Children.Add(new TextBlock
+            {
+                Text = msg.AttachmentDisplayLabel + " anexado",
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = secondaryTextBrush
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(msg.AttachmentFileName) ? "anexo" : msg.AttachmentFileName,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = primaryTextBrush,
+                TextWrapping = TextWrapping.Wrap
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = FormatConversationAttachmentSize(msg.AttachmentSizeBytes),
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = secondaryTextBrush,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var openButton = new Button
+            {
+                Content = string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) || !File.Exists(msg.AttachmentLocalPath)
+                    ? "Baixar e abrir"
+                    : "Abrir",
+                Margin = new Thickness(0, 10, 0, 0),
+                Padding = new Thickness(12, 6, 12, 6),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = msg.IsOwn
+                    ? new SolidColorBrush(Color.FromArgb(56, 255, 255, 255))
+                    : GetThemeBrush("AccentBrush"),
+                Foreground = msg.IsOwn
+                    ? Brushes.White
+                    : Brushes.White
+            };
+            openButton.Click += async (_, __) => await OpenConversationAttachmentAsync(msg);
+            content.Children.Add(openButton);
+
+            return new Border
+            {
+                Margin = new Thickness(0, ShouldShowConversationMessageText(msg) ? 8 : 0, 0, 0),
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(14),
+                Background = cardBackground,
+                BorderBrush = cardBorder,
+                BorderThickness = new Thickness(1),
+                Child = content
+            };
+        }
+
+        private UIElement CreateConversationLinkPreviewContent(ChatMessage msg, Brush primaryTextBrush)
+        {
+            var cardBackground = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(34, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            var cardBorder = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(68, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(71, 85, 105))
+                    : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var secondaryTextBrush = msg.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(214, 255, 255, 255))
+                : GetThemeBrush("SecondaryTextBrush");
+
+            var border = new Border
+            {
+                Margin = new Thickness(0, ShouldShowConversationMessageText(msg) ? 8 : 0, 0, 0),
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(14),
+                Background = cardBackground,
+                BorderBrush = cardBorder,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Abrir link"
+            };
+
+            var previewContent = new StackPanel { Orientation = Orientation.Vertical };
+            previewContent.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(msg.LinkDisplayHost) ? "Link" : msg.LinkDisplayHost,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = secondaryTextBrush
+            });
+            previewContent.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(msg.LinkTitle) ? msg.LinkUrl : msg.LinkTitle,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = primaryTextBrush,
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            var description = string.IsNullOrWhiteSpace(msg.LinkDescription)
+                ? msg.LinkUrl
+                : msg.LinkDescription;
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                previewContent.Children.Add(new TextBlock
+                {
+                    Text = description,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    FontSize = 11,
+                    Foreground = secondaryTextBrush,
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            border.Child = previewContent;
+            border.MouseLeftButtonUp += (_, __) => OpenConversationExternalLink(msg.LinkUrl);
+            return border;
+        }
+
+        private ImageSource? TryCreateConversationAttachmentPreviewSource(ChatMessage msg)
+        {
+            if (msg == null || !msg.IsImageAttachment || string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) || !File.Exists(msg.AttachmentLocalPath))
+            {
+                return null;
+            }
+
+            try
+            {
+                return CreateFrozenBitmapImage(new Uri(msg.AttachmentLocalPath, UriKind.Absolute));
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatAttachmentPreview] Falha ao montar preview de {msg.AttachmentLocalPath}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task OpenConversationAttachmentAsync(ChatMessage msg)
+        {
+            var localPath = msg.AttachmentLocalPath;
+            if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath))
+            {
+                if (string.IsNullOrWhiteSpace(_idToken))
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Anexo indisponivel",
+                        "Este dispositivo nao possui uma copia local do anexo e a sessao atual nao permite baixar do Firebase.",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
+
+                var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? string.Empty);
+                var downloadResult = await chatService.EnsureAttachmentLocalCopyAsync(msg);
+                if (!downloadResult.Success || string.IsNullOrWhiteSpace(downloadResult.LocalPath) || !File.Exists(downloadResult.LocalPath))
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Nao foi possivel baixar",
+                        $"O anexo nao pode ser baixado agora.\n\n{downloadResult.ErrorMessage}",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
+
+                localPath = downloadResult.LocalPath;
+                msg.AttachmentLocalPath = localPath;
+                RefreshChatsUI();
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = localPath,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatAttachmentOpen] Falha ao abrir {localPath}: {ex.Message}");
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Nao foi possivel abrir",
+                    "O sistema nao conseguiu abrir este anexo no app padrao agora.",
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(234, 88, 12)));
+            }
+        }
+
+        private void OpenConversationExternalLink(string? linkUrl)
+        {
+            var normalizedUrl = (linkUrl ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalizedUrl))
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = normalizedUrl,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatLink] Falha ao abrir {normalizedUrl}: {ex.Message}");
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Link indisponivel",
+                    "Nao foi possivel abrir o link desta mensagem agora.",
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+            }
+        }
+
+        private static string FormatConversationAttachmentSize(long sizeBytes)
+        {
+            if (sizeBytes <= 0)
+            {
+                return "Tamanho nao informado";
+            }
+
+            string[] units = { "B", "KB", "MB", "GB" };
+            var value = (double)sizeBytes;
+            var unitIndex = 0;
+            while (value >= 1024 && unitIndex < units.Length - 1)
+            {
+                value /= 1024;
+                unitIndex++;
+            }
+
+            return $"{value:0.#} {units[unitIndex]}";
         }
 
         private ImageSource? TryCreateStickerImageSource(string? assetFileName)
@@ -28132,12 +29369,18 @@ namespace MeuApp
                 var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
                 var conversations = await chatService.LoadConversationsAsync();
                 await EnrichConversationAvatarsAsync(conversations);
+                NormalizeChatConversations(conversations);
 
                 _conversations = conversations;
 
                 if (_selectedConversation != null)
                 {
                     _selectedConversation = _conversations.FirstOrDefault(c => c.ContactId == _selectedConversation.ContactId);
+                }
+                else
+                {
+                    _selectedConversation = _conversations.FirstOrDefault(c => c.IsSelfConversation)
+                        ?? _conversations.FirstOrDefault();
                 }
 
                 UpdateChatsBadge();
@@ -28858,6 +30101,609 @@ namespace MeuApp
             inputBox.Focus();
         }
 
+        private string GetConversationStateKey(Conversation conv)
+        {
+            if (conv == null)
+            {
+                return string.Empty;
+            }
+
+            return !string.IsNullOrWhiteSpace(conv.ConversationId)
+                ? conv.ConversationId
+                : BuildConversationId(conv.ContactId);
+        }
+
+        private string GetConversationParticipantName(Conversation conv)
+        {
+            if (conv == null)
+            {
+                return "Contato";
+            }
+
+            return conv.IsSelfConversation
+                ? "Voce"
+                : string.IsNullOrWhiteSpace(conv.ContactName) ? "Contato" : conv.ContactName;
+        }
+
+        private bool TryGetConversationMutedUntil(Conversation conv, out DateTime mutedUntil)
+        {
+            mutedUntil = default;
+            var stateKey = GetConversationStateKey(conv);
+            if (string.IsNullOrWhiteSpace(stateKey))
+            {
+                return false;
+            }
+
+            if (!_mutedConversationUntil.TryGetValue(stateKey, out mutedUntil))
+            {
+                return false;
+            }
+
+            if (mutedUntil <= DateTime.Now)
+            {
+                _mutedConversationUntil.Remove(stateKey);
+                mutedUntil = default;
+                return false;
+            }
+
+            return true;
+        }
+
+        private string GetConversationWorkspaceSubtitle(Conversation conv)
+        {
+            var summary = conv.Messages.Count > 0
+                ? (conv.IsSelfConversation ? $"Ultima anotacao {conv.FormattedTime}" : $"Ultima atividade {conv.FormattedTime}")
+                : (conv.IsSelfConversation ? "Seu espaco pessoal para notas, lembretes, fotos e arquivos" : "Conversa pronta para receber novas mensagens");
+
+            return TryGetConversationMutedUntil(conv, out var mutedUntil)
+                ? $"{summary} • alertas silenciados ate {mutedUntil:HH:mm}"
+                : summary;
+        }
+
+        private string GetConversationPreviewText(Conversation conv)
+        {
+            var preview = string.IsNullOrWhiteSpace(conv.LastMessage)
+                ? (conv.IsSelfConversation ? SelfChatPreviewText : "Nenhuma mensagem ainda")
+                : conv.HasUnread ? $"• {conv.LastMessage}" : conv.LastMessage;
+
+            return TryGetConversationMutedUntil(conv, out _)
+                ? $"🔕 {preview}"
+                : preview;
+        }
+
+        private string GetConversationTimeLabel(Conversation conv)
+        {
+            if (TryGetConversationMutedUntil(conv, out var mutedUntil))
+            {
+                return $"Silenciada {mutedUntil:HH:mm}";
+            }
+
+            return conv.IsSelfConversation ? "Fixo" : conv.FormattedTime;
+        }
+
+        private void ToggleConversationMuteState(Conversation conv)
+        {
+            var stateKey = GetConversationStateKey(conv);
+            if (string.IsNullOrWhiteSpace(stateKey))
+            {
+                return;
+            }
+
+            if (TryGetConversationMutedUntil(conv, out _))
+            {
+                _mutedConversationUntil.Remove(stateKey);
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Alertas reativados",
+                    $"A conversa com {GetConversationParticipantName(conv)} voltou a receber alertas nesta sessao.",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+            }
+            else
+            {
+                var mutedUntil = DateTime.Now.AddHours(8);
+                _mutedConversationUntil[stateKey] = mutedUntil;
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Conversa silenciada",
+                    $"Os alertas da conversa com {GetConversationParticipantName(conv)} foram pausados ate {mutedUntil:HH:mm} nesta sessao.",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+            }
+
+            RefreshChatsUI();
+        }
+
+        private static string TruncateChatText(string text, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(text) || text.Length <= maxLength)
+            {
+                return text;
+            }
+
+            return text.Substring(0, Math.Max(0, maxLength - 3)).TrimEnd() + "...";
+        }
+
+        private string GetConversationMessageDisplayText(ChatMessage msg)
+        {
+            if (msg == null)
+            {
+                return string.Empty;
+            }
+
+            if (msg.IsDeleted)
+            {
+                return msg.DeletedDisplayText;
+            }
+
+            if (msg.IsSticker)
+            {
+                return $"Figurinha: {GetStickerDisplayName(msg.StickerAsset)}";
+            }
+
+            return string.IsNullOrWhiteSpace(msg.Content) ? "Mensagem vazia" : msg.Content.Trim();
+        }
+
+        private void PrefillChatComposer(TextBox? inputBox, string template, bool replace = false)
+        {
+            if (inputBox == null)
+            {
+                return;
+            }
+
+            var normalizedTemplate = (template ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalizedTemplate))
+            {
+                return;
+            }
+
+            var currentText = inputBox.Text ?? string.Empty;
+            inputBox.Text = replace || string.IsNullOrWhiteSpace(currentText)
+                ? normalizedTemplate
+                : $"{currentText.TrimEnd()}{Environment.NewLine}{normalizedTemplate}";
+            inputBox.CaretIndex = inputBox.Text.Length;
+            inputBox.Focus();
+        }
+
+        private void AddChatFilesToHubAndComposer(Conversation conv, TextBox? inputBox, string title, string filter, string composerLabel)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Multiselect = true,
+                Title = title,
+                Filter = filter
+            };
+
+            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+            {
+                return;
+            }
+
+            EnsureFilesHubStateLoaded();
+            var association = new FilesHubAssociationSelection
+            {
+                AssociationType = "Chat",
+                AssociationLabel = conv.IsSelfConversation ? "Chat proprio" : $"Conversa com {GetConversationParticipantName(conv)}"
+            };
+            var importedItems = new List<FilesHubItem>();
+            var failedFiles = new List<string>();
+
+            foreach (var filePath in dialog.FileNames)
+            {
+                try
+                {
+                    var item = ArchiveFilesHubItem(filePath, association);
+                    _filesHubState.Items.Insert(0, item);
+                    importedItems.Add(item);
+                }
+                catch (Exception ex)
+                {
+                    DebugHelper.WriteLine($"[ChatFiles] Falha ao arquivar {filePath}: {ex.Message}");
+                    failedFiles.Add(IOPath.GetFileName(filePath));
+                }
+            }
+
+            if (importedItems.Count == 0)
+            {
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Nada foi preparado",
+                    "Os arquivos selecionados nao puderam ser enviados para a mochila do chat.",
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return;
+            }
+
+            _filesHubState.Items = (_filesHubState.Items ?? new List<FilesHubItem>())
+                .OrderByDescending(item => item.AddedAt)
+                .ToList();
+            _filesHubStatusMessage = importedItems.Count == 1
+                ? $"{importedItems[0].FileName} entrou na mochila a partir do chat."
+                : $"{importedItems.Count} arquivo(s) entraram na mochila a partir do chat.";
+            TrySaveFilesHubState(true);
+            if (FilesContent.Visibility == Visibility.Visible)
+            {
+                RenderFilesHub();
+            }
+
+            var preparedNames = string.Join(", ", importedItems.Take(3).Select(item => item.FileName));
+            if (importedItems.Count > 3)
+            {
+                preparedNames += ", ...";
+            }
+
+            PrefillChatComposer(
+                inputBox,
+                importedItems.Count == 1
+                    ? $"{composerLabel}: {importedItems[0].FileName}"
+                    : $"{composerLabel}: {preparedNames}");
+
+            var successMessage = importedItems.Count == 1
+                ? $"{importedItems[0].FileName} foi arquivado na mochila do chat e um resumo foi preparado no composer."
+                : $"{importedItems.Count} item(ns) foram arquivados na mochila do chat e um resumo foi preparado no composer.";
+
+            if (failedFiles.Count > 0)
+            {
+                successMessage += $"{Environment.NewLine}{Environment.NewLine}Falhas: {string.Join(", ", failedFiles.Take(3))}";
+                if (failedFiles.Count > 3)
+                {
+                    successMessage += ", ...";
+                }
+            }
+
+            ShowStyledAlertDialog(
+                "CHAT",
+                importedItems.Count == 1 ? "Arquivo preparado" : "Arquivos preparados",
+                successMessage,
+                "Fechar",
+                GetThemeBrush("AccentBrush"));
+        }
+
+        private string BuildConversationTranscriptText(Conversation conv, int? messageLimit = null)
+        {
+            var orderedMessages = (conv.Messages ?? new List<ChatMessage>())
+                .OrderBy(message => message.Timestamp)
+                .ToList();
+            if (messageLimit.HasValue && orderedMessages.Count > messageLimit.Value)
+            {
+                orderedMessages = orderedMessages
+                    .Skip(Math.Max(0, orderedMessages.Count - messageLimit.Value))
+                    .ToList();
+            }
+
+            var builder = new StringBuilder();
+            builder.AppendLine($"Conversa: {(conv.IsSelfConversation ? "Chat proprio" : GetConversationParticipantName(conv))}");
+            builder.AppendLine($"Exportado em: {DateTime.Now:dd/MM/yyyy HH:mm}");
+            builder.AppendLine($"Mensagens consideradas: {orderedMessages.Count}");
+            if (TryGetConversationMutedUntil(conv, out var mutedUntil))
+            {
+                builder.AppendLine($"Alertas silenciados ate: {mutedUntil:dd/MM/yyyy HH:mm}");
+            }
+
+            builder.AppendLine(new string('-', 52));
+
+            foreach (var message in orderedMessages)
+            {
+                var senderLabel = message.IsOwn ? "Voce" : (string.IsNullOrWhiteSpace(message.SenderName) ? GetConversationParticipantName(conv) : message.SenderName);
+                var suffix = message.IsEdited && !message.IsDeleted ? " (editada)" : string.Empty;
+                var text = GetConversationMessageDisplayText(message)
+                    .Replace("\r\n", "\n", StringComparison.Ordinal)
+                    .Replace('\r', '\n')
+                    .Trim();
+                var indentedText = string.Join(Environment.NewLine, text.Split('\n').Select(line => $"    {line}"));
+
+                builder.AppendLine($"[{message.Timestamp:dd/MM/yyyy HH:mm}] {senderLabel}{suffix}");
+                builder.AppendLine(indentedText);
+                builder.AppendLine();
+            }
+
+            return builder.ToString().TrimEnd();
+        }
+
+        private void ExportConversationHistory(Conversation conv)
+        {
+            var transcript = BuildConversationTranscriptText(conv);
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                ShowStyledAlertDialog("CHAT", "Nada para exportar", "Esta conversa ainda nao possui historico suficiente para exportacao.", "Fechar", GetThemeBrush("AccentBrush"));
+                return;
+            }
+
+            var fileSafeName = SanitizeFileNameSegment(GetConversationParticipantName(conv));
+            var dialog = new SaveFileDialog
+            {
+                Title = "Exportar historico da conversa",
+                Filter = "Arquivo de texto|*.txt|Markdown|*.md",
+                FileName = $"chat-{fileSafeName}-{DateTime.Now:yyyyMMdd-HHmm}.txt"
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            try
+            {
+                File.WriteAllText(dialog.FileName, transcript, Encoding.UTF8);
+                ShowStyledAlertDialog("CHAT", "Exportacao concluida", $"O historico da conversa foi salvo em:\n{dialog.FileName}", "Fechar", GetThemeBrush("AccentBrush"));
+            }
+            catch (Exception ex)
+            {
+                ShowStyledAlertDialog("CHAT", "Falha ao exportar", $"Nao foi possivel salvar o historico desta conversa.\n\n{ex.Message}", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+            }
+        }
+
+        private void CopyConversationProfessorReportToClipboard(Conversation conv)
+        {
+            var report = new StringBuilder();
+            report.AppendLine("Resumo academico de conversa");
+            report.AppendLine($"Gerado em: {DateTime.Now:dd/MM/yyyy HH:mm}");
+            report.AppendLine($"Conversa: {(conv.IsSelfConversation ? "Chat proprio" : GetConversationParticipantName(conv))}");
+            report.AppendLine();
+            report.AppendLine("Ultimos registros:");
+            report.AppendLine(BuildConversationTranscriptText(conv, 12));
+
+            try
+            {
+                Clipboard.SetText(report.ToString());
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    conv.IsSelfConversation ? "Resumo copiado" : "Relatorio preparado",
+                    conv.IsSelfConversation
+                        ? "O resumo do chat proprio foi copiado para a area de transferencia."
+                        : "O resumo academico desta conversa foi copiado para a area de transferencia para compartilhamento com a docencia.",
+                    "Fechar",
+                    GetThemeBrush("AccentBrush"));
+            }
+            catch (Exception ex)
+            {
+                ShowStyledAlertDialog("CHAT", "Falha ao copiar", $"Nao foi possivel copiar o resumo da conversa.\n\n{ex.Message}", "Fechar", new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+            }
+        }
+
+        private void ShowConversationSearchDialog(Conversation conv)
+        {
+            var dialog = CreateStyledDialogWindow("Buscar na conversa", 700, 620, 560, canResize: true);
+            var accentBrush = new SolidColorBrush(Color.FromRgb(99, 102, 241));
+
+            var searchBox = new TextBox
+            {
+                Height = 46,
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+            ApplyDialogInputStyle(searchBox);
+
+            var resultsCountText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            };
+
+            var resultsList = new ListBox
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                MinHeight = 300,
+                BorderThickness = new Thickness(1)
+            };
+            ApplyDialogInputStyle(resultsList);
+
+            var currentResults = new List<string>();
+            void RefreshResults()
+            {
+                var query = searchBox.Text?.Trim() ?? string.Empty;
+                currentResults = (conv.Messages ?? new List<ChatMessage>())
+                    .OrderByDescending(message => message.Timestamp)
+                    .Where(message => string.IsNullOrWhiteSpace(query)
+                        || GetConversationMessageDisplayText(message).Contains(query, StringComparison.OrdinalIgnoreCase)
+                        || (message.SenderName ?? string.Empty).Contains(query, StringComparison.OrdinalIgnoreCase)
+                        || (message.StickerAsset ?? string.Empty).Contains(query, StringComparison.OrdinalIgnoreCase))
+                    .Take(40)
+                    .Select(message => $"[{message.Timestamp:dd/MM HH:mm}] {(message.IsOwn ? "Voce" : (string.IsNullOrWhiteSpace(message.SenderName) ? GetConversationParticipantName(conv) : message.SenderName))}: {TruncateChatText(GetConversationMessageDisplayText(message), 180)}")
+                    .ToList();
+
+                resultsList.ItemsSource = currentResults;
+                resultsCountText.Text = string.IsNullOrWhiteSpace(query)
+                    ? $"{currentResults.Count} resultado(s) exibidos no recorte atual da conversa."
+                    : $"{currentResults.Count} resultado(s) para \"{query}\".";
+            }
+
+            searchBox.TextChanged += (_, __) => RefreshResults();
+            resultsList.MouseDoubleClick += (_, __) =>
+            {
+                if (resultsList.SelectedItem is string selectedText)
+                {
+                    Clipboard.SetText(selectedText);
+                }
+            };
+            RefreshResults();
+
+            var copyButton = CreateDialogActionButton("Copiar resultado", accentBrush, Brushes.White, Brushes.Transparent, 150);
+            copyButton.Click += (_, __) =>
+            {
+                if (resultsList.SelectedItem is not string selectedText)
+                {
+                    ShowStyledAlertDialog("CHAT", "Selecao obrigatoria", "Escolha um resultado antes de copiar o trecho encontrado.", "Fechar", accentBrush);
+                    return;
+                }
+
+                Clipboard.SetText(selectedText);
+                dialog.Close();
+            };
+
+            var closeButton = CreateDialogActionButton("Fechar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"));
+            closeButton.Click += (_, __) => dialog.Close();
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            layout.Children.Add(CreateDialogHeader(
+                "CHAT",
+                "Buscar no historico",
+                $"Pesquise mensagens, figurinhas e remetentes dentro da conversa com {GetConversationParticipantName(conv)}.",
+                accentBrush));
+
+            var searchCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "Digite um termo para filtrar o recorte atual da conversa.",
+                            FontSize = 12,
+                            Foreground = GetThemeBrush("SecondaryTextBrush")
+                        },
+                        searchBox,
+                        resultsCountText
+                    }
+                }
+            };
+            Grid.SetRow(searchCard, 1);
+            layout.Children.Add(searchCard);
+
+            var resultsCard = new Border
+            {
+                Margin = new Thickness(0, 16, 0, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(16),
+                Child = resultsList
+            };
+            Grid.SetRow(resultsCard, 2);
+            layout.Children.Add(resultsCard);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            actions.Children.Add(closeButton);
+            actions.Children.Add(copyButton);
+            Grid.SetRow(actions, 3);
+            layout.Children.Add(actions);
+
+            dialog.Content = CreateStyledDialogShell(layout);
+            searchBox.Loaded += (_, __) => searchBox.Focus();
+            dialog.ShowDialog();
+        }
+
+        private string? ShowChatActionComposerDialog(string title, string description, string initialText, string confirmLabel, Brush accentBrush)
+        {
+            var dialog = CreateStyledDialogWindow(title, 600, 430);
+
+            var contentBox = new TextBox
+            {
+                Text = initialText,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Height = 180,
+                FontSize = 14,
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 10, 0, 0)
+            };
+            ApplyDialogInputStyle(contentBox);
+
+            string? result = null;
+            var confirmButton = CreateDialogActionButton(confirmLabel, accentBrush, Brushes.White, Brushes.Transparent, 168);
+            confirmButton.Click += (_, __) =>
+            {
+                result = contentBox.Text?.Trim();
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"));
+            cancelButton.Click += (_, __) => dialog.Close();
+
+            var layout = new Grid();
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            layout.Children.Add(CreateDialogHeader("CHAT", title, description, accentBrush));
+
+            var editorCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Padding = new Thickness(16),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = "Mensagem que sera publicada no chat",
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        },
+                        contentBox
+                    }
+                }
+            };
+            Grid.SetRow(editorCard, 1);
+            layout.Children.Add(editorCard);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 22, 0, 0)
+            };
+            actions.Children.Add(cancelButton);
+            actions.Children.Add(confirmButton);
+            Grid.SetRow(actions, 2);
+            layout.Children.Add(actions);
+
+            dialog.Content = CreateStyledDialogShell(layout);
+            contentBox.Loaded += (_, __) =>
+            {
+                contentBox.Focus();
+                contentBox.CaretIndex = contentBox.Text.Length;
+            };
+
+            return dialog.ShowDialog() == true ? result : null;
+        }
+
+        private async Task RequestConversationCallAsync(Conversation conv, string mode)
+        {
+            var isVideo = string.Equals(mode, "video", StringComparison.OrdinalIgnoreCase);
+            var accentBrush = isVideo
+                ? new SolidColorBrush(Color.FromRgb(236, 72, 153))
+                : new SolidColorBrush(Color.FromRgb(14, 165, 233));
+            var callLabel = isVideo ? "chamada de video" : "chamada de audio";
+            var draft = ShowChatActionComposerDialog(
+                isVideo ? "Solicitar video" : "Solicitar audio",
+                $"Registre um pedido de {callLabel} para {GetConversationParticipantName(conv)}. O aviso sera publicado no historico atual.",
+                isVideo ? "Podemos alinhar por video sobre:\n" : "Podemos alinhar por audio sobre:\n",
+                "Publicar no chat",
+                accentBrush);
+
+            if (string.IsNullOrWhiteSpace(draft))
+            {
+                return;
+            }
+
+            await SendConversationTextAsync(conv, $"[{(isVideo ? "VIDEO" : "AUDIO")}] Solicitacao de {callLabel}{Environment.NewLine}{draft.Trim()}");
+        }
+
         private UIElement CreateDeletedBubbleContent(ChatMessage msg)
         {
             var deletedBorderBrush = _appDarkModeEnabled
@@ -28957,9 +30803,17 @@ namespace MeuApp
                 }
             }
 
-            msg.Content = updatedText.Trim();
+            var normalizedText = updatedText.Trim();
+            var linkPreview = await ChatLinkPreviewService.TryBuildPreviewAsync(normalizedText);
+
+            msg.Content = normalizedText;
             msg.IsEdited = true;
             msg.EditedAt = DateTime.Now;
+            msg.LinkUrl = linkPreview?.Url ?? string.Empty;
+            msg.LinkTitle = linkPreview?.Title ?? string.Empty;
+            msg.LinkDescription = linkPreview?.Description ?? string.Empty;
+            msg.LinkImageUrl = linkPreview?.ImageUrl ?? string.Empty;
+            msg.LinkSiteName = linkPreview?.SiteName ?? string.Empty;
             RefreshConversationSummary(conv);
             RefreshChatsUI();
         }
@@ -28995,6 +30849,16 @@ namespace MeuApp
             msg.Content = msg.DeletedDisplayText;
             msg.MessageType = "deleted";
             msg.StickerAsset = string.Empty;
+            msg.AttachmentFileName = string.Empty;
+            msg.AttachmentContentType = string.Empty;
+            msg.AttachmentStoragePath = string.Empty;
+            msg.AttachmentSizeBytes = 0;
+            msg.AttachmentLocalPath = string.Empty;
+            msg.LinkUrl = string.Empty;
+            msg.LinkTitle = string.Empty;
+            msg.LinkDescription = string.Empty;
+            msg.LinkImageUrl = string.Empty;
+            msg.LinkSiteName = string.Empty;
             msg.IsDeleted = true;
             msg.DeletedAt = DateTime.Now;
             RefreshConversationSummary(conv);
@@ -29058,16 +30922,19 @@ namespace MeuApp
                 }
             };
 
-            shell.Loaded += (_, __) =>
+            if (!AccessibilityPreferences.ReduceAnimations)
             {
-                shell.Opacity = 0;
-                var transform = new TranslateTransform(0, 20);
-                shell.RenderTransform = transform;
+                shell.Loaded += (_, __) =>
+                {
+                    shell.Opacity = 0;
+                    var transform = new TranslateTransform(0, 20);
+                    shell.RenderTransform = transform;
 
-                var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-                shell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
-                transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(20, 0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
-            };
+                    var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+                    shell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
+                    transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(20, 0, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
+                };
+            }
 
             return shell;
         }
@@ -29140,6 +31007,67 @@ namespace MeuApp
             if (control.Padding == default)
             {
                 control.Padding = new Thickness(12, 10, 12, 10);
+            }
+
+            if (control is TextBoxBase textBoxBase)
+            {
+                textBoxBase.CaretBrush = GetThemeBrush("AccentBrush");
+                textBoxBase.SelectionBrush = CreateSoftAccentBrush(GetThemeBrush("AccentBrush"), _appDarkModeEnabled ? (byte)96 : (byte)72);
+                textBoxBase.SelectionOpacity = _appDarkModeEnabled ? 0.82 : 0.68;
+            }
+
+            if (control is ComboBox comboBox)
+            {
+                if (TryFindResource("DialogComboBoxItemStyle") is Style comboBoxItemStyle)
+                {
+                    comboBox.ItemContainerStyle = comboBoxItemStyle;
+                }
+
+                return;
+            }
+
+            if (control is ListBox listBox)
+            {
+                if (TryFindResource("DialogListBoxItemStyle") is Style listBoxItemStyle)
+                {
+                    listBox.ItemContainerStyle = listBoxItemStyle;
+                }
+
+                return;
+            }
+
+            if (control is DatePicker datePicker)
+            {
+                void ApplyDatePickerTextBoxTheme()
+                {
+                    if (datePicker.Template?.FindName("PART_TextBox", datePicker) is DatePickerTextBox textBox)
+                    {
+                        textBox.Background = GetThemeBrush("SearchBackgroundBrush");
+                        textBox.BorderBrush = GetThemeBrush("SearchBorderBrush");
+                        textBox.Foreground = GetThemeBrush("PrimaryTextBrush");
+                        textBox.CaretBrush = GetThemeBrush("AccentBrush");
+                    }
+                }
+
+                if (datePicker.IsLoaded)
+                {
+                    ApplyDatePickerTextBoxTheme();
+                }
+                else
+                {
+                    datePicker.Loaded += (_, __) => ApplyDatePickerTextBoxTheme();
+                }
+            }
+        }
+
+        private void ApplyDialogSliderStyle(Slider slider)
+        {
+            slider.Foreground = GetThemeBrush("AccentBrush");
+            slider.Background = GetThemeBrush("SearchBorderBrush");
+
+            if (TryFindResource("DialogSliderStyle") is Style sliderStyle)
+            {
+                slider.Style = sliderStyle;
             }
         }
 
@@ -29372,7 +31300,7 @@ namespace MeuApp
             });
             popupContent.Children.Add(new TextBlock
             {
-                Text = $"Gerencie a conversa com {conv.ContactName} sem sair do chat.",
+                Text = $"Gerencie a conversa com {GetConversationParticipantName(conv)} sem sair do chat.",
                 FontSize = 11,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = subtitleBrush,
@@ -29389,7 +31317,7 @@ namespace MeuApp
                 StaysOpen = false
             };
 
-            Button CreateActionButton(string icon, string title, string subtitle, Color accentColor, Action action)
+            Button CreateActionButton(string icon, string title, string subtitle, Color accentColor, Func<Task> action)
             {
                 var button = new Button
                 {
@@ -29477,36 +31405,60 @@ namespace MeuApp
                 button.Content = cardBorder;
                 button.MouseEnter += (s, e) => cardBorder.Background = hoverBackground;
                 button.MouseLeave += (s, e) => cardBorder.Background = idleBackground;
-                button.Click += (s, e) =>
+                button.Click += async (s, e) =>
                 {
                     popup.IsOpen = false;
-                    action();
+                    await action();
                 };
 
                 return button;
             }
 
-            popupContent.Children.Add(CreateActionButton(
-                "🔕",
-                "Silenciar conversa",
-                "Pausa alertas desta conversa por 8 horas para reduzir distrações.",
-                Color.FromRgb(14, 165, 233),
-                () => MessageBox.Show(
-                    $"As notificações da conversa com {conv.ContactName} foram silenciadas por 8 horas.",
-                    "Conversa silenciada",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information)));
+            var isMuted = TryGetConversationMutedUntil(conv, out var mutedUntil);
 
             popupContent.Children.Add(CreateActionButton(
-                "📌",
-                "Fixar no topo",
-                "Mantém este contato destacado no início da lista de conversas.",
-                Color.FromRgb(59, 130, 246),
-                () => MessageBox.Show(
-                    $"A conversa com {conv.ContactName} foi marcada como prioritária.",
-                    "Conversa fixada",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information)));
+                isMuted ? "🔔" : "🔕",
+                isMuted ? "Reativar alertas" : "Silenciar conversa",
+                isMuted
+                    ? $"Os alertas desta conversa estao pausados ate {mutedUntil:HH:mm}. Clique para reativar agora."
+                    : "Pausa alertas desta conversa por 8 horas para reduzir distracoes nesta sessao.",
+                Color.FromRgb(14, 165, 233),
+                () =>
+                {
+                    ToggleConversationMuteState(conv);
+                    return Task.CompletedTask;
+                }));
+
+            if (conv.IsSelfConversation)
+            {
+                popupContent.Children.Add(CreateActionButton(
+                    "⭐",
+                    "Chat próprio fixo",
+                    "Este espaço pessoal sempre aparece em Favoritos para guardar notas, fotos e arquivos.",
+                    Color.FromRgb(59, 130, 246),
+                    () =>
+                    {
+                        SetConversationFilter(ChatConversationFilterMode.Favorites);
+                        _selectedConversation = conv;
+                        RefreshChatsUI();
+                        return Task.CompletedTask;
+                    }));
+            }
+            else
+            {
+                popupContent.Children.Add(CreateActionButton(
+                    conv.IsFavorite ? "⭐" : "📌",
+                    conv.IsFavorite ? "Remover dos favoritos" : "Adicionar aos favoritos",
+                    conv.IsFavorite
+                        ? "Tira este contato da aba Favoritos, mas mantém a conversa na lista geral."
+                        : "Mostra este contato na aba Favoritos e destaca a conversa para acesso rápido.",
+                    Color.FromRgb(59, 130, 246),
+                    () =>
+                    {
+                        ToggleConversationFavorite(conv);
+                        return Task.CompletedTask;
+                    }));
+            }
 
             popupContent.Children.Add(new Border
             {
@@ -29517,25 +31469,27 @@ namespace MeuApp
 
             popupContent.Children.Add(CreateActionButton(
                 "🛡",
-                "Denunciar ao professor",
-                "Encaminha um alerta acadêmico com o contexto desta conversa.",
+                conv.IsSelfConversation ? "Copiar resumo do chat" : "Preparar relatorio ao professor",
+                conv.IsSelfConversation
+                    ? "Copia um resumo rapido das suas notas para compartilhar fora do app."
+                    : "Copia um resumo academico com as ultimas mensagens para encaminhamento docente.",
                 Color.FromRgb(245, 158, 11),
-                () => MessageBox.Show(
-                    $"Um aviso foi encaminhado ao professor responsável sobre a conversa com {conv.ContactName}.",
-                    "Encaminhamento acadêmico",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information)));
+                () =>
+                {
+                    CopyConversationProfessorReportToClipboard(conv);
+                    return Task.CompletedTask;
+                }));
 
             popupContent.Children.Add(CreateActionButton(
                 "🗂",
                 "Exportar histórico",
                 "Prepara esta conversa para compartilhamento e auditoria do projeto.",
                 Color.FromRgb(16, 185, 129),
-                () => MessageBox.Show(
-                    $"A exportação do histórico com {conv.ContactName} foi preparada para a próxima etapa de implementação.",
-                    "Exportação iniciada",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information)));
+                () =>
+                {
+                    ExportConversationHistory(conv);
+                    return Task.CompletedTask;
+                }));
 
             popup.Child = new Border
             {

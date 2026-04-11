@@ -28,7 +28,7 @@ namespace MeuApp
         public string Description { get; }
     }
 
-    public sealed class GalleryImageViewerWindow : Window
+    public sealed class GalleryImageViewerWindow : ChromeWindow
     {
         private readonly IReadOnlyList<GalleryViewerItem> _items;
         private readonly ScrollViewer _scrollViewer;
@@ -115,10 +115,6 @@ namespace MeuApp
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var header = new Grid();
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
             var headingStack = new StackPanel();
             _contextText = new TextBlock
             {
@@ -146,26 +142,24 @@ namespace MeuApp
                 TextWrapping = TextWrapping.Wrap
             };
             headingStack.Children.Add(_subtitleText);
-            header.Children.Add(headingStack);
 
-            var closeButton = new Button
+            var titleBar = new WindowTitleBar
             {
-                Content = "Fechar",
-                Width = 124,
-                Height = 42,
-                Margin = new Thickness(18, 0, 0, 0),
-                Background = new SolidColorBrush(Color.FromRgb(15, 23, 42)),
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Foreground = Brushes.White,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(51, 65, 85)),
-                BorderThickness = new Thickness(1),
-                FontWeight = FontWeights.SemiBold,
-                Cursor = Cursors.Hand,
-                VerticalAlignment = VerticalAlignment.Top
+                MutedForegroundBrush = new SolidColorBrush(Color.FromRgb(148, 163, 184)),
+                CommandHoverBrush = new SolidColorBrush(Color.FromRgb(15, 23, 42)),
+                CloseHoverBrush = new SolidColorBrush(Color.FromRgb(59, 24, 24)),
+                CloseForegroundBrush = new SolidColorBrush(Color.FromRgb(252, 165, 165)),
+                WindowCommandsBackground = new SolidColorBrush(Color.FromRgb(15, 23, 42)),
+                WindowCommandsBorderBrush = new SolidColorBrush(Color.FromRgb(51, 65, 85)),
+                InnerPadding = new Thickness(0, 0, 0, 6),
+                TitleBarMinHeight = 56,
+                HeaderContent = headingStack
             };
-            closeButton.Click += (_, __) => Close();
-            Grid.SetColumn(closeButton, 1);
-            header.Children.Add(closeButton);
-            root.Children.Add(header);
+            root.Children.Add(titleBar);
 
             var mainGrid = new Grid { Margin = new Thickness(0, 22, 0, 0) };
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });

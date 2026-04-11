@@ -1,7 +1,8 @@
-<Window x:Class="MeuApp.SearchResultsWindow"
+<local:ChromeWindow x:Class="MeuApp.SearchResultsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+    xmlns:local="clr-namespace:MeuApp"
     Title="Choas | Buscar conexões" Height="500" Width="600"
     WindowStartupLocation="CenterOwner"
     Background="White"
@@ -9,7 +10,38 @@
     ResizeMode="CanResize">
 
     <Grid Background="White">
-        <StackPanel Orientation="Vertical" Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <local:WindowTitleBar Grid.Row="0"
+                              Background="White"
+                              BorderBrush="#FFE5E7EB"
+                              BorderThickness="0,0,0,1"
+                              Foreground="#FF0F172A"
+                              MutedForegroundBrush="#FF64748B"
+                              CommandHoverBrush="#FFF8FAFC"
+                              CloseHoverBrush="#FFFEE2E2"
+                              CloseForegroundBrush="#FFDC2626"
+                              AccentBrush="#FF0078D4"
+                              AccentMutedBrush="#FFE8F0FF"
+                              QuickActionsBackgroundBrush="White"
+                              QuickActionsMutedSurfaceBrush="#FFF8FAFC"
+                              QuickActionsBorderBrush="#FFCBD5E1"
+                              WindowCommandsBackground="#FFF8FAFC"
+                              WindowCommandsBorderBrush="#FFCBD5E1"
+                              InnerPadding="20,10"
+                              TitleBarMinHeight="72">
+            <local:WindowTitleBar.HeaderContent>
+                <StackPanel>
+                    <TextBlock Text="Resultados da busca" FontFamily="{StaticResource AppDisplayFontFamily}" FontSize="18" FontWeight="ExtraBold" Foreground="#FF0F172A"/>
+                    <TextBlock Text="Conexões, perfis e atalhos de conversa" FontSize="11" Foreground="#FF64748B"/>
+                </StackPanel>
+            </local:WindowTitleBar.HeaderContent>
+        </local:WindowTitleBar>
+
+        <StackPanel Grid.Row="1" Orientation="Vertical" Margin="20">
             <!-- SEARCH HEADER -->
             <StackPanel Orientation="Vertical" Margin="0,0,0,16">
                 <TextBlock Text="🔍 Resultados da busca de conexões" FontSize="18" FontWeight="ExtraBold" Foreground="#FF333333" Margin="0,0,0,8"/>
@@ -69,4 +101,4 @@
             <TextBlock x:Name="LoadingText" Text="Buscando..." FontSize="13" Foreground="#FF0078D4" TextAlignment="Center" Margin="0,32" Visibility="Collapsed"/>
         </StackPanel>
     </Grid>
-</Window>
+</local:ChromeWindow>

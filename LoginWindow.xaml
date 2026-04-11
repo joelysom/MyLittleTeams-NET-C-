@@ -1,31 +1,48 @@
-<Window x:Class="MeuApp.LoginWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
-        Title="Choas | Entrar" Height="720" Width="1280"
-        WindowStartupLocation="CenterScreen"
-        Background="White"
-        BorderThickness="0"
-        ResizeMode="CanMinimize">
+<local:ChromeWindow x:Class="MeuApp.LoginWindow"
+                    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
+                    xmlns:local="clr-namespace:MeuApp"
+                    Title="Choas | Entrar" Height="720" Width="1280"
+                    WindowStartupLocation="CenterScreen"
+                    Background="White"
+                    BorderThickness="0"
+                    ResizeMode="CanMinimize">
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="PrimaryColor" Color="#FF0078D4"/>
-        <SolidColorBrush x:Key="SurfaceColor" Color="#FFFFFFFF"/>
-        <SolidColorBrush x:Key="BackgroundColor" Color="#FFF3F3F3"/>
-        <SolidColorBrush x:Key="TextPrimary" Color="#FF1F1F1F"/>
-        <SolidColorBrush x:Key="TextSecondary" Color="#FF717171"/>
-        
+    <local:ChromeWindow.Resources>
+        <SolidColorBrush x:Key="LoginAccentBrush" Color="#FF0078D4"/>
+        <SolidColorBrush x:Key="LoginAccentHoverBrush" Color="#FF106EBE"/>
+        <SolidColorBrush x:Key="LoginAccentPressedBrush" Color="#FF0063B1"/>
+        <SolidColorBrush x:Key="LoginWindowBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="LoginSurfaceBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="LoginSurfaceAltBrush" Color="#FFF8FAFC"/>
+        <SolidColorBrush x:Key="LoginInputBackgroundBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="LoginBorderBrush" Color="#FFE0E0E0"/>
+        <SolidColorBrush x:Key="LoginPrimaryTextBrush" Color="#FF1F1F1F"/>
+        <SolidColorBrush x:Key="LoginSecondaryTextBrush" Color="#FF717171"/>
+        <SolidColorBrush x:Key="LoginMutedTextBrush" Color="#FF666666"/>
+        <SolidColorBrush x:Key="LoginDividerBrush" Color="#FFE0E0E0"/>
+        <SolidColorBrush x:Key="LoginInfoCardBrush" Color="#FFF7FAFF"/>
+        <SolidColorBrush x:Key="LoginInfoCardBorderBrush" Color="#FFD7E7FF"/>
+        <SolidColorBrush x:Key="LoginInfoCardTextBrush" Color="#FF24507A"/>
+        <SolidColorBrush x:Key="LoginAccessibilityCardBrush" Color="#FFFFFFFF"/>
+        <SolidColorBrush x:Key="LoginAccessibilityCardBorderBrush" Color="#FFE5E7EB"/>
+        <SolidColorBrush x:Key="LoginAccessibilityMutedBrush" Color="#FFF8FAFC"/>
+
+        <LinearGradientBrush x:Key="LoginHeroBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#FF081223" Offset="0"/>
+            <GradientStop Color="#FF0D2A52" Offset="0.45"/>
+            <GradientStop Color="#FF1D4ED8" Offset="1"/>
+        </LinearGradientBrush>
+
         <Style x:Key="LoginInputStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="Foreground">
-                <Setter.Value>
-                    <SolidColorBrush Color="#FF1F1F1F"/>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="Background" Value="{DynamicResource LoginInputBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginPrimaryTextBrush}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource LoginAccentBrush}"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LoginBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Margin" Value="0,8,0,0"/>
             <Setter Property="Template">
@@ -36,9 +53,9 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsFocused" Value="True">
-                                <Setter Property="BorderBrush" Value="#FF0078D4"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource LoginAccentBrush}"/>
                                 <Setter Property="BorderThickness" Value="2"/>
-                                <Setter Property="Background" Value="White"/>
+                                <Setter Property="Background" Value="{DynamicResource LoginInputBackgroundBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -47,22 +64,218 @@
         </Style>
 
         <Style x:Key="LoginPasswordStyle" TargetType="PasswordBox">
-            <Setter Property="Background" Value="#FFFFFF"/>
-            <Setter Property="Foreground">
-                <Setter.Value>
-                    <SolidColorBrush Color="#FF1F1F1F"/>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="Background" Value="{DynamicResource LoginInputBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginPrimaryTextBrush}"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="Padding" Value="14,12"/>
-            <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LoginBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Margin" Value="0,8,0,0"/>
         </Style>
 
+        <Style x:Key="LoginScrollBarThumbStyle" TargetType="Thumb">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border x:Name="ThumbBorder"
+                                Margin="2"
+                                CornerRadius="999"
+                                Background="{DynamicResource LoginBorderBrush}"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource LoginAccentHoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LoginVerticalScrollBarStyle" TargetType="ScrollBar">
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Width="{TemplateBinding Width}" Background="Transparent">
+                            <Border Margin="2,0"
+                                    CornerRadius="999"
+                                    Background="{DynamicResource LoginSurfaceAltBrush}"/>
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource LoginScrollBarThumbStyle}"/>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LoginComboBoxToggleButtonStyle" TargetType="ToggleButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid Background="Transparent">
+                            <Path x:Name="Arrow"
+                                  Width="12"
+                                  Height="7"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Fill="{DynamicResource LoginSecondaryTextBrush}"
+                                  Data="M 0 0 L 6 7 L 12 0 Z"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Arrow" Property="Fill" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Arrow" Property="Fill" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Arrow" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LoginComboBoxItemStyle" TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource LoginPrimaryTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource LoginSurfaceAltBrush}"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="12,9"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ComboBoxItemBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="12"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ComboBoxItemBorder" Property="Background" Value="{DynamicResource LoginInfoCardBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ComboBoxItemBorder" Property="Background" Value="{DynamicResource LoginAccentBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ComboBoxItemBorder" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LoginComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Height" Value="44"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="Background" Value="{DynamicResource LoginInputBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginPrimaryTextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LoginBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource LoginComboBoxItemStyle}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="ComboBoxBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="44"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <ContentPresenter Grid.Column="0"
+                                                      Margin="14,0,6,0"
+                                                      VerticalAlignment="Center"
+                                                      HorizontalAlignment="Left"
+                                                      IsHitTestVisible="False"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                      TextElement.Foreground="{TemplateBinding Foreground}"/>
+
+                                    <ToggleButton Grid.Column="1"
+                                                  Style="{StaticResource LoginComboBoxToggleButtonStyle}"
+                                                  IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"/>
+                                </Grid>
+                            </Border>
+
+                            <Popup x:Name="PART_Popup"
+                                   Placement="Bottom"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   PopupAnimation="Fade">
+                                <Border x:Name="PopupBorder"
+                                        Margin="0,8,0,0"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Background="{DynamicResource LoginSurfaceBrush}"
+                                        BorderBrush="{DynamicResource LoginBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="16">
+                                    <ScrollViewer Margin="6"
+                                                  MaxHeight="240"
+                                                  SnapsToDevicePixels="True">
+                                        <ScrollViewer.Resources>
+                                            <Style TargetType="ScrollBar" BasedOn="{StaticResource LoginVerticalScrollBarStyle}"/>
+                                        </ScrollViewer.Resources>
+                                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="ComboBoxBorder" Property="BorderBrush" Value="{DynamicResource LoginAccentBrush}"/>
+                                <Setter TargetName="ComboBoxBorder" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter TargetName="ComboBoxBorder" Property="BorderBrush" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ComboBoxBorder" Property="Opacity" Value="0.6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="#FF0078D4"/>
+            <Setter Property="Background" Value="{DynamicResource LoginAccentBrush}"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
@@ -80,10 +293,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#FF106EBE"/>
+                                <Setter Property="Background" Value="{DynamicResource LoginAccentHoverBrush}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter Property="Background" Value="#FF0063B1"/>
+                                <Setter Property="Background" Value="{DynamicResource LoginAccentPressedBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -92,13 +305,13 @@
         </Style>
 
         <Style x:Key="SecondaryButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="#FF0078D4"/>
+            <Setter Property="Background" Value="{DynamicResource LoginSurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginAccentBrush}"/>
             <Setter Property="FontFamily" Value="{StaticResource AppTextFontFamily}"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="16,10"/>
-            <Setter Property="BorderBrush" Value="#FFD0D0D0"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LoginBorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="0,20,0,0"/>
@@ -111,8 +324,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#FFF3F3F3"/>
-                                <Setter Property="BorderBrush" Value="#FFA0A0A0"/>
+                                <Setter Property="Background" Value="{DynamicResource LoginSurfaceAltBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -122,7 +334,7 @@
 
         <Style x:Key="TabButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#FF717171"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginSecondaryTextBrush}"/>
             <Setter Property="FontFamily" Value="{StaticResource AppDisplayFontFamily}"/>
             <Setter Property="FontSize" Value="15"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -132,23 +344,114 @@
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Margin" Value="0,0,32,0"/>
         </Style>
-    </Window.Resources>
 
-    <Grid Background="White">
+        <Style x:Key="AccessibilityMiniButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="34"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource LoginPrimaryTextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource LoginAccessibilityMutedBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LoginAccessibilityCardBorderBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="AccessibilityImageButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="78"/>
+            <Setter Property="Height" Value="78"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Background="Transparent">
+                            <Ellipse x:Name="HoverChrome"
+                                     Margin="4"
+                                     Fill="{DynamicResource LoginAccessibilityMutedBrush}"
+                                     Stroke="{DynamicResource LoginAccessibilityCardBorderBrush}"
+                                     StrokeThickness="1"
+                                     Opacity="0"/>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="HoverChrome" Property="Opacity" Value="0.9"/>
+                                <Setter TargetName="HoverChrome" Property="Stroke" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="HoverChrome" Property="Opacity" Value="1"/>
+                                <Setter TargetName="HoverChrome" Property="Margin" Value="6"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="HoverChrome" Property="Opacity" Value="0.9"/>
+                                <Setter TargetName="HoverChrome" Property="Stroke" Value="{DynamicResource LoginAccentBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </local:ChromeWindow.Resources>
+
+    <Grid Background="{DynamicResource LoginWindowBackgroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <local:WindowTitleBar Grid.Row="0"
+                              Background="{DynamicResource LoginSurfaceBrush}"
+                              BorderBrush="{DynamicResource LoginBorderBrush}"
+                              BorderThickness="0,0,0,1"
+                              Foreground="{DynamicResource LoginPrimaryTextBrush}"
+                              MutedForegroundBrush="{DynamicResource LoginSecondaryTextBrush}"
+                              CommandHoverBrush="{DynamicResource LoginSurfaceAltBrush}"
+                              CloseHoverBrush="#FFFEE2E2"
+                              CloseForegroundBrush="#FFDC2626"
+                              AccentBrush="{DynamicResource LoginAccentBrush}"
+                              AccentMutedBrush="{DynamicResource LoginInfoCardBrush}"
+                              QuickActionsBackgroundBrush="{DynamicResource LoginAccessibilityCardBrush}"
+                              QuickActionsMutedSurfaceBrush="{DynamicResource LoginAccessibilityMutedBrush}"
+                              QuickActionsBorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}"
+                              WindowCommandsBackground="{DynamicResource LoginSurfaceAltBrush}"
+                              WindowCommandsBorderBrush="{DynamicResource LoginBorderBrush}"
+                              InnerPadding="20,10"
+                              TitleBarMinHeight="72">
+            <local:WindowTitleBar.HeaderContent>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="34" Height="34" CornerRadius="17" Background="{DynamicResource LoginInfoCardBrush}" Margin="0,0,12,0">
+                        <Image Source="pack://application:,,,/img/tesseractICO.png" Width="18" Height="18" Stretch="Uniform" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                    </Border>
+                    <StackPanel>
+                        <TextBlock Text="Choas" FontFamily="{StaticResource AppDisplayFontFamily}" FontSize="18" FontWeight="ExtraBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                        <TextBlock Text="Acesso acadêmico ao workspace" FontSize="11" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                    </StackPanel>
+                </StackPanel>
+            </local:WindowTitleBar.HeaderContent>
+        </local:WindowTitleBar>
+
+        <Grid Grid.Row="1" Background="{DynamicResource LoginWindowBackgroundBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <!-- LADO ESQUERDO - IMAGEM -->
-        <Border Grid.Column="0">
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                    <GradientStop Color="#FF081223" Offset="0"/>
-                    <GradientStop Color="#FF0D2A52" Offset="0.45"/>
-                    <GradientStop Color="#FF1D4ED8" Offset="1"/>
-                </LinearGradientBrush>
-            </Border.Background>
+        <Border Grid.Column="0" Background="{DynamicResource LoginHeroBackgroundBrush}">
             <Grid>
                 <Ellipse Width="420" Height="420" Fill="#1FFFFFFF" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-120,-110,0,0"/>
                 <Ellipse Width="360" Height="360" Fill="#1200C2FF" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-90,-80"/>
@@ -214,102 +517,249 @@
                         </Grid>
                     </Border>
                 </Grid>
+
+                <Border Width="326"
+                        Padding="18"
+                        Margin="44,0,0,40"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Bottom"
+                        Background="#B30A1222"
+                        BorderBrush="#33FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="24">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.22" Color="#FF020617"/>
+                    </Border.Effect>
+
+                    <StackPanel>
+                        <Border HorizontalAlignment="Left"
+                                Padding="10,4"
+                                Background="#1FFFFFFF"
+                                BorderBrush="#26FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="999">
+                            <TextBlock x:Name="LoginHeroBadgeText"
+                                       Text="ACESSO"
+                                       FontSize="10"
+                                       FontWeight="Bold"
+                                       Foreground="#FFF8FAFC"/>
+                        </Border>
+
+                        <TextBlock x:Name="LoginHeroTitleText"
+                                   Margin="0,14,0,0"
+                                   Text="Entre no observatório"
+                                   FontFamily="{StaticResource AppDisplayFontFamily}"
+                                   FontSize="24"
+                                   FontWeight="ExtraBold"
+                                   Foreground="#FFF8FBFF"
+                                   TextWrapping="Wrap"/>
+
+                        <TextBlock x:Name="LoginHeroBodyText"
+                                   Margin="0,10,0,0"
+                                   Text="Acompanhe turmas, equipes, arquivos e conversas em um workspace acadêmico mais organizado." 
+                                   FontSize="12"
+                                   LineHeight="19"
+                                   Foreground="#FFD7E2F2"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
 
         <!-- LADO DIREITO - FORMULÁRIO -->
-        <Border Grid.Column="1" Background="White" Padding="60,0">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel Orientation="Vertical" VerticalAlignment="Center">
-                    <!-- Logo/Título -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12" VerticalAlignment="Center">
-                        <Image Source="pack://application:,,,/img/tesseractICO.png" Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="Choas" FontSize="28" FontWeight="ExtraBold" Foreground="#0078D4" VerticalAlignment="Center"/>
-                    </StackPanel>
-                    <TextBlock Text="Observatório de Projetos Integradores" FontSize="14" Foreground="#999999" Margin="0,0,0,32"/>
+        <Border Grid.Column="1" Background="{DynamicResource LoginSurfaceBrush}" Padding="42,20,58,20">
+            <Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,4,0">
+                    <ScrollViewer.Resources>
+                        <Style TargetType="ScrollBar" BasedOn="{StaticResource LoginVerticalScrollBarStyle}"/>
+                    </ScrollViewer.Resources>
+                    <Border Width="484" HorizontalAlignment="Center" Padding="0,28,10,28">
+                    <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12" VerticalAlignment="Center">
+                            <Image Source="pack://application:,,,/img/tesseractICO.png" Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Choas" FontSize="28" FontWeight="ExtraBold" Foreground="{DynamicResource LoginAccentBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <TextBlock Text="Observatório de Projetos Integradores" FontSize="14" Foreground="{DynamicResource LoginSecondaryTextBrush}" Margin="0,0,0,32"/>
 
-                    <!-- Tabs -->
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
-                        <Button x:Name="LoginTabButton" Content="Login" Style="{StaticResource TabButtonStyle}" Click="SwitchTab_Click" Tag="Login" Foreground="#0078D4" FontWeight="ExtraBold"/>
-                        <Button x:Name="SignupTabButton" Content="Cadastro" Style="{StaticResource TabButtonStyle}" Click="SwitchTab_Click" Tag="Signup"/>
-                    </StackPanel>
-
-                    <!-- Linha divisória -->
-                    <Rectangle Height="2" Fill="#FFE0E0E0" Margin="0,0,0,24"/>
-
-                    <!-- LOGIN CONTENT -->
-                    <StackPanel x:Name="LoginContent" Orientation="Vertical">
-                        <TextBlock Text="Email ou Telefone" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
-
-                        <TextBlock Text="Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <PasswordBox x:Name="LoginPassword" Style="{StaticResource LoginPasswordStyle}"/>
-
-                        <TextBlock Text="Manter conectado" FontSize="12" Foreground="#666666" Margin="0,12,0,0"/>
-                        <CheckBox Background="Transparent" Foreground="#0078D4" Margin="0,8,0,0" IsChecked="True"/>
-
-                        <Button Content="Entrar" Style="{StaticResource PrimaryButtonStyle}" Click="LoginButton_Click" Foreground="White"/>
-
-                        <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="#0078D4" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline" MouseLeftButtonUp="ForgotPasswordLink_MouseLeftButtonUp"/>
-                    </StackPanel>
-
-                    <!-- SIGNUP CONTENT -->
-                    <StackPanel x:Name="SignupContent" Orientation="Vertical" Visibility="Collapsed">
-                        <TextBlock Text="Nome Completo" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <TextBox x:Name="SignupName" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seu Nome"/>
-
-                        <TextBlock Text="Email" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
-
-                        <TextBlock Text="Telefone" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupPhone" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="(XX) 9XXXX-XXXX"/>
-
-                        <TextBlock Text="Perfil de acesso" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <ComboBox x:Name="SignupRoleComboBox" Height="44" Padding="12,8" Margin="0,8,0,0" SelectionChanged="SignupRoleComboBox_SelectionChanged" SelectedIndex="0">
-                            <ComboBoxItem Content="Aluno" Tag="student"/>
-                            <ComboBoxItem Content="Professor orientador" Tag="professor"/>
-                        </ComboBox>
-
-                        <TextBlock Text="Curso" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupCourse" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software"/>
-
-                        <TextBlock Text="Matrícula" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <TextBox x:Name="SignupRegistration" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="202400123"/>
-
-                        <StackPanel x:Name="ProfessorSignupFieldsPanel" Visibility="Collapsed">
-                            <Border Margin="0,16,0,0" Padding="14" CornerRadius="12" Background="#FFF7FAFF" BorderBrush="#FFD7E7FF" BorderThickness="1">
-                                <TextBlock Text="O cadastro docente libera dashboard multi-equipes, exportação acadêmica e permissões avançadas de orientação." TextWrapping="Wrap" FontSize="12" Foreground="#FF24507A"/>
-                            </Border>
-
-                            <TextBlock Text="Departamento ou área" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="SignupAcademicDepartment" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software / Coordenação"/>
-
-                            <TextBlock Text="Foco acadêmico" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="SignupAcademicFocus" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Projetos integradores, banca, UX, dados..."/>
-
-                            <TextBlock Text="Janela de atendimento" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="SignupOfficeHours" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seg e Qua, 19h às 21h"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,24">
+                            <Button x:Name="LoginTabButton" Content="Login" Style="{StaticResource TabButtonStyle}" Click="SwitchTab_Click" Tag="Login" Foreground="{DynamicResource LoginAccentBrush}" FontWeight="ExtraBold"/>
+                            <Button x:Name="SignupTabButton" Content="Cadastro" Style="{StaticResource TabButtonStyle}" Click="SwitchTab_Click" Tag="Signup"/>
                         </StackPanel>
 
-                        <TextBlock Text="Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <PasswordBox x:Name="SignupPassword" Style="{StaticResource LoginPasswordStyle}"/>
-                        <TextBlock Text="Confirmar Senha" FontSize="13" Foreground="#333333" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                        <PasswordBox x:Name="SignupPasswordConfirm" Style="{StaticResource LoginPasswordStyle}"/>
+                        <Rectangle Height="2" Fill="{DynamicResource LoginDividerBrush}" Margin="0,0,0,24"/>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                            <CheckBox Background="Transparent" Foreground="#0078D4"/>
-                            <TextBlock Text="Concordo com os Termos de Serviço" FontSize="12" Foreground="#666666" VerticalAlignment="Center"/>
+                        <StackPanel x:Name="LoginContent" Orientation="Vertical">
+                            <TextBlock Text="Email ou Telefone" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
+
+                            <TextBlock Text="Senha" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <PasswordBox x:Name="LoginPassword" Style="{StaticResource LoginPasswordStyle}"/>
+
+                            <TextBlock Text="Manter conectado" FontSize="12" Foreground="{DynamicResource LoginMutedTextBrush}" Margin="0,12,0,0"/>
+                            <CheckBox Background="Transparent" Foreground="{DynamicResource LoginAccentBrush}" Margin="0,8,0,0" IsChecked="True"/>
+
+                            <Button Content="Entrar" Style="{StaticResource PrimaryButtonStyle}" Click="LoginButton_Click" Foreground="White"/>
+
+                            <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="{DynamicResource LoginAccentBrush}" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline" MouseLeftButtonUp="ForgotPasswordLink_MouseLeftButtonUp"/>
                         </StackPanel>
 
-                        <Button Content="Criar Conta" Style="{StaticResource PrimaryButtonStyle}" Click="SignupButton_Click" Foreground="White"/>
-                    </StackPanel>
+                        <StackPanel x:Name="SignupContent" Orientation="Vertical" Visibility="Collapsed">
+                            <TextBlock Text="Nome Completo" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBox x:Name="SignupName" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seu Nome"/>
 
-                    <!-- Footer -->
-                    <TextBlock Margin="0,32,0,0">
-                        <Run Text="© 2026 Choas. Todos os direitos reservados. " FontSize="11" Foreground="#999999"/>
-                    </TextBlock>
-                </StackPanel>
-            </ScrollViewer>
+                            <TextBlock Text="Email" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
+
+                            <TextBlock Text="Telefone" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupPhone" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="(XX) 9XXXX-XXXX"/>
+
+                            <TextBlock Text="Perfil de acesso" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <ComboBox x:Name="SignupRoleComboBox" Style="{StaticResource LoginComboBoxStyle}" SelectionChanged="SignupRoleComboBox_SelectionChanged" SelectedIndex="0">
+                                <ComboBoxItem Content="Aluno" Tag="student"/>
+                                <ComboBoxItem Content="Professor orientador" Tag="professor"/>
+                            </ComboBox>
+
+                            <TextBlock Text="Curso" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupCourse" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software"/>
+
+                            <TextBlock Text="Matrícula" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <TextBox x:Name="SignupRegistration" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="202400123"/>
+
+                            <StackPanel x:Name="ProfessorSignupFieldsPanel" Visibility="Collapsed">
+                                <Border Margin="0,16,0,0" Padding="14" CornerRadius="12" Background="{DynamicResource LoginInfoCardBrush}" BorderBrush="{DynamicResource LoginInfoCardBorderBrush}" BorderThickness="1">
+                                    <TextBlock Text="O cadastro docente libera dashboard multi-equipes, exportação acadêmica e permissões avançadas de orientação." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource LoginInfoCardTextBrush}"/>
+                                </Border>
+
+                                <TextBlock Text="Departamento ou área" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                                <TextBox x:Name="SignupAcademicDepartment" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Engenharia de Software / Coordenação"/>
+
+                                <TextBlock Text="Foco acadêmico" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                                <TextBox x:Name="SignupAcademicFocus" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Projetos integradores, banca, UX, dados..."/>
+
+                                <TextBlock Text="Janela de atendimento" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                                <TextBox x:Name="SignupOfficeHours" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="Seg e Qua, 19h às 21h"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Senha" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <PasswordBox x:Name="SignupPassword" Style="{StaticResource LoginPasswordStyle}"/>
+                            <TextBlock Text="Confirmar Senha" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                            <PasswordBox x:Name="SignupPasswordConfirm" Style="{StaticResource LoginPasswordStyle}"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <CheckBox Background="Transparent" Foreground="{DynamicResource LoginAccentBrush}"/>
+                                <TextBlock Text="Concordo com os Termos de Serviço" FontSize="12" Foreground="{DynamicResource LoginMutedTextBrush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <Button Content="Criar Conta" Style="{StaticResource PrimaryButtonStyle}" Click="SignupButton_Click" Foreground="White"/>
+                        </StackPanel>
+
+                        <TextBlock Margin="0,32,0,0">
+                            <Run Text="© 2026 Choas. Todos os direitos reservados. " FontSize="11" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                        </TextBlock>
+                    </StackPanel>
+                    </Border>
+                </ScrollViewer>
+
+                <Border x:Name="LoginAccessibilityPanel"
+                        Visibility="Collapsed"
+                        Width="320"
+                        Padding="18"
+                        Margin="0,0,92,18"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Panel.ZIndex="5"
+                        Background="{DynamicResource LoginAccessibilityCardBrush}"
+                        BorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="24">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="28" ShadowDepth="10" Opacity="0.18" Color="#FF0F172A"/>
+                    </Border.Effect>
+
+                    <StackPanel>
+                        <TextBlock Text="Acessibilidade" FontFamily="{StaticResource AppDisplayFontFamily}" FontSize="18" FontWeight="ExtraBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                        <TextBlock Text="Ajuste leitura, movimento e tema da tela de entrada." Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+
+                        <Border Height="1" Margin="0,16,0,16" Background="{DynamicResource LoginAccessibilityCardBorderBrush}"/>
+
+                        <Border Margin="0,0,0,10" Padding="14" Background="{DynamicResource LoginAccessibilityMutedBrush}" BorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Modo escuro" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                                    <TextBlock Text="Altera a tela de login para uma paleta escura." Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                                </StackPanel>
+                                <CheckBox x:Name="LoginDarkModeToggle" Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource LoginAccentBrush}" Checked="LoginDarkModeToggle_Changed" Unchecked="LoginDarkModeToggle_Changed"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Margin="0,0,0,10" Padding="14" Background="{DynamicResource LoginAccessibilityMutedBrush}" BorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Alto contraste" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                                    <TextBlock Text="Reforça contraste e legibilidade dos elementos principais." Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                                </StackPanel>
+                                <CheckBox x:Name="LoginHighContrastToggle" Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource LoginAccentBrush}" Checked="LoginHighContrastToggle_Changed" Unchecked="LoginHighContrastToggle_Changed"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Margin="0,0,0,10" Padding="14" Background="{DynamicResource LoginAccessibilityMutedBrush}" BorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Tamanho do texto" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                                    <TextBlock Text="Escala global de leitura para a interface." Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                                    <Button x:Name="DecreaseTextScaleButton" Style="{StaticResource AccessibilityMiniButtonStyle}" Content="-" FontSize="18" Click="DecreaseTextScaleButton_Click"/>
+                                    <TextBlock x:Name="LoginTextScalePercentText" Width="68" Margin="10,0" VerticalAlignment="Center" TextAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource LoginPrimaryTextBrush}" Text="(100)%"/>
+                                    <Button x:Name="IncreaseTextScaleButton" Style="{StaticResource AccessibilityMiniButtonStyle}" Content="+" FontSize="18" Click="IncreaseTextScaleButton_Click"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Padding="14" Background="{DynamicResource LoginAccessibilityMutedBrush}" BorderBrush="{DynamicResource LoginAccessibilityCardBorderBrush}" BorderThickness="1" CornerRadius="18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Reduzir animações" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                                    <TextBlock Text="Diminui movimentos rápidos do shell e dos painéis." Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LoginSecondaryTextBrush}"/>
+                                </StackPanel>
+                                <CheckBox x:Name="LoginReduceAnimationsToggle" Grid.Column="1" VerticalAlignment="Center" Foreground="{DynamicResource LoginAccentBrush}" Checked="LoginReduceAnimationsToggle_Changed" Unchecked="LoginReduceAnimationsToggle_Changed"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Button x:Name="AccessibilityButton"
+                        Style="{StaticResource AccessibilityImageButtonStyle}"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Margin="0,0,18,18"
+                        ToolTip="Abrir acessibilidade e tema"
+                        Click="AccessibilityButton_Click"
+                        Panel.ZIndex="6">
+                    <Image Source="pack://application:,,,/img/Choas_ACBtn.png" Width="58" Height="58" Stretch="Uniform">
+                        <Image.Effect>
+                            <DropShadowEffect BlurRadius="18" ShadowDepth="6" Opacity="0.18" Color="#FF0F172A"/>
+                        </Image.Effect>
+                    </Image>
+                </Button>
+            </Grid>
         </Border>
+        </Grid>
     </Grid>
-</Window>
+</local:ChromeWindow>

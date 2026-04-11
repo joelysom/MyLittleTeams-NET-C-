@@ -184,6 +184,34 @@ service firebase.storage {
         && fileName.size() > 0;
     }
 
+    function isConversationParticipantById(conversationId) {
+      return signedIn()
+        && conversationId.matches(
+          '(^' + request.auth.uid + '-.*$)|(^.*-' + request.auth.uid + '$)'
+        );
+    }
+
+    function validChatAssetPath(ownerUserId, messageId, fileName) {
+      return ownerUserId.size() > 0
+        && messageId.size() > 0
+        && fileName.size() > 0;
+    }
+
+    match /chat-assets/{conversationId}/{ownerUserId}/{messageId}/{fileName} {
+      allow read: if validChatAssetPath(ownerUserId, messageId, fileName)
+        && isConversationParticipantById(conversationId);
+
+      allow write: if validChatAssetPath(ownerUserId, messageId, fileName)
+        && signedIn()
+        && request.auth.uid == ownerUserId
+        && isConversationParticipantById(conversationId);
+
+      allow delete: if validChatAssetPath(ownerUserId, messageId, fileName)
+        && signedIn()
+        && request.auth.uid == ownerUserId
+        && isConversationParticipantById(conversationId);
+    }
+
     match /team-assets/{teamId}/{permissionScope}/{ownerUserId}/{assetId}/{versionId}/{fileName} {
       allow read: if teamExists(teamId)
         && canViewScopedTeamAsset(teamDocument(teamId).data, permissionScope, ownerUserId);

@@ -19,6 +19,10 @@ namespace MeuApp
         public string LastSenderId { get; set; } = "";
         public DateTime? LastReadAt { get; set; }
         public bool HasUnread { get; set; }
+        public bool IsFavorite { get; set; }
+        public bool CanRemoveFromFavorites { get; set; } = true;
+        public int CustomSortOrder { get; set; }
+        public bool IsSelfConversation { get; set; }
         public List<ChatMessage> Messages { get; set; } = new List<ChatMessage>();
 
         public string FormattedTime

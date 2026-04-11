@@ -27,6 +27,8 @@
     <Resource Include="img\favicon.ico" />
     <Resource Include="img\TesseractLogin.png" />
     <Resource Include="img\tesseractICO.png" />
+    <Resource Include="img\Choas_ACBtn.png" />
+    <Resource Include="img\Chat\**\*.png" />
     <Resource Include="img\Error\**\*.png" />
     <Resource Include="img\wallpapers\**\*.png" />
     <Resource Include="img\avatar\**\*.png" />
