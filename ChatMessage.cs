@@ -16,6 +16,10 @@ namespace MeuApp
         public string AttachmentStoragePath { get; set; } = string.Empty;
         public long AttachmentSizeBytes { get; set; }
         public string AttachmentLocalPath { get; set; } = string.Empty;
+        public string AttachmentPreviewDataUri { get; set; } = string.Empty;
+        public string MediaGroupId { get; set; } = string.Empty;
+        public int MediaGroupIndex { get; set; }
+        public int MediaGroupCount { get; set; }
         public string LinkUrl { get; set; } = string.Empty;
         public string LinkTitle { get; set; } = string.Empty;
         public string LinkDescription { get; set; } = string.Empty;
@@ -44,6 +48,11 @@ namespace MeuApp
         public bool HasAttachment => !IsDeleted
             && (IsImageAttachment || IsVideoAttachment || IsAudioAttachment || IsFileAttachment)
             && (!string.IsNullOrWhiteSpace(AttachmentStoragePath) || !string.IsNullOrWhiteSpace(AttachmentFileName));
+
+        public bool IsMediaGroupItem => !IsDeleted
+            && IsImageAttachment
+            && !string.IsNullOrWhiteSpace(MediaGroupId)
+            && MediaGroupCount > 1;
 
         public bool HasLinkPreview => !IsDeleted
             && !string.IsNullOrWhiteSpace(LinkUrl)

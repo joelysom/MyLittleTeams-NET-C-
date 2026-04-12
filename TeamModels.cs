@@ -251,6 +251,8 @@ namespace MeuApp
         public List<TeachingClassMemberInfo> StudentSummaries { get; set; } = new List<TeachingClassMemberInfo>();
         public bool HomeFeedReady { get; set; }
         public DateTime? HomeFeedLoadedAt { get; set; }
+        public bool AssignmentsReady { get; set; }
+        public DateTime? AssignmentsLoadedAt { get; set; }
         public List<TeachingClassHomePostInfo> HomePosts { get; set; } = new List<TeachingClassHomePostInfo>();
     }
 
@@ -265,9 +267,15 @@ namespace MeuApp
         public string LinkUrl { get; set; } = string.Empty;
         public string ActivityLabel { get; set; } = string.Empty;
         public DateTime? ActivityDueAt { get; set; }
+        public bool AssignmentEnabled { get; set; }
+        public string AssignmentMode { get; set; } = "material";
+        public bool AllowLateSubmission { get; set; } = true;
+        public int MaxPoints { get; set; } = 10;
         public DateTime PublishedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
         public List<TeachingClassPostAttachmentInfo> Attachments { get; set; } = new List<TeachingClassPostAttachmentInfo>();
+        public List<TeachingClassActivityQuestionInfo> Questions { get; set; } = new List<TeachingClassActivityQuestionInfo>();
+        public List<TeachingClassActivitySubmissionInfo> Submissions { get; set; } = new List<TeachingClassActivitySubmissionInfo>();
         public List<TeachingClassPostCommentInfo> Comments { get; set; } = new List<TeachingClassPostCommentInfo>();
         public List<TeachingClassPostReactionInfo> Reactions { get; set; } = new List<TeachingClassPostReactionInfo>();
     }
@@ -304,6 +312,56 @@ namespace MeuApp
         public string Emoji { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
+    }
+
+    public class TeachingClassActivityQuestionInfo
+    {
+        public string QuestionId { get; set; } = Guid.NewGuid().ToString("N");
+        public string Prompt { get; set; } = string.Empty;
+        public string HelpText { get; set; } = string.Empty;
+        public string ResponseKind { get; set; } = "short-answer";
+        public bool Required { get; set; } = true;
+        public List<string> Options { get; set; } = new List<string>();
+        public List<string> CorrectOptions { get; set; } = new List<string>();
+    }
+
+    public class TeachingClassActivityAnswerInfo
+    {
+        public string QuestionId { get; set; } = string.Empty;
+        public string PromptSnapshot { get; set; } = string.Empty;
+        public string ResponseKindSnapshot { get; set; } = "short-answer";
+        public string ResponseText { get; set; } = string.Empty;
+        public List<string> SelectedOptions { get; set; } = new List<string>();
+    }
+
+    public class TeachingClassActivityReviewInfo
+    {
+        public string ReviewId { get; set; } = string.Empty;
+        public string StudentUserId { get; set; } = string.Empty;
+        public string StudentName { get; set; } = string.Empty;
+        public int GradeValue { get; set; }
+        public int MaxPoints { get; set; } = 10;
+        public string FeedbackText { get; set; } = string.Empty;
+        public string GradedByUserId { get; set; } = string.Empty;
+        public string GradedByName { get; set; } = string.Empty;
+        public DateTime GradedAt { get; set; } = DateTime.Now;
+    }
+
+    public class TeachingClassActivitySubmissionInfo
+    {
+        public string SubmissionId { get; set; } = string.Empty;
+        public string ClassId { get; set; } = string.Empty;
+        public string PostId { get; set; } = string.Empty;
+        public string StudentUserId { get; set; } = string.Empty;
+        public string StudentName { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public string SubmissionLink { get; set; } = string.Empty;
+        public DateTime SubmittedAt { get; set; } = DateTime.Now;
+        public DateTime UpdatedAt { get; set; } = DateTime.Now;
+        public bool IsLate { get; set; }
+        public List<TeachingClassPostAttachmentInfo> Attachments { get; set; } = new List<TeachingClassPostAttachmentInfo>();
+        public List<TeachingClassActivityAnswerInfo> Answers { get; set; } = new List<TeachingClassActivityAnswerInfo>();
+        public TeachingClassActivityReviewInfo? Review { get; set; }
     }
 
     public class TeachingClassMemberInfo

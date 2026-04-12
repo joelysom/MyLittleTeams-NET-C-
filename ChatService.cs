@@ -144,7 +144,16 @@ namespace MeuApp
             }
         }
 
-        public async Task<ChatOperationResult> SendAttachmentMessageAsync(string contactId, string contactName, string senderName, string filePath, string? caption = null)
+        public async Task<ChatOperationResult> SendAttachmentMessageAsync(
+            string contactId,
+            string contactName,
+            string senderName,
+            string filePath,
+            string? caption = null,
+            string? attachmentPreviewDataUri = null,
+            string? mediaGroupId = null,
+            int mediaGroupIndex = 0,
+            int mediaGroupCount = 0)
         {
             try
             {
@@ -194,6 +203,10 @@ namespace MeuApp
                     AttachmentStoragePath = storagePath,
                     AttachmentSizeBytes = fileInfo.Length,
                     AttachmentLocalPath = filePath,
+                    AttachmentPreviewDataUri = string.IsNullOrWhiteSpace(attachmentPreviewDataUri) ? string.Empty : attachmentPreviewDataUri.Trim(),
+                    MediaGroupId = string.IsNullOrWhiteSpace(mediaGroupId) ? string.Empty : mediaGroupId.Trim(),
+                    MediaGroupIndex = Math.Max(0, mediaGroupIndex),
+                    MediaGroupCount = Math.Max(0, mediaGroupCount),
                     Timestamp = timestampUtc,
                     IsOwn = true,
                     IsEdited = false,
@@ -225,6 +238,10 @@ namespace MeuApp
                     ["attachmentContentType"] = new { stringValue = outgoingMessage.AttachmentContentType },
                     ["attachmentStoragePath"] = new { stringValue = outgoingMessage.AttachmentStoragePath },
                     ["attachmentSizeBytes"] = new { integerValue = outgoingMessage.AttachmentSizeBytes.ToString() },
+                    ["attachmentPreviewDataUri"] = new { stringValue = outgoingMessage.AttachmentPreviewDataUri },
+                    ["mediaGroupId"] = new { stringValue = outgoingMessage.MediaGroupId },
+                    ["mediaGroupIndex"] = new { integerValue = outgoingMessage.MediaGroupIndex.ToString() },
+                    ["mediaGroupCount"] = new { integerValue = outgoingMessage.MediaGroupCount.ToString() },
                     ["linkUrl"] = new { stringValue = string.Empty },
                     ["linkTitle"] = new { stringValue = string.Empty },
                     ["linkDescription"] = new { stringValue = string.Empty },
@@ -367,6 +384,10 @@ namespace MeuApp
                         ["attachmentContentType"] = new { stringValue = string.Empty },
                         ["attachmentStoragePath"] = new { stringValue = string.Empty },
                         ["attachmentSizeBytes"] = new { integerValue = "0" },
+                        ["attachmentPreviewDataUri"] = new { stringValue = string.Empty },
+                        ["mediaGroupId"] = new { stringValue = string.Empty },
+                        ["mediaGroupIndex"] = new { integerValue = "0" },
+                        ["mediaGroupCount"] = new { integerValue = "0" },
                         ["linkUrl"] = new { stringValue = string.Empty },
                         ["linkTitle"] = new { stringValue = string.Empty },
                         ["linkDescription"] = new { stringValue = string.Empty },
@@ -377,7 +398,7 @@ namespace MeuApp
                     }
                 });
 
-                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages/{documentId}")}?updateMask.fieldPaths=content&updateMask.fieldPaths=messageType&updateMask.fieldPaths=stickerAsset&updateMask.fieldPaths=attachmentFileName&updateMask.fieldPaths=attachmentContentType&updateMask.fieldPaths=attachmentStoragePath&updateMask.fieldPaths=attachmentSizeBytes&updateMask.fieldPaths=linkUrl&updateMask.fieldPaths=linkTitle&updateMask.fieldPaths=linkDescription&updateMask.fieldPaths=linkImageUrl&updateMask.fieldPaths=linkSiteName&updateMask.fieldPaths=isDeleted&updateMask.fieldPaths=deletedAt";
+                var url = $"{AppConfig.BuildFirestoreDocumentUrl($"conversations/{conversationId}/messages/{documentId}")}?updateMask.fieldPaths=content&updateMask.fieldPaths=messageType&updateMask.fieldPaths=stickerAsset&updateMask.fieldPaths=attachmentFileName&updateMask.fieldPaths=attachmentContentType&updateMask.fieldPaths=attachmentStoragePath&updateMask.fieldPaths=attachmentSizeBytes&updateMask.fieldPaths=attachmentPreviewDataUri&updateMask.fieldPaths=mediaGroupId&updateMask.fieldPaths=mediaGroupIndex&updateMask.fieldPaths=mediaGroupCount&updateMask.fieldPaths=linkUrl&updateMask.fieldPaths=linkTitle&updateMask.fieldPaths=linkDescription&updateMask.fieldPaths=linkImageUrl&updateMask.fieldPaths=linkSiteName&updateMask.fieldPaths=isDeleted&updateMask.fieldPaths=deletedAt";
                 var request = new HttpRequestMessage(HttpMethod.Patch, url);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
                 request.Content = new StringContent(patchBody, Encoding.UTF8, "application/json");
@@ -581,6 +602,10 @@ namespace MeuApp
                 string? attachmentFileName = null;
                 string? attachmentContentType = null;
                 string? attachmentStoragePath = null;
+                string? attachmentPreviewDataUri = null;
+                string? mediaGroupId = null;
+                var mediaGroupIndex = 0;
+                var mediaGroupCount = 0;
                 long attachmentSizeBytes = 0;
                 string? linkUrl = null;
                 string? linkTitle = null;
@@ -646,6 +671,21 @@ namespace MeuApp
                 {
                     attachmentStoragePath = attachmentStoragePathValue.GetString();
                 }
+
+                if (fields.TryGetProperty("attachmentPreviewDataUri", out var attachmentPreviewDataUriField) &&
+                    attachmentPreviewDataUriField.TryGetProperty("stringValue", out var attachmentPreviewDataUriValue))
+                {
+                    attachmentPreviewDataUri = attachmentPreviewDataUriValue.GetString();
+                }
+
+                if (fields.TryGetProperty("mediaGroupId", out var mediaGroupIdField) &&
+                    mediaGroupIdField.TryGetProperty("stringValue", out var mediaGroupIdValue))
+                {
+                    mediaGroupId = mediaGroupIdValue.GetString();
+                }
+
+                mediaGroupIndex = (int)Math.Max(0, GetLongField(fields, "mediaGroupIndex"));
+                mediaGroupCount = (int)Math.Max(0, GetLongField(fields, "mediaGroupCount"));
 
                 attachmentSizeBytes = GetLongField(fields, "attachmentSizeBytes");
 
@@ -731,6 +771,10 @@ namespace MeuApp
                     AttachmentContentType = attachmentContentType ?? string.Empty,
                     AttachmentStoragePath = attachmentStoragePath ?? string.Empty,
                     AttachmentSizeBytes = attachmentSizeBytes,
+                    AttachmentPreviewDataUri = attachmentPreviewDataUri ?? string.Empty,
+                    MediaGroupId = mediaGroupId ?? string.Empty,
+                    MediaGroupIndex = mediaGroupIndex,
+                    MediaGroupCount = mediaGroupCount,
                     LinkUrl = linkUrl ?? string.Empty,
                     LinkTitle = linkTitle ?? string.Empty,
                     LinkDescription = linkDescription ?? string.Empty,
@@ -1413,7 +1457,7 @@ namespace MeuApp
                 return "<null>";
             }
 
-            return $"MessageId={message.MessageId}; DocumentId={message.DocumentId}; SenderId={message.SenderId}; SenderName={SanitizeForLog(message.SenderName)}; MessageType={message.MessageType}; IsEdited={message.IsEdited}; IsDeleted={message.IsDeleted}; Timestamp={message.Timestamp:O}; EditedAt={message.EditedAt:O}; DeletedAt={message.DeletedAt:O}; Content={SanitizeForLog(message.Content)}; AttachmentFile={SanitizeForLog(message.AttachmentFileName)}; AttachmentStorage={SanitizeForLog(message.AttachmentStoragePath)}; AttachmentSize={message.AttachmentSizeBytes}; LinkUrl={SanitizeForLog(message.LinkUrl)}; LinkTitle={SanitizeForLog(message.LinkTitle)}";
+            return $"MessageId={message.MessageId}; DocumentId={message.DocumentId}; SenderId={message.SenderId}; SenderName={SanitizeForLog(message.SenderName)}; MessageType={message.MessageType}; IsEdited={message.IsEdited}; IsDeleted={message.IsDeleted}; Timestamp={message.Timestamp:O}; EditedAt={message.EditedAt:O}; DeletedAt={message.DeletedAt:O}; Content={SanitizeForLog(message.Content)}; AttachmentFile={SanitizeForLog(message.AttachmentFileName)}; AttachmentStorage={SanitizeForLog(message.AttachmentStoragePath)}; AttachmentSize={message.AttachmentSizeBytes}; MediaGroupId={SanitizeForLog(message.MediaGroupId)}; MediaIndex={message.MediaGroupIndex}; MediaCount={message.MediaGroupCount}; LinkUrl={SanitizeForLog(message.LinkUrl)}; LinkTitle={SanitizeForLog(message.LinkTitle)}";
         }
 
         private static string SanitizeForLog(string? value)

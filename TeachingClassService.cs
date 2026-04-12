@@ -176,6 +176,207 @@ namespace MeuApp
                 return TeachingClassHomePostResult.Fail(ex.Message);
             }
         }
+        public async Task<List<TeachingClassActivitySubmissionInfo>> LoadHomeActivitySubmissionsAsync(string classId, string postId)
+        {
+            var submissions = new List<TeachingClassActivitySubmissionInfo>();
+
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                if (string.IsNullOrWhiteSpace(normalizedClassId) || string.IsNullOrWhiteSpace(normalizedPostId))
+                {
+                    return submissions;
+                }
+
+                var snapshots = await ListCollectionDocumentsAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/submissions");
+                submissions = snapshots
+                    .Select(snapshot => ParseHomeActivitySubmissionFromFirestore(snapshot.DocumentId, snapshot.Fields))
+                    .Where(item => item != null)
+                    .Cast<TeachingClassActivitySubmissionInfo>()
+                    .OrderByDescending(item => item.UpdatedAt)
+                    .ToList();
+
+                var reviews = await LoadHomeActivityReviewsAsync(normalizedClassId, normalizedPostId);
+                MergeHomeActivityReviewsIntoSubmissions(submissions, reviews);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.LoadHomeActivitySubmissions] Erro: {ex.Message}");
+            }
+
+            return submissions;
+        }
+
+        public async Task<TeachingClassActivitySubmissionInfo?> GetHomeActivitySubmissionAsync(string classId, string postId, string studentUserId)
+        {
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                var normalizedStudentUserId = (studentUserId ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(normalizedClassId)
+                    || string.IsNullOrWhiteSpace(normalizedPostId)
+                    || string.IsNullOrWhiteSpace(normalizedStudentUserId))
+                {
+                    return null;
+                }
+
+                var snapshot = await GetFirestoreDocumentAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/submissions/{normalizedStudentUserId}");
+                if (snapshot == null)
+                {
+                    return null;
+                }
+
+                var submission = ParseHomeActivitySubmissionFromFirestore(snapshot.DocumentId, snapshot.Fields);
+                if (submission == null)
+                {
+                    return null;
+                }
+
+                submission.Review = await GetHomeActivityReviewAsync(normalizedClassId, normalizedPostId, normalizedStudentUserId);
+                return submission;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.GetHomeActivitySubmission] Erro: {ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task<TeachingClassActivitySubmissionResult> SaveHomeActivitySubmissionAsync(string classId, string postId, TeachingClassActivitySubmissionInfo submission)
+        {
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                if (string.IsNullOrWhiteSpace(normalizedClassId) || string.IsNullOrWhiteSpace(normalizedPostId))
+                {
+                    return TeachingClassActivitySubmissionResult.Fail("Atividade inválida para registrar entrega.");
+                }
+
+                var normalizedSubmission = NormalizeHomeActivitySubmission(submission, normalizedClassId, normalizedPostId);
+                var requestBody = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["fields"] = BuildHomeActivitySubmissionFirestoreFields(normalizedSubmission)
+                });
+
+                var request = new HttpRequestMessage(
+                    new HttpMethod("PATCH"),
+                    AppConfig.BuildFirestoreDocumentUrl($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/submissions/{normalizedSubmission.SubmissionId}"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    return TeachingClassActivitySubmissionResult.Fail($"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
+                }
+
+                normalizedSubmission.Review = await GetHomeActivityReviewAsync(normalizedClassId, normalizedPostId, normalizedSubmission.StudentUserId);
+                return TeachingClassActivitySubmissionResult.Ok(normalizedSubmission);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.SaveHomeActivitySubmission] Erro: {ex.Message}");
+                return TeachingClassActivitySubmissionResult.Fail(ex.Message);
+            }
+        }
+
+        public async Task<List<TeachingClassActivityReviewInfo>> LoadHomeActivityReviewsAsync(string classId, string postId)
+        {
+            var reviews = new List<TeachingClassActivityReviewInfo>();
+
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                if (string.IsNullOrWhiteSpace(normalizedClassId) || string.IsNullOrWhiteSpace(normalizedPostId))
+                {
+                    return reviews;
+                }
+
+                var snapshots = await ListCollectionDocumentsAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/reviews");
+                reviews = snapshots
+                    .Select(snapshot => ParseHomeActivityReviewFromFirestore(snapshot.DocumentId, snapshot.Fields))
+                    .Where(item => item != null)
+                    .Cast<TeachingClassActivityReviewInfo>()
+                    .OrderByDescending(item => item.GradedAt)
+                    .ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.LoadHomeActivityReviews] Erro: {ex.Message}");
+            }
+
+            return reviews;
+        }
+
+        public async Task<TeachingClassActivityReviewInfo?> GetHomeActivityReviewAsync(string classId, string postId, string studentUserId)
+        {
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                var normalizedStudentUserId = (studentUserId ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(normalizedClassId)
+                    || string.IsNullOrWhiteSpace(normalizedPostId)
+                    || string.IsNullOrWhiteSpace(normalizedStudentUserId))
+                {
+                    return null;
+                }
+
+                var snapshot = await GetFirestoreDocumentAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/reviews/{normalizedStudentUserId}");
+                return snapshot == null
+                    ? null
+                    : ParseHomeActivityReviewFromFirestore(snapshot.DocumentId, snapshot.Fields);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.GetHomeActivityReview] Erro: {ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task<TeachingClassActivityReviewResult> SaveHomeActivityReviewAsync(string classId, string postId, TeachingClassActivityReviewInfo review)
+        {
+            try
+            {
+                var normalizedClassId = NormalizeClassCode(classId);
+                var normalizedPostId = string.IsNullOrWhiteSpace(postId) ? string.Empty : NormalizeDocumentId(postId);
+                if (string.IsNullOrWhiteSpace(normalizedClassId) || string.IsNullOrWhiteSpace(normalizedPostId))
+                {
+                    return TeachingClassActivityReviewResult.Fail("Atividade inválida para registrar correção.");
+                }
+
+                var normalizedReview = NormalizeHomeActivityReview(review, normalizedClassId, normalizedPostId);
+                var requestBody = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["fields"] = BuildHomeActivityReviewFirestoreFields(normalizedReview)
+                });
+
+                var request = new HttpRequestMessage(
+                    new HttpMethod("PATCH"),
+                    AppConfig.BuildFirestoreDocumentUrl($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/reviews/{normalizedReview.ReviewId}"));
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+                request.Content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+
+                var response = await httpClient.SendAsync(request);
+                var responseBody = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    return TeachingClassActivityReviewResult.Fail($"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
+                }
+
+                return TeachingClassActivityReviewResult.Ok(normalizedReview);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.SaveHomeActivityReview] Erro: {ex.Message}");
+                return TeachingClassActivityReviewResult.Fail(ex.Message);
+            }
+        }
 
         public async Task<TeachingClassOperationResult> SaveHomeCommentAsync(string classId, string postId, TeachingClassPostCommentInfo comment)
         {
@@ -356,6 +557,26 @@ namespace MeuApp
                     if (!deleteComment.Success)
                     {
                         return deleteComment;
+                    }
+                }
+
+                var submissionSnapshots = await ListCollectionDocumentsAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/submissions");
+                foreach (var submissionSnapshot in submissionSnapshots)
+                {
+                    var deleteSubmission = await DeleteFirestoreDocumentAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/submissions/{submissionSnapshot.DocumentId}");
+                    if (!deleteSubmission.Success)
+                    {
+                        return deleteSubmission;
+                    }
+                }
+
+                var reviewSnapshots = await ListCollectionDocumentsAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/reviews");
+                foreach (var reviewSnapshot in reviewSnapshots)
+                {
+                    var deleteReview = await DeleteFirestoreDocumentAsync($"teachingClasses/{normalizedClassId}/homePosts/{normalizedPostId}/reviews/{reviewSnapshot.DocumentId}");
+                    if (!deleteReview.Success)
+                    {
+                        return deleteReview;
                     }
                 }
 
@@ -850,6 +1071,23 @@ namespace MeuApp
             return normalized;
         }
 
+        private TeachingClassPostAttachmentInfo NormalizeTeachingClassAttachment(TeachingClassPostAttachmentInfo attachment, string defaultPermissionScope)
+        {
+            var normalized = attachment ?? new TeachingClassPostAttachmentInfo();
+            normalized.AttachmentId = string.IsNullOrWhiteSpace(normalized.AttachmentId) ? Guid.NewGuid().ToString("N") : NormalizeDocumentId(normalized.AttachmentId);
+            normalized.FileName = (normalized.FileName ?? string.Empty).Trim();
+            normalized.PermissionScope = NormalizeTeachingClassPermissionScope(string.IsNullOrWhiteSpace(normalized.PermissionScope) ? defaultPermissionScope : normalized.PermissionScope);
+            normalized.StorageKind = string.IsNullOrWhiteSpace(normalized.StorageKind) ? "firebase-storage" : normalized.StorageKind.Trim();
+            normalized.StorageReference = (normalized.StorageReference ?? string.Empty).Trim();
+            normalized.MimeType = (normalized.MimeType ?? string.Empty).Trim();
+            normalized.PreviewImageDataUri = (normalized.PreviewImageDataUri ?? string.Empty).Trim();
+            normalized.SizeBytes = Math.Max(0, normalized.SizeBytes);
+            normalized.Version = Math.Max(1, normalized.Version);
+            normalized.AddedByUserId = string.IsNullOrWhiteSpace(normalized.AddedByUserId) ? _currentUserId : normalized.AddedByUserId.Trim();
+            normalized.AddedAt = normalized.AddedAt == default ? DateTime.Now : normalized.AddedAt;
+            return normalized;
+        }
+
         private TeachingClassHomePostInfo NormalizeHomePost(TeachingClassHomePostInfo post)
         {
             var normalized = post ?? new TeachingClassHomePostInfo();
@@ -861,27 +1099,30 @@ namespace MeuApp
             normalized.Content = (normalized.Content ?? string.Empty).Trim();
             normalized.LinkUrl = NormalizeOptionalLink(normalized.LinkUrl);
             normalized.ActivityLabel = (normalized.ActivityLabel ?? string.Empty).Trim();
+            normalized.AssignmentEnabled = normalized.AssignmentEnabled && string.Equals(normalized.PostType, "activity", StringComparison.OrdinalIgnoreCase);
+            normalized.AssignmentMode = normalized.AssignmentEnabled ? NormalizeAssignmentMode(normalized.AssignmentMode) : "material";
+            normalized.AllowLateSubmission = !normalized.AssignmentEnabled || normalized.AllowLateSubmission;
+            normalized.MaxPoints = Math.Max(1, normalized.MaxPoints <= 0 ? 10 : normalized.MaxPoints);
             normalized.PublishedAt = normalized.PublishedAt == default ? DateTime.Now : normalized.PublishedAt;
             normalized.UpdatedAt = DateTime.Now;
             normalized.Attachments = (normalized.Attachments ?? new List<TeachingClassPostAttachmentInfo>())
                 .Where(item => item != null)
-                .Select(item =>
-                {
-                    item.AttachmentId = string.IsNullOrWhiteSpace(item.AttachmentId) ? Guid.NewGuid().ToString("N") : NormalizeDocumentId(item.AttachmentId);
-                    item.FileName = (item.FileName ?? string.Empty).Trim();
-                    item.PermissionScope = NormalizeTeachingClassPermissionScope(item.PermissionScope);
-                    item.StorageKind = string.IsNullOrWhiteSpace(item.StorageKind) ? "firebase-storage" : item.StorageKind.Trim();
-                    item.StorageReference = (item.StorageReference ?? string.Empty).Trim();
-                    item.MimeType = (item.MimeType ?? string.Empty).Trim();
-                    item.PreviewImageDataUri = (item.PreviewImageDataUri ?? string.Empty).Trim();
-                    item.Version = Math.Max(1, item.Version);
-                    item.AddedByUserId = string.IsNullOrWhiteSpace(item.AddedByUserId) ? _currentUserId : item.AddedByUserId.Trim();
-                    item.AddedAt = item.AddedAt == default ? DateTime.Now : item.AddedAt;
-                    return item;
-                })
+                .Select(item => NormalizeTeachingClassAttachment(item, "class"))
                 .GroupBy(item => item.AttachmentId, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToList();
+            normalized.Questions = (normalized.Questions ?? new List<TeachingClassActivityQuestionInfo>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.Prompt))
+                .Select(NormalizeHomeActivityQuestion)
+                .GroupBy(item => item.QuestionId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            if (!normalized.AssignmentEnabled || !string.Equals(normalized.AssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized.Questions = new List<TeachingClassActivityQuestionInfo>();
+            }
+
+            normalized.Submissions ??= new List<TeachingClassActivitySubmissionInfo>();
             normalized.Comments ??= new List<TeachingClassPostCommentInfo>();
             normalized.Reactions ??= new List<TeachingClassPostReactionInfo>();
             return normalized;
@@ -968,6 +1209,105 @@ namespace MeuApp
             normalized.CreatedAt = normalized.CreatedAt == default ? DateTime.Now : normalized.CreatedAt;
             normalized.UpdatedAt = DateTime.Now;
             return normalized;
+        }
+
+        private TeachingClassActivityQuestionInfo NormalizeHomeActivityQuestion(TeachingClassActivityQuestionInfo question)
+        {
+            var normalized = question ?? new TeachingClassActivityQuestionInfo();
+            normalized.QuestionId = string.IsNullOrWhiteSpace(normalized.QuestionId) ? Guid.NewGuid().ToString("N") : NormalizeDocumentId(normalized.QuestionId);
+            normalized.Prompt = (normalized.Prompt ?? string.Empty).Trim();
+            normalized.HelpText = (normalized.HelpText ?? string.Empty).Trim();
+            normalized.ResponseKind = NormalizeAssignmentQuestionResponseKind(normalized.ResponseKind);
+            normalized.Options = NormalizeAssignmentQuestionOptions(normalized.ResponseKind, normalized.Options);
+            normalized.CorrectOptions = NormalizeAssignmentQuestionCorrectOptions(normalized.ResponseKind, normalized.Options, normalized.CorrectOptions);
+            return normalized;
+        }
+
+        private TeachingClassActivitySubmissionInfo NormalizeHomeActivitySubmission(TeachingClassActivitySubmissionInfo submission, string classId, string postId)
+        {
+            var normalized = submission ?? new TeachingClassActivitySubmissionInfo();
+            normalized.ClassId = string.IsNullOrWhiteSpace(normalized.ClassId) ? classId : NormalizeClassCode(normalized.ClassId);
+            normalized.PostId = string.IsNullOrWhiteSpace(normalized.PostId) ? postId : NormalizeDocumentId(normalized.PostId);
+            normalized.StudentUserId = string.IsNullOrWhiteSpace(normalized.StudentUserId) ? _currentUserId : normalized.StudentUserId.Trim();
+            normalized.SubmissionId = string.IsNullOrWhiteSpace(normalized.SubmissionId)
+                ? normalized.StudentUserId
+                : NormalizeDocumentId(normalized.SubmissionId);
+            normalized.StudentName = (normalized.StudentName ?? string.Empty).Trim();
+            normalized.Notes = (normalized.Notes ?? string.Empty).Trim();
+            normalized.SubmissionLink = NormalizeOptionalLink(normalized.SubmissionLink);
+            normalized.SubmittedAt = normalized.SubmittedAt == default ? DateTime.Now : normalized.SubmittedAt;
+            normalized.UpdatedAt = DateTime.Now;
+            normalized.Attachments = (normalized.Attachments ?? new List<TeachingClassPostAttachmentInfo>())
+                .Where(item => item != null)
+                .Select(item => NormalizeTeachingClassAttachment(item, "private"))
+                .GroupBy(item => item.AttachmentId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            normalized.Answers = (normalized.Answers ?? new List<TeachingClassActivityAnswerInfo>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.QuestionId))
+                .Select(item => new TeachingClassActivityAnswerInfo
+                {
+                    QuestionId = NormalizeDocumentId(item.QuestionId),
+                    PromptSnapshot = (item.PromptSnapshot ?? string.Empty).Trim(),
+                    ResponseKindSnapshot = NormalizeAssignmentQuestionResponseKind(item.ResponseKindSnapshot),
+                    ResponseText = (item.ResponseText ?? string.Empty).Trim(),
+                    SelectedOptions = (item.SelectedOptions ?? new List<string>())
+                        .Where(option => !string.IsNullOrWhiteSpace(option))
+                        .Select(option => option.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                })
+                .GroupBy(item => item.QuestionId, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+            return normalized;
+        }
+
+        private TeachingClassActivityReviewInfo NormalizeHomeActivityReview(TeachingClassActivityReviewInfo review, string classId, string postId)
+        {
+            var normalized = review ?? new TeachingClassActivityReviewInfo();
+            normalized.StudentUserId = string.IsNullOrWhiteSpace(normalized.StudentUserId) ? _currentUserId : normalized.StudentUserId.Trim();
+            normalized.ReviewId = string.IsNullOrWhiteSpace(normalized.ReviewId)
+                ? normalized.StudentUserId
+                : NormalizeDocumentId(normalized.ReviewId);
+            normalized.StudentName = (normalized.StudentName ?? string.Empty).Trim();
+            normalized.GradeValue = Math.Max(0, normalized.GradeValue);
+            normalized.MaxPoints = Math.Max(1, normalized.MaxPoints <= 0 ? 10 : normalized.MaxPoints);
+            normalized.FeedbackText = (normalized.FeedbackText ?? string.Empty).Trim();
+            normalized.GradedByUserId = string.IsNullOrWhiteSpace(normalized.GradedByUserId) ? _currentUserId : normalized.GradedByUserId.Trim();
+            normalized.GradedByName = (normalized.GradedByName ?? string.Empty).Trim();
+            normalized.GradedAt = normalized.GradedAt == default ? DateTime.Now : normalized.GradedAt;
+            return normalized;
+        }
+
+        private void MergeHomeActivityReviewsIntoSubmissions(ICollection<TeachingClassActivitySubmissionInfo> submissions, IEnumerable<TeachingClassActivityReviewInfo> reviews)
+        {
+            if (submissions == null)
+            {
+                return;
+            }
+
+            var submissionList = submissions.ToList();
+            var reviewList = (reviews ?? Enumerable.Empty<TeachingClassActivityReviewInfo>()).ToList();
+            foreach (var review in reviewList)
+            {
+                var target = submissionList.FirstOrDefault(item => string.Equals(item.StudentUserId, review.StudentUserId, StringComparison.OrdinalIgnoreCase));
+                if (target != null)
+                {
+                    target.Review = review;
+                    continue;
+                }
+
+                submissions.Add(new TeachingClassActivitySubmissionInfo
+                {
+                    SubmissionId = review.StudentUserId,
+                    StudentUserId = review.StudentUserId,
+                    StudentName = review.StudentName,
+                    SubmittedAt = review.GradedAt,
+                    UpdatedAt = review.GradedAt,
+                    Review = review
+                });
+            }
         }
 
         private async Task<List<string>> GetUserClassIdsAsync(string userId)
@@ -1202,6 +1542,37 @@ namespace MeuApp
             return TeachingClassOperationResult.Fail($"HTTP {(int)response.StatusCode}: {responseBody.Substring(0, Math.Min(responseBody.Length, 200))}");
         }
 
+        private async Task<TeachingClassDocumentSnapshot?> GetFirestoreDocumentAsync(string relativeDocumentPath)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, AppConfig.BuildFirestoreDocumentUrl(relativeDocumentPath));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _idToken);
+
+            var response = await httpClient.SendAsync(request);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.GetFirestoreDocument] HTTP {(int)response.StatusCode}: {responseBody}");
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(responseBody);
+            if (!doc.RootElement.TryGetProperty("fields", out var fields))
+            {
+                return null;
+            }
+
+            return new TeachingClassDocumentSnapshot
+            {
+                DocumentId = GetDocumentId(doc.RootElement),
+                Fields = fields.Clone()
+            };
+        }
+
         private async Task<List<TeachingClassDocumentSnapshot>> ListCollectionDocumentsAsync(string relativeCollectionPath)
         {
             var result = new List<TeachingClassDocumentSnapshot>();
@@ -1321,9 +1692,15 @@ namespace MeuApp
                     LinkUrl = GetString(fields, "linkUrl"),
                     ActivityLabel = GetString(fields, "activityLabel"),
                     ActivityDueAt = GetOptionalTimestamp(fields, "activityDueAt"),
+                    AssignmentEnabled = GetBool(fields, "assignmentEnabled"),
+                    AssignmentMode = NormalizeAssignmentMode(GetString(fields, "assignmentMode")),
+                    AllowLateSubmission = GetBool(fields, "allowLateSubmission", true),
+                    MaxPoints = Math.Max(1, GetInt(fields, "maxPoints") <= 0 ? 10 : GetInt(fields, "maxPoints")),
                     PublishedAt = GetTimestamp(fields, "publishedAt"),
                     UpdatedAt = GetTimestamp(fields, "updatedAt"),
                     Attachments = GetPostAttachmentArray(fields, "attachments"),
+                    Questions = GetActivityQuestionArray(fields, "questions"),
+                    Submissions = new List<TeachingClassActivitySubmissionInfo>(),
                     Comments = new List<TeachingClassPostCommentInfo>(),
                     Reactions = new List<TeachingClassPostReactionInfo>()
                 };
@@ -1372,6 +1749,57 @@ namespace MeuApp
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"[TeachingClassService.ParseHomeReaction] Erro: {ex.Message}");
+                return null;
+            }
+        }
+
+        private TeachingClassActivitySubmissionInfo? ParseHomeActivitySubmissionFromFirestore(string documentId, JsonElement fields)
+        {
+            try
+            {
+                return new TeachingClassActivitySubmissionInfo
+                {
+                    SubmissionId = string.IsNullOrWhiteSpace(GetString(fields, "submissionId")) ? documentId : GetString(fields, "submissionId"),
+                    ClassId = GetString(fields, "classId"),
+                    PostId = GetString(fields, "postId"),
+                    StudentUserId = GetString(fields, "studentUserId"),
+                    StudentName = GetString(fields, "studentName"),
+                    Notes = GetString(fields, "notes"),
+                    SubmissionLink = GetString(fields, "submissionLink"),
+                    SubmittedAt = GetTimestamp(fields, "submittedAt"),
+                    UpdatedAt = GetTimestamp(fields, "updatedAt"),
+                    IsLate = GetBool(fields, "isLate"),
+                    Attachments = GetPostAttachmentArray(fields, "attachments"),
+                    Answers = GetActivityAnswerArray(fields, "answers")
+                };
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.ParseHomeActivitySubmission] Erro: {ex.Message}");
+                return null;
+            }
+        }
+
+        private TeachingClassActivityReviewInfo? ParseHomeActivityReviewFromFirestore(string documentId, JsonElement fields)
+        {
+            try
+            {
+                return new TeachingClassActivityReviewInfo
+                {
+                    ReviewId = string.IsNullOrWhiteSpace(GetString(fields, "reviewId")) ? documentId : GetString(fields, "reviewId"),
+                    StudentUserId = GetString(fields, "studentUserId"),
+                    StudentName = GetString(fields, "studentName"),
+                    GradeValue = Math.Max(0, GetInt(fields, "gradeValue")),
+                    MaxPoints = Math.Max(1, GetInt(fields, "maxPoints") <= 0 ? 10 : GetInt(fields, "maxPoints")),
+                    FeedbackText = GetString(fields, "feedbackText"),
+                    GradedByUserId = GetString(fields, "gradedByUserId"),
+                    GradedByName = GetString(fields, "gradedByName"),
+                    GradedAt = GetTimestamp(fields, "gradedAt")
+                };
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassService.ParseHomeActivityReview] Erro: {ex.Message}");
                 return null;
             }
         }
@@ -1441,6 +1869,70 @@ namespace MeuApp
                 .ToArray();
         }
 
+        private object[] ConvertActivityQuestionsToFirestoreArray(IEnumerable<TeachingClassActivityQuestionInfo> questions)
+        {
+            return (questions ?? Enumerable.Empty<TeachingClassActivityQuestionInfo>())
+                .Where(question => question != null && !string.IsNullOrWhiteSpace(question.Prompt))
+                .Select(question => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            questionId = new { stringValue = string.IsNullOrWhiteSpace(question.QuestionId) ? Guid.NewGuid().ToString("N") : question.QuestionId },
+                            prompt = new { stringValue = question.Prompt ?? string.Empty },
+                            helpText = new { stringValue = question.HelpText ?? string.Empty },
+                            responseKind = new { stringValue = NormalizeAssignmentQuestionResponseKind(question.ResponseKind) },
+                            required = new { booleanValue = question.Required },
+                            options = new
+                            {
+                                arrayValue = new
+                                {
+                                    values = ConvertStringsToFirestoreArray(NormalizeAssignmentQuestionOptions(question.ResponseKind, question.Options))
+                                }
+                            },
+                            correctOptions = new
+                            {
+                                arrayValue = new
+                                {
+                                    values = ConvertStringsToFirestoreArray(NormalizeAssignmentQuestionCorrectOptions(question.ResponseKind, question.Options, question.CorrectOptions))
+                                }
+                            }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
+        private object[] ConvertActivityAnswersToFirestoreArray(IEnumerable<TeachingClassActivityAnswerInfo> answers)
+        {
+            return (answers ?? Enumerable.Empty<TeachingClassActivityAnswerInfo>())
+                .Where(answer => answer != null && !string.IsNullOrWhiteSpace(answer.QuestionId))
+                .Select(answer => new
+                {
+                    mapValue = new
+                    {
+                        fields = new
+                        {
+                            questionId = new { stringValue = answer.QuestionId ?? string.Empty },
+                            promptSnapshot = new { stringValue = answer.PromptSnapshot ?? string.Empty },
+                            responseKindSnapshot = new { stringValue = NormalizeAssignmentQuestionResponseKind(answer.ResponseKindSnapshot) },
+                            responseText = new { stringValue = answer.ResponseText ?? string.Empty },
+                            selectedOptions = new
+                            {
+                                arrayValue = new
+                                {
+                                    values = ConvertStringsToFirestoreArray(answer.SelectedOptions ?? Enumerable.Empty<string>())
+                                }
+                            }
+                        }
+                    }
+                })
+                .Cast<object>()
+                .ToArray();
+        }
+
         private Dictionary<string, object?> BuildHomePostFirestoreFields(TeachingClassHomePostInfo post)
         {
             var fields = new Dictionary<string, object?>
@@ -1453,6 +1945,10 @@ namespace MeuApp
                 ["content"] = new Dictionary<string, object?> { ["stringValue"] = post.Content ?? string.Empty },
                 ["linkUrl"] = new Dictionary<string, object?> { ["stringValue"] = post.LinkUrl ?? string.Empty },
                 ["activityLabel"] = new Dictionary<string, object?> { ["stringValue"] = post.ActivityLabel ?? string.Empty },
+                ["assignmentEnabled"] = new Dictionary<string, object?> { ["booleanValue"] = post.AssignmentEnabled },
+                ["assignmentMode"] = new Dictionary<string, object?> { ["stringValue"] = NormalizeAssignmentMode(post.AssignmentMode) },
+                ["allowLateSubmission"] = new Dictionary<string, object?> { ["booleanValue"] = post.AllowLateSubmission },
+                ["maxPoints"] = new Dictionary<string, object?> { ["integerValue"] = Math.Max(1, post.MaxPoints <= 0 ? 10 : post.MaxPoints).ToString() },
                 ["publishedAt"] = new Dictionary<string, object?> { ["timestampValue"] = ToFirestoreTimestamp(post.PublishedAt == default ? DateTime.Now : post.PublishedAt) },
                 ["updatedAt"] = new Dictionary<string, object?> { ["timestampValue"] = ToFirestoreTimestamp(post.UpdatedAt == default ? DateTime.Now : post.UpdatedAt) },
                 ["attachments"] = new Dictionary<string, object?>
@@ -1460,6 +1956,13 @@ namespace MeuApp
                     ["arrayValue"] = new Dictionary<string, object?>
                     {
                         ["values"] = ConvertAttachmentsToFirestoreArray(post.Attachments)
+                    }
+                },
+                ["questions"] = new Dictionary<string, object?>
+                {
+                    ["arrayValue"] = new Dictionary<string, object?>
+                    {
+                        ["values"] = ConvertActivityQuestionsToFirestoreArray(post.Questions)
                     }
                 }
             };
@@ -1470,6 +1973,53 @@ namespace MeuApp
             }
 
             return fields;
+        }
+
+        private Dictionary<string, object?> BuildHomeActivitySubmissionFirestoreFields(TeachingClassActivitySubmissionInfo submission)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["submissionId"] = new Dictionary<string, object?> { ["stringValue"] = submission.SubmissionId },
+                ["classId"] = new Dictionary<string, object?> { ["stringValue"] = submission.ClassId ?? string.Empty },
+                ["postId"] = new Dictionary<string, object?> { ["stringValue"] = submission.PostId ?? string.Empty },
+                ["studentUserId"] = new Dictionary<string, object?> { ["stringValue"] = submission.StudentUserId ?? string.Empty },
+                ["studentName"] = new Dictionary<string, object?> { ["stringValue"] = submission.StudentName ?? string.Empty },
+                ["notes"] = new Dictionary<string, object?> { ["stringValue"] = submission.Notes ?? string.Empty },
+                ["submissionLink"] = new Dictionary<string, object?> { ["stringValue"] = submission.SubmissionLink ?? string.Empty },
+                ["submittedAt"] = new Dictionary<string, object?> { ["timestampValue"] = ToFirestoreTimestamp(submission.SubmittedAt == default ? DateTime.Now : submission.SubmittedAt) },
+                ["updatedAt"] = new Dictionary<string, object?> { ["timestampValue"] = ToFirestoreTimestamp(submission.UpdatedAt == default ? DateTime.Now : submission.UpdatedAt) },
+                ["isLate"] = new Dictionary<string, object?> { ["booleanValue"] = submission.IsLate },
+                ["attachments"] = new Dictionary<string, object?>
+                {
+                    ["arrayValue"] = new Dictionary<string, object?>
+                    {
+                        ["values"] = ConvertAttachmentsToFirestoreArray(submission.Attachments)
+                    }
+                },
+                ["answers"] = new Dictionary<string, object?>
+                {
+                    ["arrayValue"] = new Dictionary<string, object?>
+                    {
+                        ["values"] = ConvertActivityAnswersToFirestoreArray(submission.Answers)
+                    }
+                }
+            };
+        }
+
+        private Dictionary<string, object?> BuildHomeActivityReviewFirestoreFields(TeachingClassActivityReviewInfo review)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["reviewId"] = new Dictionary<string, object?> { ["stringValue"] = review.ReviewId },
+                ["studentUserId"] = new Dictionary<string, object?> { ["stringValue"] = review.StudentUserId ?? string.Empty },
+                ["studentName"] = new Dictionary<string, object?> { ["stringValue"] = review.StudentName ?? string.Empty },
+                ["gradeValue"] = new Dictionary<string, object?> { ["integerValue"] = Math.Max(0, review.GradeValue).ToString() },
+                ["maxPoints"] = new Dictionary<string, object?> { ["integerValue"] = Math.Max(1, review.MaxPoints <= 0 ? 10 : review.MaxPoints).ToString() },
+                ["feedbackText"] = new Dictionary<string, object?> { ["stringValue"] = review.FeedbackText ?? string.Empty },
+                ["gradedByUserId"] = new Dictionary<string, object?> { ["stringValue"] = review.GradedByUserId ?? string.Empty },
+                ["gradedByName"] = new Dictionary<string, object?> { ["stringValue"] = review.GradedByName ?? string.Empty },
+                ["gradedAt"] = new Dictionary<string, object?> { ["timestampValue"] = ToFirestoreTimestamp(review.GradedAt == default ? DateTime.Now : review.GradedAt) }
+            };
         }
 
         private Dictionary<string, object?> BuildHomeCommentFirestoreFields(TeachingClassPostCommentInfo comment)
@@ -1591,6 +2141,73 @@ namespace MeuApp
             return result;
         }
 
+        private List<TeachingClassActivityQuestionInfo> GetActivityQuestionArray(JsonElement fields, string fieldName)
+        {
+            var result = new List<TeachingClassActivityQuestionInfo>();
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var values))
+            {
+                return result;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (!value.TryGetProperty("mapValue", out var mapValue) ||
+                    !mapValue.TryGetProperty("fields", out var questionFields))
+                {
+                    continue;
+                }
+
+                result.Add(new TeachingClassActivityQuestionInfo
+                {
+                    QuestionId = GetString(questionFields, "questionId"),
+                    Prompt = GetString(questionFields, "prompt"),
+                    HelpText = GetString(questionFields, "helpText"),
+                    ResponseKind = NormalizeAssignmentQuestionResponseKind(GetString(questionFields, "responseKind")),
+                    Required = GetBool(questionFields, "required", true),
+                    Options = NormalizeAssignmentQuestionOptions(GetString(questionFields, "responseKind"), GetStringArray(questionFields, "options")),
+                    CorrectOptions = NormalizeAssignmentQuestionCorrectOptions(
+                        GetString(questionFields, "responseKind"),
+                        GetStringArray(questionFields, "options"),
+                        GetStringArray(questionFields, "correctOptions"))
+                });
+            }
+
+            return result;
+        }
+
+        private List<TeachingClassActivityAnswerInfo> GetActivityAnswerArray(JsonElement fields, string fieldName)
+        {
+            var result = new List<TeachingClassActivityAnswerInfo>();
+            if (!fields.TryGetProperty(fieldName, out var field) ||
+                !field.TryGetProperty("arrayValue", out var arrayValue) ||
+                !arrayValue.TryGetProperty("values", out var values))
+            {
+                return result;
+            }
+
+            foreach (var value in values.EnumerateArray())
+            {
+                if (!value.TryGetProperty("mapValue", out var mapValue) ||
+                    !mapValue.TryGetProperty("fields", out var answerFields))
+                {
+                    continue;
+                }
+
+                result.Add(new TeachingClassActivityAnswerInfo
+                {
+                    QuestionId = GetString(answerFields, "questionId"),
+                    PromptSnapshot = GetString(answerFields, "promptSnapshot"),
+                    ResponseKindSnapshot = NormalizeAssignmentQuestionResponseKind(GetString(answerFields, "responseKindSnapshot")),
+                    ResponseText = GetString(answerFields, "responseText"),
+                    SelectedOptions = GetStringArray(answerFields, "selectedOptions")
+                });
+            }
+
+            return result;
+        }
+
         private string GetString(JsonElement fields, string fieldName)
         {
             if (fields.TryGetProperty(fieldName, out var field) &&
@@ -1650,6 +2267,17 @@ namespace MeuApp
             return 0;
         }
 
+        private bool GetBool(JsonElement fields, string fieldName, bool defaultValue = false)
+        {
+            if (fields.TryGetProperty(fieldName, out var field) &&
+                field.TryGetProperty("booleanValue", out var booleanValue))
+            {
+                return booleanValue.GetBoolean();
+            }
+
+            return defaultValue;
+        }
+
         private string GetDocumentId(JsonElement document)
         {
             if (document.TryGetProperty("name", out var nameField))
@@ -1664,6 +2292,76 @@ namespace MeuApp
         {
             var normalized = (postType ?? string.Empty).Trim().ToLowerInvariant();
             return normalized == "activity" ? "activity" : "announcement";
+        }
+
+        private static string NormalizeAssignmentMode(string? assignmentMode)
+        {
+            var normalized = (assignmentMode ?? string.Empty).Trim().ToLowerInvariant();
+            return normalized == "quiz" ? "quiz" : "material";
+        }
+
+        private static string NormalizeAssignmentQuestionResponseKind(string? responseKind)
+        {
+            var normalized = (responseKind ?? string.Empty).Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "paragraph" => "paragraph",
+                "single-choice" => "single-choice",
+                "multiple-choice" => "multiple-choice",
+                "true-false" => "true-false",
+                _ => "short-answer"
+            };
+        }
+
+        private static List<string> NormalizeAssignmentQuestionOptions(string? responseKind, IEnumerable<string>? options)
+        {
+            var normalizedKind = NormalizeAssignmentQuestionResponseKind(responseKind);
+            if (string.Equals(normalizedKind, "true-false", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<string> { "Verdadeiro", "Falso" };
+            }
+
+            if (!string.Equals(normalizedKind, "single-choice", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(normalizedKind, "multiple-choice", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<string>();
+            }
+
+            return (options ?? Enumerable.Empty<string>())
+                .Where(option => !string.IsNullOrWhiteSpace(option))
+                .Select(option => option.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static List<string> NormalizeAssignmentQuestionCorrectOptions(string? responseKind, IEnumerable<string>? options, IEnumerable<string>? correctOptions)
+        {
+            var normalizedKind = NormalizeAssignmentQuestionResponseKind(responseKind);
+            var normalizedOptions = NormalizeAssignmentQuestionOptions(normalizedKind, options);
+            if (normalizedOptions.Count == 0)
+            {
+                return new List<string>();
+            }
+
+            var normalizedCorrectOptions = (correctOptions ?? Enumerable.Empty<string>())
+                .Where(option => !string.IsNullOrWhiteSpace(option))
+                .Select(option => option.Trim())
+                .Where(option => normalizedOptions.Any(item => string.Equals(item, option, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (string.Equals(normalizedKind, "single-choice", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(normalizedKind, "true-false", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalizedCorrectOptions.Take(1).ToList();
+            }
+
+            if (string.Equals(normalizedKind, "multiple-choice", StringComparison.OrdinalIgnoreCase))
+            {
+                return normalizedCorrectOptions;
+            }
+
+            return new List<string>();
         }
 
         private static string NormalizeTeachingClassPermissionScope(string? scope)
@@ -1937,6 +2635,40 @@ namespace MeuApp
         public static TeachingClassHomePostResult Fail(string errorMessage)
         {
             return new TeachingClassHomePostResult { Success = false, ErrorMessage = errorMessage };
+        }
+    }
+
+    public class TeachingClassActivitySubmissionResult
+    {
+        public bool Success { get; set; }
+        public TeachingClassActivitySubmissionInfo? Submission { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public static TeachingClassActivitySubmissionResult Ok(TeachingClassActivitySubmissionInfo submission)
+        {
+            return new TeachingClassActivitySubmissionResult { Success = true, Submission = submission };
+        }
+
+        public static TeachingClassActivitySubmissionResult Fail(string errorMessage)
+        {
+            return new TeachingClassActivitySubmissionResult { Success = false, ErrorMessage = errorMessage };
+        }
+    }
+
+    public class TeachingClassActivityReviewResult
+    {
+        public bool Success { get; set; }
+        public TeachingClassActivityReviewInfo? Review { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public static TeachingClassActivityReviewResult Ok(TeachingClassActivityReviewInfo review)
+        {
+            return new TeachingClassActivityReviewResult { Success = true, Review = review };
+        }
+
+        public static TeachingClassActivityReviewResult Fail(string errorMessage)
+        {
+            return new TeachingClassActivityReviewResult { Success = false, ErrorMessage = errorMessage };
         }
     }
 

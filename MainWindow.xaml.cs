@@ -60,6 +60,12 @@ namespace MeuApp
         private const int TeachingClassIconUploadQuality = 84;
         private const int MaxRemoteTeamAssetBytes = 26214400;
         private const string TeachingClassModuleHome = "home";
+        private const string TeachingClassModuleAssignments = "assignments";
+        private const string TeachingClassAssignmentFilterAll = "todos";
+        private const string TeachingClassAssignmentFilterPending = "pendente";
+        private const string TeachingClassAssignmentFilterOverdue = "em-atraso";
+        private const string TeachingClassAssignmentFilterReviewed = "corrigida";
+        private const string TeachingClassAssignmentFilterNoSubmission = "sem-entrega";
         private const string SelfChatPlaceholderText = "Aqui é o seu chat próprio para notas, lembretes, fotos e arquivos rápidos.";
         private const string SelfChatPreviewText = "Seus lembretes, fotos e arquivos ficam aqui.";
         private static readonly HttpClient httpClient = new HttpClient();
@@ -273,6 +279,7 @@ namespace MeuApp
         private readonly Dictionary<string, TeamWorkspaceInfo> _queuedTeamPersistence = new Dictionary<string, TeamWorkspaceInfo>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, TeamWorkspaceInfo> _dirtyTeamPersistenceState = new Dictionary<string, TeamWorkspaceInfo>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _teamPersistenceInFlight = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _teachingClassAssignmentFiltersByClassId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private readonly List<TeachingClassInfo> _teachingClasses = new List<TeachingClassInfo>();
         private TeachingClassInfo? _activeTeachingClass = null;
         private string _activeTeachingClassModule = TeachingClassModuleHome;
@@ -281,6 +288,8 @@ namespace MeuApp
         private string _teachingClassGallerySelectionId = string.Empty;
         private bool _teachingClassHomeFeedLoadInFlight = false;
         private string _teachingClassHomeFeedLoadingClassId = string.Empty;
+        private bool _teachingClassAssignmentsLoadInFlight = false;
+        private string _teachingClassAssignmentsLoadingClassId = string.Empty;
         private int _chatRenderSequence = 0;
         private int _teamWorkspaceRenderSequence = 0;
         private bool _realtimeSyncInFlight = false;
@@ -298,6 +307,7 @@ namespace MeuApp
         private static readonly TimeSpan CalendarFacultyProfilesCacheTtl = TimeSpan.FromMinutes(5);
         private FilesHubState _filesHubState = new FilesHubState();
         private bool _filesHubStateLoaded = false;
+        private int _filesHubRenderSequence = 0;
         private bool _showChoasIntroBubble = false;
         private string _filesHubStatusMessage = string.Empty;
         private BitmapImage? _choasGifSource = null;
@@ -318,6 +328,60 @@ namespace MeuApp
             public bool CompactMode { get; init; }
         }
 
+        private sealed class TeachingClassAssignmentFilterOption
+        {
+            public string Key { get; init; } = TeachingClassAssignmentFilterAll;
+            public string Label { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public int Count { get; init; }
+        }
+
+        private sealed class TeachingClassUiNotification
+        {
+            public string Id { get; init; } = Guid.NewGuid().ToString("N");
+            public string Title { get; init; } = string.Empty;
+            public string Message { get; init; } = string.Empty;
+            public string Type { get; init; } = "info";
+            public string RelatedPostId { get; init; } = string.Empty;
+            public DateTime CreatedAt { get; init; } = DateTime.Now;
+        }
+
+        private sealed class TeachingClassFeedbackRubricPreset
+        {
+            public string Key { get; init; } = string.Empty;
+            public string Label { get; init; } = string.Empty;
+            public string Description { get; init; } = string.Empty;
+            public double ScoreRatio { get; init; }
+            public string FeedbackText { get; init; } = string.Empty;
+        }
+
+        private sealed class TeachingClassFeedbackTemplatePreset
+        {
+            public string Label { get; init; } = string.Empty;
+            public string FeedbackText { get; init; } = string.Empty;
+        }
+
+        private sealed class TeachingClassObjectiveCorrectionItem
+        {
+            public string QuestionId { get; init; } = string.Empty;
+            public string Prompt { get; init; } = string.Empty;
+            public string ResponseKind { get; init; } = "short-answer";
+            public List<string> CorrectOptions { get; init; } = new List<string>();
+            public List<string> SelectedOptions { get; init; } = new List<string>();
+            public bool IsCorrect { get; init; }
+        }
+
+        private sealed class TeachingClassObjectiveCorrectionSummary
+        {
+            public int TotalQuestionCount { get; init; }
+            public int ObjectiveQuestionCount { get; init; }
+            public int ObjectiveCorrectCount { get; init; }
+            public int ObjectivePointsBudget { get; init; }
+            public int SuggestedPoints { get; init; }
+            public int RemainingManualPoints { get; init; }
+            public List<TeachingClassObjectiveCorrectionItem> Items { get; init; } = new List<TeachingClassObjectiveCorrectionItem>();
+        }
+
         private sealed class CsdNoteDragInfo
         {
             public TeamWorkspaceInfo Team { get; init; } = new TeamWorkspaceInfo();
@@ -331,6 +395,12 @@ namespace MeuApp
             public bool IntroSeen { get; set; }
             public bool ChoasMinimized { get; set; }
             public List<FilesHubItem> Items { get; set; } = new List<FilesHubItem>();
+        }
+
+        private sealed class FilesHubLoadResult
+        {
+            public FilesHubState State { get; init; } = new FilesHubState();
+            public string StatusMessage { get; init; } = string.Empty;
         }
 
         private sealed class FilesHubItem
@@ -352,10 +422,42 @@ namespace MeuApp
             public DateTime? RemoteLastSyncedAt { get; set; }
         }
 
+        private sealed class FilesHubRenderItem
+        {
+            public FilesHubItem Item { get; init; } = new FilesHubItem();
+            public bool FileExists { get; init; }
+            public bool IsSynced { get; init; }
+        }
+
+        private sealed class FilesHubRenderSection
+        {
+            public string AssociationType { get; init; } = "Projeto";
+            public List<FilesHubRenderItem> Items { get; init; } = new List<FilesHubRenderItem>();
+        }
+
+        private sealed class FilesHubRenderModel
+        {
+            public int ItemCount { get; init; }
+            public string DominantType { get; init; } = "Projeto";
+            public FilesHubItem? LatestItem { get; init; }
+            public List<FilesHubRenderSection> Sections { get; init; } = new List<FilesHubRenderSection>();
+        }
+
         private sealed class FilesHubAssociationSelection
         {
             public string AssociationType { get; init; } = "Projeto";
             public string AssociationLabel { get; init; } = string.Empty;
+        }
+
+        private sealed class DialogSelectionOption
+        {
+            public string Label { get; init; } = string.Empty;
+            public string Value { get; init; } = string.Empty;
+
+            public override string ToString()
+            {
+                return Label;
+            }
         }
 
         private sealed class FilesHubSyncSelection
@@ -370,6 +472,37 @@ namespace MeuApp
             public string FilePath { get; init; } = string.Empty;
             public string FileName { get; init; } = string.Empty;
             public string PreviewImageDataUri { get; init; } = string.Empty;
+        }
+
+        private sealed class ChatAttachmentSendDraft
+        {
+            public string FilePath { get; init; } = string.Empty;
+            public string Caption { get; init; } = string.Empty;
+            public string PreviewDataUri { get; init; } = string.Empty;
+            public string MediaGroupId { get; init; } = string.Empty;
+            public int MediaGroupIndex { get; init; }
+            public int MediaGroupCount { get; init; }
+        }
+
+        private sealed class ChatImageComposerDraft
+        {
+            public string DraftId { get; init; } = Guid.NewGuid().ToString("N");
+            public string OriginalFilePath { get; init; } = string.Empty;
+            public string WorkingFilePath { get; set; } = string.Empty;
+            public string DisplayFileName { get; set; } = string.Empty;
+            public string ImageDataUri { get; set; } = string.Empty;
+            public string PreviewDataUri { get; set; } = string.Empty;
+            public string OverlayText { get; set; } = string.Empty;
+            public double OverlayLeft { get; set; } = 36;
+            public double OverlayTop { get; set; } = 36;
+            public double OverlayFontSize { get; set; } = 28;
+        }
+
+        private sealed class ChatImageComposerResult
+        {
+            public bool Confirmed { get; init; }
+            public string Caption { get; init; } = string.Empty;
+            public List<ChatImageComposerDraft> Drafts { get; init; } = new List<ChatImageComposerDraft>();
         }
 
         private sealed class CalendarAgendaItem
@@ -820,37 +953,119 @@ namespace MeuApp
                 return;
             }
 
-            _filesHubState = LoadFilesHubState();
-            _filesHubState.Items = (_filesHubState.Items ?? new List<FilesHubItem>())
-                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.FileName))
-                .OrderByDescending(item => item.AddedAt)
-                .ToList();
+            var loadResult = LoadFilesHubState();
+            _filesHubState = loadResult.State;
             _filesHubStateLoaded = true;
+
+            if (!string.IsNullOrWhiteSpace(loadResult.StatusMessage))
+            {
+                _filesHubStatusMessage = loadResult.StatusMessage;
+            }
         }
 
-        private FilesHubState LoadFilesHubState()
+        private FilesHubLoadResult LoadFilesHubState()
         {
             var statePath = GetFilesHubStateFilePath();
+            var statusMessage = string.Empty;
+
             try
             {
                 if (File.Exists(statePath))
                 {
                     var json = File.ReadAllText(statePath);
                     var state = JsonSerializer.Deserialize<FilesHubState>(json);
-                    if (state != null)
+                    return new FilesHubLoadResult
                     {
-                        state.Items ??= new List<FilesHubItem>();
-                        return state;
-                    }
+                        State = NormalizeFilesHubState(state)
+                    };
                 }
             }
             catch (Exception ex)
             {
                 DebugHelper.WriteLine($"Falha ao carregar o hub de arquivos: {ex.Message}");
-                _filesHubStatusMessage = "Nao foi possivel recuperar a mochila local; um espaco limpo foi iniciado.";
+                statusMessage = "Nao foi possivel recuperar a mochila local; um espaco limpo foi iniciado.";
             }
 
-            return new FilesHubState();
+            return new FilesHubLoadResult
+            {
+                State = new FilesHubState(),
+                StatusMessage = statusMessage
+            };
+        }
+
+        private async Task<FilesHubLoadResult> LoadFilesHubStateAsync()
+        {
+            var statePath = GetFilesHubStateFilePath();
+            var statusMessage = string.Empty;
+
+            try
+            {
+                if (File.Exists(statePath))
+                {
+                    var json = await File.ReadAllTextAsync(statePath);
+                    var state = await Task.Run(() => JsonSerializer.Deserialize<FilesHubState>(json));
+                    return new FilesHubLoadResult
+                    {
+                        State = NormalizeFilesHubState(state)
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"Falha ao carregar o hub de arquivos: {ex.Message}");
+                statusMessage = "Nao foi possivel recuperar a mochila local; um espaco limpo foi iniciado.";
+            }
+
+            return new FilesHubLoadResult
+            {
+                State = new FilesHubState(),
+                StatusMessage = statusMessage
+            };
+        }
+
+        private FilesHubState NormalizeFilesHubState(FilesHubState? state)
+        {
+            var normalized = CloneFilesHubState(state ?? new FilesHubState());
+            normalized.Items = (normalized.Items ?? new List<FilesHubItem>())
+                .Where(item => item != null && !string.IsNullOrWhiteSpace(item.FileName))
+                .OrderByDescending(item => item.AddedAt)
+                .ToList();
+            return normalized;
+        }
+
+        private FilesHubState CloneFilesHubState(FilesHubState state)
+        {
+            return new FilesHubState
+            {
+                IntroSeen = state.IntroSeen,
+                ChoasMinimized = state.ChoasMinimized,
+                Items = (state.Items ?? new List<FilesHubItem>())
+                    .Where(item => item != null)
+                    .Select(CloneFilesHubItem)
+                    .ToList()
+            };
+        }
+
+        private FilesHubItem CloneFilesHubItem(FilesHubItem item)
+        {
+            return new FilesHubItem
+            {
+                ItemId = item.ItemId,
+                FileName = item.FileName,
+                StoredFilePath = item.StoredFilePath,
+                AssociationType = item.AssociationType,
+                AssociationLabel = item.AssociationLabel,
+                AddedAt = item.AddedAt,
+                FileSizeBytes = item.FileSizeBytes,
+                FileExtension = item.FileExtension,
+                RemoteTeamId = item.RemoteTeamId,
+                RemoteTeamName = item.RemoteTeamName,
+                RemoteAssetId = item.RemoteAssetId,
+                RemotePermissionScope = item.RemotePermissionScope,
+                RemoteStorageReference = item.RemoteStorageReference,
+                RemoteVersion = item.RemoteVersion,
+                RemoteLastSyncedAt = item.RemoteLastSyncedAt
+            };
         }
 
         private bool TrySaveFilesHubState(bool showErrorDialog = false)
@@ -1247,14 +1462,14 @@ namespace MeuApp
             {
                 Height = 46,
                 Margin = new Thickness(0, 8, 0, 0),
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Equipe", Value = "team" },
-                    new { Label = "Curso", Value = "course" },
-                    new { Label = "Liderança", Value = "leadership" },
-                    new { Label = "Privado", Value = "private" }
+                    new DialogSelectionOption { Label = "Equipe", Value = "team" },
+                    new DialogSelectionOption { Label = "Curso", Value = "course" },
+                    new DialogSelectionOption { Label = "Liderança", Value = "leadership" },
+                    new DialogSelectionOption { Label = "Privado", Value = "private" }
                 },
                 SelectedValue = TeamPermissionService.NormalizePermissionScope(preferredScope)
             };
@@ -1621,14 +1836,14 @@ namespace MeuApp
             {
                 Height = 46,
                 Margin = new Thickness(0, 8, 0, 0),
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Equipe", Value = "team" },
-                    new { Label = "Curso", Value = "course" },
-                    new { Label = "Liderança", Value = "leadership" },
-                    new { Label = "Privado", Value = "private" }
+                    new DialogSelectionOption { Label = "Equipe", Value = "team" },
+                    new DialogSelectionOption { Label = "Curso", Value = "course" },
+                    new DialogSelectionOption { Label = "Liderança", Value = "leadership" },
+                    new DialogSelectionOption { Label = "Privado", Value = "private" }
                 },
                 SelectedValue = TeamPermissionService.NormalizePermissionScope(initialScope)
             };
@@ -1986,10 +2201,83 @@ namespace MeuApp
             RenderFilesChoasCompanion();
         }
 
-        private void RenderFilesHub()
+        private void RenderFilesHub(bool showLoadingState = false)
         {
-            EnsureFilesHubStateLoaded();
+            var renderSequence = ++_filesHubRenderSequence;
+            _ = RenderFilesHubAsync(renderSequence, showLoadingState || !_filesHubStateLoaded);
+        }
 
+        private async Task RenderFilesHubAsync(int renderSequence, bool showLoadingState)
+        {
+            try
+            {
+                if (showLoadingState)
+                {
+                    RenderFilesHubLoadingState();
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                }
+
+                if (!_filesHubStateLoaded)
+                {
+                    var loadResult = await LoadFilesHubStateAsync();
+                    if (renderSequence != _filesHubRenderSequence)
+                    {
+                        return;
+                    }
+
+                    _filesHubState = loadResult.State;
+                    _filesHubStateLoaded = true;
+
+                    if (!string.IsNullOrWhiteSpace(loadResult.StatusMessage))
+                    {
+                        _filesHubStatusMessage = loadResult.StatusMessage;
+                    }
+                }
+
+                EnsureFilesHubPresentationState();
+
+                var stateSnapshot = CloneFilesHubState(_filesHubState);
+                var renderModel = await Task.Run(() => PrepareFilesHubRenderModel(stateSnapshot));
+                if (renderSequence != _filesHubRenderSequence)
+                {
+                    return;
+                }
+
+                if (FilesContent.Visibility != Visibility.Visible)
+                {
+                    return;
+                }
+
+                await RenderFilesHubPreparedStateAsync(renderModel, renderSequence);
+            }
+            catch (Exception ex)
+            {
+                if (renderSequence != _filesHubRenderSequence)
+                {
+                    return;
+                }
+
+                DebugHelper.WriteLine($"Falha ao renderizar o hub de arquivos: {ex.Message}");
+                _filesHubStatusMessage = "O hub de arquivos nao conseguiu montar o painel agora.";
+
+                UpdateFilesHubBottomSpacing();
+                UpdateFilesHubStatusPresentation();
+                FilesHubSummaryHost.Children.Clear();
+                FilesHubBodyHost.Children.Clear();
+                StopChoasAnimation();
+                FilesHubBodyHost.Children.Add(CreateFilesHubLoadFailureState());
+            }
+            finally
+            {
+                if (renderSequence == _filesHubRenderSequence)
+                {
+                    FilesAddButton.IsEnabled = true;
+                }
+            }
+        }
+
+        private void EnsureFilesHubPresentationState()
+        {
             if (!_filesHubState.IntroSeen)
             {
                 _filesHubState.IntroSeen = true;
@@ -2002,58 +2290,393 @@ namespace MeuApp
                 _filesHubState.ChoasMinimized = false;
                 TrySaveFilesHubState();
             }
+        }
 
+        private FilesHubRenderModel PrepareFilesHubRenderModel(FilesHubState state)
+        {
+            var items = (state.Items ?? new List<FilesHubItem>())
+                .OrderByDescending(item => item.AddedAt)
+                .ToList();
+
+            var preparedItems = items
+                .Select(item => new FilesHubRenderItem
+                {
+                    Item = item,
+                    FileExists = File.Exists(item.StoredFilePath),
+                    IsSynced = IsFilesHubItemSynced(item)
+                })
+                .ToList();
+
+            var dominantType = preparedItems
+                .GroupBy(entry => string.IsNullOrWhiteSpace(entry.Item.AssociationType) ? "Projeto" : entry.Item.AssociationType)
+                .OrderByDescending(group => group.Count())
+                .ThenBy(group => GetFilesHubAssociationOrder(group.Key))
+                .Select(group => group.Key)
+                .FirstOrDefault() ?? "Projeto";
+
+            var sections = preparedItems
+                .GroupBy(entry => string.IsNullOrWhiteSpace(entry.Item.AssociationType) ? "Projeto" : entry.Item.AssociationType)
+                .OrderBy(group => GetFilesHubAssociationOrder(group.Key))
+                .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new FilesHubRenderSection
+                {
+                    AssociationType = group.Key,
+                    Items = group
+                        .OrderByDescending(entry => entry.Item.AddedAt)
+                        .ToList()
+                })
+                .ToList();
+
+            return new FilesHubRenderModel
+            {
+                ItemCount = preparedItems.Count,
+                DominantType = dominantType,
+                LatestItem = preparedItems.FirstOrDefault()?.Item,
+                Sections = sections
+            };
+        }
+
+        private async Task RenderFilesHubPreparedStateAsync(FilesHubRenderModel renderModel, int renderSequence)
+        {
             UpdateFilesHubBottomSpacing();
             UpdateFilesHubStatusPresentation();
 
             FilesHubSummaryHost.Children.Clear();
             FilesHubBodyHost.Children.Clear();
 
-            var items = _filesHubState.Items
-                .OrderByDescending(item => item.AddedAt)
-                .ToList();
-            var dominantType = items
-                .GroupBy(item => string.IsNullOrWhiteSpace(item.AssociationType) ? "Projeto" : item.AssociationType)
-                .OrderByDescending(group => group.Count())
-                .ThenBy(group => GetFilesHubAssociationOrder(group.Key))
-                .Select(group => group.Key)
-                .FirstOrDefault() ?? "Projeto";
-            var latestItem = items.FirstOrDefault();
-
             FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
                 "Arquivos",
-                items.Count.ToString(),
-                items.Count == 0 ? "Nenhum material guardado ainda" : "Pacote local pronto para consulta",
+                renderModel.ItemCount.ToString(),
+                renderModel.ItemCount == 0 ? "Nenhum material guardado ainda" : "Pacote local pronto para consulta",
                 Color.FromRgb(14, 165, 233)));
             FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
                 "Vinculo lider",
-                items.Count == 0 ? "--" : dominantType,
-                items.Count == 0 ? "Use o + para classificar seu primeiro item" : GetFilesHubAssociationDescription(dominantType),
-                GetFilesHubAssociationAccentColor(dominantType)));
+                renderModel.ItemCount == 0 ? "--" : renderModel.DominantType,
+                renderModel.ItemCount == 0 ? "Use o + para classificar seu primeiro item" : GetFilesHubAssociationDescription(renderModel.DominantType),
+                GetFilesHubAssociationAccentColor(renderModel.DominantType)));
             FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
                 "Ultimo item",
-                latestItem == null ? "--" : FormatRelativeDate(latestItem.AddedAt),
-                latestItem == null ? "CHOAS ainda sem memoria local" : latestItem.FileName,
+                renderModel.LatestItem == null ? "--" : FormatRelativeDate(renderModel.LatestItem.AddedAt),
+                renderModel.LatestItem == null ? "CHOAS ainda sem memoria local" : renderModel.LatestItem.FileName,
                 Color.FromRgb(16, 185, 129)));
 
-            FilesHubBodyHost.Children.Add(CreateFilesHubOverviewBanner(items.Count));
+            FilesHubBodyHost.Children.Add(CreateFilesHubOverviewBanner(renderModel.ItemCount));
 
-            if (items.Count == 0)
+            if (renderModel.ItemCount == 0)
             {
                 FilesHubBodyHost.Children.Add(CreateFilesHubEmptyState());
             }
             else
             {
-                foreach (var group in items
-                    .GroupBy(item => string.IsNullOrWhiteSpace(item.AssociationType) ? "Projeto" : item.AssociationType)
-                    .OrderBy(group => GetFilesHubAssociationOrder(group.Key))
-                    .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase))
+                foreach (var section in renderModel.Sections)
                 {
-                    FilesHubBodyHost.Children.Add(CreateFilesHubSection(group.Key, group.ToList()));
+                    if (renderSequence != _filesHubRenderSequence || FilesContent.Visibility != Visibility.Visible)
+                    {
+                        return;
+                    }
+
+                    FilesHubBodyHost.Children.Add(CreateFilesHubSection(section));
+                    await Dispatcher.Yield(DispatcherPriority.Background);
                 }
             }
 
-            RenderFilesChoasCompanion();
+            if (renderSequence == _filesHubRenderSequence && FilesContent.Visibility == Visibility.Visible)
+            {
+                RenderFilesChoasCompanion();
+            }
+        }
+
+        private void RenderFilesHubLoadingState()
+        {
+            FilesAddButton.IsEnabled = false;
+
+            UpdateFilesHubBottomSpacing();
+            UpdateFilesHubStatusPresentation();
+            FilesHubSummaryHost.Children.Clear();
+            FilesHubBodyHost.Children.Clear();
+            StopChoasAnimation();
+
+            FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
+                "Arquivos",
+                "--",
+                "Carregando mochila local",
+                Color.FromRgb(14, 165, 233)));
+            FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
+                "Contextos",
+                "--",
+                "Organizando projeto, sessao, trabalho e atividade",
+                Color.FromRgb(59, 130, 246)));
+            FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
+                "Painel",
+                "Preparando",
+                "A interface aparece assim que os grupos estiverem prontos",
+                Color.FromRgb(16, 185, 129)));
+
+            FilesHubBodyHost.Children.Add(CreateFilesHubLoadingState());
+        }
+
+        private Border CreateFilesHubLoadingState()
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+            var contentGrid = new Grid();
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var textStack = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 460
+            };
+            textStack.Children.Add(new TextBlock
+            {
+                Text = "Preparando sua mochila de arquivos",
+                FontSize = 24,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = "Leitura local, organizacao dos contextos e checagem dos arquivos agora rodam fora da thread principal para a tela abrir sem travar.",
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 21
+            });
+            textStack.Children.Add(new ProgressBar
+            {
+                Margin = new Thickness(0, 18, 0, 0),
+                Height = 6,
+                IsIndeterminate = true,
+                Foreground = accentBrush
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = "Assim que a mochila estiver pronta, os blocos entram em tela por etapas para manter a navegacao fluida.",
+                Margin = new Thickness(0, 14, 0, 0),
+                FontSize = 11.5,
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 19
+            });
+            contentGrid.Children.Add(textStack);
+
+            var mediaBorder = new Border
+            {
+                Width = 220,
+                Height = 220,
+                Margin = new Thickness(24, 0, 0, 0),
+                Padding = new Thickness(10),
+                CornerRadius = new CornerRadius(26),
+                Background = CreateSoftAccentBrush(accentBrush, 18),
+                BorderBrush = accentBrush,
+                BorderThickness = new Thickness(1),
+                Child = CreateFilesHubLoadingMediaHost()
+            };
+            Grid.SetColumn(mediaBorder, 1);
+            contentGrid.Children.Add(mediaBorder);
+
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 0, 16),
+                Padding = new Thickness(24),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Child = contentGrid
+            };
+        }
+
+        private Border CreateFilesHubLoadFailureState()
+        {
+            var retryButton = CreateFilesHubActionButton(
+                "Tentar novamente",
+                GetThemeBrush("AccentBrush"),
+                Brushes.White,
+                Brushes.Transparent,
+                (_, __) => RenderFilesHub(showLoadingState: true),
+                minWidth: 148);
+            retryButton.HorizontalAlignment = HorizontalAlignment.Center;
+
+            return new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(28),
+                Child = new StackPanel
+                {
+                    Width = 420,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Children =
+                    {
+                        new PackIconMaterial
+                        {
+                            Kind = PackIconMaterialKind.AlertCircleOutline,
+                            Width = 34,
+                            Height = 34,
+                            Foreground = new SolidColorBrush(Color.FromRgb(234, 88, 12)),
+                            HorizontalAlignment = HorizontalAlignment.Center
+                        },
+                        new TextBlock
+                        {
+                            Text = "Nao foi possivel montar o hub agora",
+                            Margin = new Thickness(0, 14, 0, 0),
+                            FontSize = 22,
+                            FontWeight = FontWeights.ExtraBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextAlignment = TextAlignment.Center
+                        },
+                        new TextBlock
+                        {
+                            Text = "A leitura do estado local ou a montagem dos blocos falhou nesta tentativa. O conteudo continua preservado e voce pode tentar novamente sem reiniciar o app.",
+                            Margin = new Thickness(0, 10, 0, 18),
+                            FontSize = 12,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            TextAlignment = TextAlignment.Center,
+                            LineHeight = 20
+                        },
+                        retryButton
+                    }
+                }
+            };
+        }
+
+        private UIElement CreateFilesHubLoadingMediaHost()
+        {
+            var videoPath = ResolveFilesHubLoadingVideoPath();
+            if (string.IsNullOrWhiteSpace(videoPath))
+            {
+                return CreateFilesHubLoadingMediaFallback();
+            }
+
+            var host = new Grid();
+            host.Children.Add(CreateFilesHubLoadingMediaFallback());
+            _ = TryInitializeFilesHubLoadingAnimationAsync(host, videoPath);
+            return host;
+        }
+
+        private UIElement CreateFilesHubLoadingMediaFallback()
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+
+            return new Grid
+            {
+                Children =
+                {
+                    new StackPanel
+                    {
+                        Width = 132,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Children =
+                        {
+                            new Border
+                            {
+                                Width = 84,
+                                Height = 84,
+                                CornerRadius = new CornerRadius(28),
+                                Background = CreateSoftAccentBrush(accentBrush, 30),
+                                BorderBrush = accentBrush,
+                                BorderThickness = new Thickness(1),
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                Child = new PackIconMaterial
+                                {
+                                    Kind = PackIconMaterialKind.FolderSyncOutline,
+                                    Width = 34,
+                                    Height = 34,
+                                    Foreground = accentBrush,
+                                    HorizontalAlignment = HorizontalAlignment.Center,
+                                    VerticalAlignment = VerticalAlignment.Center
+                                }
+                            },
+                            new TextBlock
+                            {
+                                Text = "CHOAS",
+                                Margin = new Thickness(0, 12, 0, 0),
+                                FontSize = 16,
+                                FontWeight = FontWeights.ExtraBold,
+                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                TextAlignment = TextAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = "Carregando hub",
+                                Margin = new Thickness(0, 6, 0, 0),
+                                FontSize = 11,
+                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                TextAlignment = TextAlignment.Center
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        private async Task TryInitializeFilesHubLoadingAnimationAsync(Grid host, string videoPath)
+        {
+            try
+            {
+                var webView = new WebView2
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    Margin = new Thickness(0),
+                    Focusable = false
+                };
+
+                await webView.EnsureCoreWebView2Async();
+
+                if (webView.CoreWebView2 != null)
+                {
+                    webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
+                    webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                    webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                }
+
+                var videoUri = new Uri(videoPath, UriKind.Absolute).AbsoluteUri;
+                var html = $@"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""utf-8"" />
+    <style>
+        html, body {{ margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }}
+        body {{ display: flex; align-items: center; justify-content: center; }}
+        video {{ width: 100%; height: 100%; object-fit: contain; }}
+    </style>
+</head>
+<body>
+    <video autoplay muted loop playsinline>
+        <source src=""{videoUri}"" type=""video/webm"" />
+    </video>
+</body>
+</html>";
+
+                webView.NavigateToString(html);
+                host.Children.Clear();
+                host.Children.Add(webView);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"Falha ao iniciar animacao de loading do hub: {ex.Message}");
+            }
+        }
+
+        private string? ResolveFilesHubLoadingVideoPath()
+        {
+            var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            var candidates = new[]
+            {
+                IOPath.Combine(baseDirectory, "img", "Loading", "ChoasLoading.webm"),
+                IOPath.GetFullPath(IOPath.Combine(baseDirectory, "..", "..", "..", "img", "Loading", "ChoasLoading.webm")),
+                IOPath.GetFullPath(IOPath.Combine(Environment.CurrentDirectory, "img", "Loading", "ChoasLoading.webm"))
+            };
+
+            return candidates.FirstOrDefault(candidate => File.Exists(candidate));
         }
 
         private Border CreateFilesHubOverviewBanner(int itemCount)
@@ -2198,20 +2821,20 @@ namespace MeuApp
             };
         }
 
-        private Border CreateFilesHubSection(string associationType, List<FilesHubItem> items)
+        private Border CreateFilesHubSection(FilesHubRenderSection section)
         {
-            var accentColor = GetFilesHubAssociationAccentColor(associationType);
+            var accentColor = GetFilesHubAssociationAccentColor(section.AssociationType);
             var accentBrush = new SolidColorBrush(accentColor);
             var itemStack = new StackPanel();
 
-            foreach (var item in items.OrderByDescending(entry => entry.AddedAt))
+            foreach (var item in section.Items)
             {
                 itemStack.Children.Add(CreateFilesHubItemCard(item));
             }
 
             var metaWrap = new WrapPanel();
-            metaWrap.Children.Add(CreateStaticTeamChip($"{items.Count} item(ns)", CreateSoftAccentBrush(accentBrush, 28), accentBrush));
-            metaWrap.Children.Add(CreateStaticTeamChip(GetFilesHubAssociationDescription(associationType), GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            metaWrap.Children.Add(CreateStaticTeamChip($"{section.Items.Count} item(ns)", CreateSoftAccentBrush(accentBrush, 28), accentBrush));
+            metaWrap.Children.Add(CreateStaticTeamChip(GetFilesHubAssociationDescription(section.AssociationType), GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
 
             return new Border
             {
@@ -2234,7 +2857,7 @@ namespace MeuApp
                         },
                         new TextBlock
                         {
-                            Text = associationType,
+                            Text = section.AssociationType,
                             Margin = new Thickness(0, 12, 0, 0),
                             FontSize = 18,
                             FontWeight = FontWeights.Bold,
@@ -2251,18 +2874,63 @@ namespace MeuApp
             };
         }
 
-        private Border CreateFilesHubItemCard(FilesHubItem item)
+        private Border CreateFilesHubItemCard(FilesHubRenderItem renderItem)
         {
+            var item = renderItem.Item;
             var accentColor = GetFilesHubAssociationAccentColor(item.AssociationType);
             var accentBrush = new SolidColorBrush(accentColor);
-            var fileExists = File.Exists(item.StoredFilePath);
-            var isSynced = IsFilesHubItemSynced(item);
+            var fileExists = renderItem.FileExists;
+            var isSynced = renderItem.IsSynced;
+            var previewSource = fileExists && IsFilesHubImageExtension(GetFilesHubExtension(item.StoredFilePath, item.FileExtension))
+                ? TryCreateDecodedBitmapImage(item.StoredFilePath, 320)
+                : null;
 
             var layout = new Grid();
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var leftStack = new StackPanel();
+            if (previewSource != null)
+            {
+                leftStack.Children.Add(new Border
+                {
+                    Height = 164,
+                    Margin = new Thickness(0, 0, 0, 14),
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(18),
+                    ClipToBounds = true,
+                    Child = new Grid
+                    {
+                        Children =
+                        {
+                            new Image
+                            {
+                                Source = previewSource,
+                                Stretch = Stretch.UniformToFill
+                            },
+                            new Border
+                            {
+                                HorizontalAlignment = HorizontalAlignment.Left,
+                                VerticalAlignment = VerticalAlignment.Top,
+                                Margin = new Thickness(12),
+                                Padding = new Thickness(10, 5, 10, 5),
+                                Background = new SolidColorBrush(Color.FromArgb(214, 15, 23, 42)),
+                                CornerRadius = new CornerRadius(999),
+                                Child = new TextBlock
+                                {
+                                    Text = "Prévia",
+                                    FontSize = 10,
+                                    FontWeight = FontWeights.Bold,
+                                    Foreground = Brushes.White
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
             leftStack.Children.Add(new TextBlock
             {
                 Text = item.FileName,
@@ -4604,16 +5272,21 @@ namespace MeuApp
 
         private string? CreateJpegDataUriFromVisual(FrameworkElement element, int outputSize, int quality)
         {
+            return CreateJpegDataUriFromVisual(element, outputSize, outputSize, quality);
+        }
+
+        private string? CreateJpegDataUriFromVisual(FrameworkElement element, int outputWidth, int outputHeight, int quality)
+        {
             try
             {
                 var drawingVisual = new DrawingVisual();
                 using (var drawingContext = drawingVisual.RenderOpen())
                 {
-                    drawingContext.DrawRectangle(Brushes.White, null, new Rect(0, 0, outputSize, outputSize));
-                    drawingContext.DrawRectangle(new VisualBrush(element) { Stretch = Stretch.Fill }, null, new Rect(0, 0, outputSize, outputSize));
+                    drawingContext.DrawRectangle(Brushes.White, null, new Rect(0, 0, outputWidth, outputHeight));
+                    drawingContext.DrawRectangle(new VisualBrush(element) { Stretch = Stretch.Fill }, null, new Rect(0, 0, outputWidth, outputHeight));
                 }
 
-                var renderBitmap = new RenderTargetBitmap(outputSize, outputSize, 96, 96, PixelFormats.Pbgra32);
+                var renderBitmap = new RenderTargetBitmap(outputWidth, outputHeight, 96, 96, PixelFormats.Pbgra32);
                 renderBitmap.Render(drawingVisual);
 
                 var encoder = new JpegBitmapEncoder
@@ -5646,9 +6319,9 @@ namespace MeuApp
             {
                 Height = 40,
                 Margin = new Thickness(0, 8, 0, 0),
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
-                ItemsSource = options.Select(item => new { item.Label, item.Value }).ToList(),
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
+                ItemsSource = options.Select(item => new DialogSelectionOption { Label = item.Label, Value = item.Value }).ToList(),
                 SelectedValue = selectedValue
             };
             ApplyDialogInputStyle(combo);
@@ -15370,6 +16043,712 @@ namespace MeuApp
             }
         }
 
+        private async Task EnsureTeachingClassAssignmentsAsync(TeachingClassInfo? teachingClass, bool force = false)
+        {
+            if (teachingClass == null || _teachingClassService == null)
+            {
+                return;
+            }
+
+            await EnsureTeachingClassHomeFeedAsync(teachingClass, force);
+
+            var classId = teachingClass.ClassId;
+            if (string.IsNullOrWhiteSpace(classId))
+            {
+                return;
+            }
+
+            if (_teachingClassAssignmentsLoadInFlight && string.Equals(_teachingClassAssignmentsLoadingClassId, classId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!force && teachingClass.AssignmentsReady && teachingClass.AssignmentsLoadedAt.HasValue && DateTime.Now - teachingClass.AssignmentsLoadedAt.Value < TimeSpan.FromSeconds(45))
+            {
+                return;
+            }
+
+            _teachingClassAssignmentsLoadInFlight = true;
+            _teachingClassAssignmentsLoadingClassId = classId;
+
+            try
+            {
+                var assignmentPosts = GetTeachingClassAssignmentPosts(teachingClass);
+                var currentUserId = GetCurrentUserId();
+
+                if (CanManageTeachingClass(teachingClass))
+                {
+                    var loadTasks = assignmentPosts.Select(async post =>
+                    {
+                        post.Submissions = await _teachingClassService.LoadHomeActivitySubmissionsAsync(classId, post.PostId);
+                        return post;
+                    }).ToArray();
+
+                    if (loadTasks.Length > 0)
+                    {
+                        await Task.WhenAll(loadTasks);
+                    }
+                }
+                else
+                {
+                    foreach (var post in assignmentPosts)
+                    {
+                        var submission = string.IsNullOrWhiteSpace(currentUserId)
+                            ? null
+                            : await _teachingClassService.GetHomeActivitySubmissionAsync(classId, post.PostId, currentUserId);
+                        post.Submissions = submission == null
+                            ? new List<TeachingClassActivitySubmissionInfo>()
+                            : new List<TeachingClassActivitySubmissionInfo> { submission };
+                    }
+                }
+
+                teachingClass.AssignmentsReady = true;
+                teachingClass.AssignmentsLoadedAt = DateTime.Now;
+                TrackTeachingClassLocally(teachingClass);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[TeachingClassAssignments] Erro ao carregar assignments: {ex.Message}");
+            }
+            finally
+            {
+                if (string.Equals(_teachingClassAssignmentsLoadingClassId, classId, StringComparison.OrdinalIgnoreCase))
+                {
+                    _teachingClassAssignmentsLoadingClassId = string.Empty;
+                }
+
+                _teachingClassAssignmentsLoadInFlight = false;
+
+                if (_activeTeachingClass != null
+                    && string.Equals(_activeTeachingClass.ClassId, classId, StringComparison.OrdinalIgnoreCase)
+                    && !_teachingClassComposerOpen
+                    && string.Equals(_activeTeachingClassModule, TeachingClassModuleAssignments, StringComparison.OrdinalIgnoreCase))
+                {
+                    RenderProfessorDashboard();
+                }
+            }
+        }
+
+        private List<TeachingClassHomePostInfo> GetTeachingClassAssignmentPosts(TeachingClassInfo teachingClass)
+        {
+            return (teachingClass?.HomePosts ?? new List<TeachingClassHomePostInfo>())
+                .Where(post => string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase) && post.AssignmentEnabled)
+                .OrderBy(post => post.ActivityDueAt ?? post.PublishedAt)
+                .ToList();
+        }
+
+        private bool CanCurrentUserSubmitTeachingClassAssignments(TeachingClassInfo teachingClass)
+        {
+            var currentUserId = GetCurrentUserId();
+            return !string.IsNullOrWhiteSpace(currentUserId)
+                && teachingClass != null
+                && !CanManageTeachingClass(teachingClass)
+                && teachingClass.StudentIds.Contains(currentUserId, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private TeachingClassActivitySubmissionInfo? GetCurrentUserTeachingClassAssignmentSubmission(TeachingClassHomePostInfo post)
+        {
+            var currentUserId = GetCurrentUserId();
+            if (string.IsNullOrWhiteSpace(currentUserId) || post == null)
+            {
+                return null;
+            }
+
+            return (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                .FirstOrDefault(item => string.Equals(item.StudentUserId, currentUserId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string GetTeachingClassAssignmentModeLabel(TeachingClassHomePostInfo post)
+        {
+            return string.Equals(post?.AssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase)
+                ? "Questionário"
+                : "Atividade";
+        }
+
+        private string GetTeachingClassQuestionResponseKindLabel(string responseKind)
+        {
+            return responseKind?.Trim().ToLowerInvariant() switch
+            {
+                "paragraph" => "Parágrafo",
+                "single-choice" => "Escolha única",
+                "multiple-choice" => "Múltipla escolha",
+                "true-false" => "Verdadeiro ou falso",
+                _ => "Resposta curta"
+            };
+        }
+
+        private bool TeachingClassQuestionUsesChoiceOptions(string responseKind)
+        {
+            return string.Equals(responseKind, "single-choice", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(responseKind, "multiple-choice", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(responseKind, "true-false", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TeachingClassQuestionUsesMultipleSelection(string responseKind)
+        {
+            return string.Equals(responseKind, "multiple-choice", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TeachingClassQuestionUsesSingleCorrectSelection(string responseKind)
+        {
+            return string.Equals(responseKind, "single-choice", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(responseKind, "true-false", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private List<string> GetTeachingClassQuestionEffectiveOptions(TeachingClassActivityQuestionInfo? question)
+        {
+            if (question == null)
+            {
+                return new List<string>();
+            }
+
+            if (string.Equals(question.ResponseKind, "true-false", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<string> { "Verdadeiro", "Falso" };
+            }
+
+            if (!TeachingClassQuestionUsesChoiceOptions(question.ResponseKind))
+            {
+                return new List<string>();
+            }
+
+            return (question.Options ?? new List<string>())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private List<string> GetTeachingClassQuestionCorrectOptions(TeachingClassActivityQuestionInfo? question)
+        {
+            var effectiveOptions = GetTeachingClassQuestionEffectiveOptions(question);
+            if (question == null || effectiveOptions.Count == 0)
+            {
+                return new List<string>();
+            }
+
+            var correctOptions = (question.CorrectOptions ?? new List<string>())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Where(item => effectiveOptions.Any(option => string.Equals(option, item, StringComparison.OrdinalIgnoreCase)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (TeachingClassQuestionUsesSingleCorrectSelection(question.ResponseKind))
+            {
+                return correctOptions.Take(1).ToList();
+            }
+
+            return correctOptions;
+        }
+
+        private List<string> GetTeachingClassAnswerSelectedOptions(TeachingClassActivityAnswerInfo? answer)
+        {
+            if (answer == null)
+            {
+                return new List<string>();
+            }
+
+            return (answer.SelectedOptions ?? new List<string>())
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Select(item => item.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private bool IsTeachingClassObjectiveQuestion(TeachingClassActivityQuestionInfo? question)
+        {
+            return question != null
+                && TeachingClassQuestionUsesChoiceOptions(question.ResponseKind)
+                && GetTeachingClassQuestionCorrectOptions(question).Count > 0;
+        }
+
+        private bool IsTeachingClassObjectiveAnswerCorrect(TeachingClassActivityQuestionInfo? question, TeachingClassActivityAnswerInfo? answer)
+        {
+            if (question == null || !IsTeachingClassObjectiveQuestion(question) || answer == null)
+            {
+                return false;
+            }
+
+            var correctOptions = GetTeachingClassQuestionCorrectOptions(question);
+            var selectedOptions = GetTeachingClassAnswerSelectedOptions(answer);
+            if (correctOptions.Count == 0 || selectedOptions.Count == 0)
+            {
+                return false;
+            }
+
+            if (TeachingClassQuestionUsesSingleCorrectSelection(question.ResponseKind))
+            {
+                return correctOptions.Count == 1
+                    && selectedOptions.Count == 1
+                    && string.Equals(correctOptions[0], selectedOptions[0], StringComparison.OrdinalIgnoreCase);
+            }
+
+            return selectedOptions.Count == correctOptions.Count
+                && selectedOptions.All(option => correctOptions.Any(correct => string.Equals(correct, option, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private TeachingClassObjectiveCorrectionSummary BuildTeachingClassObjectiveCorrectionSummary(TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo submission)
+        {
+            var questions = post.Questions ?? new List<TeachingClassActivityQuestionInfo>();
+            var items = new List<TeachingClassObjectiveCorrectionItem>();
+
+            foreach (var question in questions)
+            {
+                if (question == null || !IsTeachingClassObjectiveQuestion(question))
+                {
+                    continue;
+                }
+
+                var answer = (submission.Answers ?? new List<TeachingClassActivityAnswerInfo>())
+                    .FirstOrDefault(item => string.Equals(item.QuestionId, question.QuestionId, StringComparison.OrdinalIgnoreCase));
+                items.Add(new TeachingClassObjectiveCorrectionItem
+                {
+                    QuestionId = question.QuestionId,
+                    Prompt = question.Prompt,
+                    ResponseKind = question.ResponseKind,
+                    CorrectOptions = GetTeachingClassQuestionCorrectOptions(question),
+                    SelectedOptions = GetTeachingClassAnswerSelectedOptions(answer),
+                    IsCorrect = IsTeachingClassObjectiveAnswerCorrect(question, answer)
+                });
+            }
+
+            var objectiveQuestionCount = items.Count;
+            var objectiveCorrectCount = items.Count(item => item.IsCorrect);
+            var totalQuestionCount = questions.Count;
+
+            var objectivePointsBudget = 0;
+            if (objectiveQuestionCount > 0)
+            {
+                if (objectiveQuestionCount == totalQuestionCount || totalQuestionCount <= 0)
+                {
+                    objectivePointsBudget = Math.Max(0, post.MaxPoints);
+                }
+                else
+                {
+                    objectivePointsBudget = Math.Max(1, (int)Math.Round((double)post.MaxPoints * objectiveQuestionCount / totalQuestionCount, MidpointRounding.AwayFromZero));
+                    objectivePointsBudget = Math.Min(Math.Max(0, post.MaxPoints - 1), objectivePointsBudget);
+                }
+            }
+
+            var suggestedPoints = objectiveQuestionCount == 0
+                ? 0
+                : (int)Math.Round((double)objectivePointsBudget * objectiveCorrectCount / objectiveQuestionCount, MidpointRounding.AwayFromZero);
+
+            return new TeachingClassObjectiveCorrectionSummary
+            {
+                TotalQuestionCount = totalQuestionCount,
+                ObjectiveQuestionCount = objectiveQuestionCount,
+                ObjectiveCorrectCount = objectiveCorrectCount,
+                ObjectivePointsBudget = objectivePointsBudget,
+                SuggestedPoints = Math.Max(0, Math.Min(post.MaxPoints, suggestedPoints)),
+                RemainingManualPoints = Math.Max(0, post.MaxPoints - objectivePointsBudget),
+                Items = items
+            };
+        }
+
+        private string GetTeachingClassAnswerDisplayText(TeachingClassActivityAnswerInfo? answer)
+        {
+            if (answer == null)
+            {
+                return "Sem resposta.";
+            }
+
+            var selectedOptions = GetTeachingClassAnswerSelectedOptions(answer);
+
+            if (selectedOptions.Count > 0)
+            {
+                return string.Join(", ", selectedOptions);
+            }
+
+            return string.IsNullOrWhiteSpace(answer.ResponseText)
+                ? "Sem resposta."
+                : answer.ResponseText;
+        }
+
+        private string GetTeachingClassAssignmentStudentStatusLabel(TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo? submission)
+        {
+            if (submission?.Review != null)
+            {
+                return "Corrigida";
+            }
+
+            if (submission != null)
+            {
+                return submission.IsLate ? "Entregue com atraso" : "Entregue";
+            }
+
+            if (post.ActivityDueAt.HasValue && post.ActivityDueAt.Value.Date < DateTime.Today)
+            {
+                return post.AllowLateSubmission ? "Atrasada" : "Prazo encerrado";
+            }
+
+            return "Em aberto";
+        }
+
+        private Brush GetTeachingClassAssignmentStudentStatusBrush(TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo? submission)
+        {
+            if (submission?.Review != null)
+            {
+                return new SolidColorBrush(Color.FromRgb(22, 163, 74));
+            }
+
+            if (submission != null)
+            {
+                return submission.IsLate
+                    ? new SolidColorBrush(Color.FromRgb(234, 88, 12))
+                    : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+            }
+
+            if (post.ActivityDueAt.HasValue && post.ActivityDueAt.Value.Date < DateTime.Today)
+            {
+                if (post.AllowLateSubmission)
+                {
+                    return new SolidColorBrush(Color.FromRgb(234, 88, 12));
+                }
+
+                return new SolidColorBrush(Color.FromRgb(220, 38, 38));
+            }
+
+            return new SolidColorBrush(Color.FromRgb(124, 58, 237));
+        }
+
+        private string NormalizeTeachingClassAssignmentFilter(string filterKey)
+        {
+            return filterKey switch
+            {
+                TeachingClassAssignmentFilterPending => TeachingClassAssignmentFilterPending,
+                TeachingClassAssignmentFilterOverdue => TeachingClassAssignmentFilterOverdue,
+                TeachingClassAssignmentFilterReviewed => TeachingClassAssignmentFilterReviewed,
+                TeachingClassAssignmentFilterNoSubmission => TeachingClassAssignmentFilterNoSubmission,
+                _ => TeachingClassAssignmentFilterAll
+            };
+        }
+
+        private string GetTeachingClassAssignmentFilter(TeachingClassInfo teachingClass)
+        {
+            if (teachingClass == null || string.IsNullOrWhiteSpace(teachingClass.ClassId))
+            {
+                return TeachingClassAssignmentFilterAll;
+            }
+
+            return _teachingClassAssignmentFiltersByClassId.TryGetValue(teachingClass.ClassId, out var filterKey)
+                ? NormalizeTeachingClassAssignmentFilter(filterKey)
+                : TeachingClassAssignmentFilterAll;
+        }
+
+        private void SetTeachingClassAssignmentFilter(TeachingClassInfo teachingClass, string filterKey)
+        {
+            if (teachingClass == null || string.IsNullOrWhiteSpace(teachingClass.ClassId))
+            {
+                return;
+            }
+
+            var normalizedFilter = NormalizeTeachingClassAssignmentFilter(filterKey);
+            if (string.Equals(normalizedFilter, TeachingClassAssignmentFilterAll, StringComparison.OrdinalIgnoreCase))
+            {
+                _teachingClassAssignmentFiltersByClassId.Remove(teachingClass.ClassId);
+            }
+            else
+            {
+                _teachingClassAssignmentFiltersByClassId[teachingClass.ClassId] = normalizedFilter;
+            }
+
+            if (_activeTeachingClass != null
+                && string.Equals(_activeTeachingClass.ClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase))
+            {
+                RenderProfessorDashboard();
+            }
+        }
+
+        private int GetTeachingClassAssignmentSubmittedCount(TeachingClassHomePostInfo post)
+        {
+            return (post?.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                .Select(item => item.StudentUserId)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+        }
+
+        private int GetTeachingClassAssignmentReviewedCount(TeachingClassHomePostInfo post)
+        {
+            return (post?.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                .Count(item => item.Review != null);
+        }
+
+        private bool IsTeachingClassAssignmentOverdueForProfessor(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post)
+        {
+            var hasLateSubmission = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>()).Any(item => item.IsLate);
+            if (hasLateSubmission)
+            {
+                return true;
+            }
+
+            if (!post.ActivityDueAt.HasValue || post.ActivityDueAt.Value >= DateTime.Now)
+            {
+                return false;
+            }
+
+            var submittedCount = GetTeachingClassAssignmentSubmittedCount(post);
+            var totalStudents = Math.Max(1, teachingClass.StudentSummaries.Count);
+            return submittedCount < totalStudents;
+        }
+
+        private bool IsTeachingClassAssignmentOverdueForStudent(TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo? submission)
+        {
+            if (submission?.IsLate == true)
+            {
+                return true;
+            }
+
+            return submission == null
+                && post.ActivityDueAt.HasValue
+                && post.ActivityDueAt.Value < DateTime.Now;
+        }
+
+        private bool DoesTeachingClassAssignmentMatchFilter(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, bool canManage, string filterKey)
+        {
+            var normalizedFilter = NormalizeTeachingClassAssignmentFilter(filterKey);
+            if (string.Equals(normalizedFilter, TeachingClassAssignmentFilterAll, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var submission = GetCurrentUserTeachingClassAssignmentSubmission(post);
+            var submittedCount = GetTeachingClassAssignmentSubmittedCount(post);
+            var reviewedCount = GetTeachingClassAssignmentReviewedCount(post);
+
+            return normalizedFilter switch
+            {
+                TeachingClassAssignmentFilterPending => canManage
+                    ? submittedCount > reviewedCount
+                    : submission != null && submission.Review == null,
+                TeachingClassAssignmentFilterOverdue => canManage
+                    ? IsTeachingClassAssignmentOverdueForProfessor(teachingClass, post)
+                    : IsTeachingClassAssignmentOverdueForStudent(post, submission),
+                TeachingClassAssignmentFilterReviewed => canManage
+                    ? submittedCount > 0 && submittedCount == reviewedCount
+                    : submission?.Review != null,
+                TeachingClassAssignmentFilterNoSubmission => canManage
+                    ? submittedCount == 0
+                    : submission == null,
+                _ => true
+            };
+        }
+
+        private List<TeachingClassAssignmentFilterOption> BuildTeachingClassAssignmentFilterOptions(TeachingClassInfo teachingClass, bool canManage)
+        {
+            var posts = GetTeachingClassAssignmentPosts(teachingClass);
+            var options = new List<TeachingClassAssignmentFilterOption>();
+            var filterDefinitions = new[]
+            {
+                (Key: TeachingClassAssignmentFilterAll, Label: "Todas", ProfessorDescription: "sem corte", StudentDescription: "visão completa"),
+                (Key: TeachingClassAssignmentFilterPending, Label: "Pendente", ProfessorDescription: "aguardando correção", StudentDescription: "aguardando feedback"),
+                (Key: TeachingClassAssignmentFilterOverdue, Label: "Em atraso", ProfessorDescription: "prazo vencido ou envio tardio", StudentDescription: "prazo vencido ou envio tardio"),
+                (Key: TeachingClassAssignmentFilterReviewed, Label: "Corrigida", ProfessorDescription: "fluxo devolvido", StudentDescription: "nota publicada"),
+                (Key: TeachingClassAssignmentFilterNoSubmission, Label: "Sem entrega", ProfessorDescription: "sem nenhum envio", StudentDescription: "ainda não enviada")
+            };
+
+            foreach (var definition in filterDefinitions)
+            {
+                var count = string.Equals(definition.Key, TeachingClassAssignmentFilterAll, StringComparison.OrdinalIgnoreCase)
+                    ? posts.Count
+                    : posts.Count(post => DoesTeachingClassAssignmentMatchFilter(teachingClass, post, canManage, definition.Key));
+
+                options.Add(new TeachingClassAssignmentFilterOption
+                {
+                    Key = definition.Key,
+                    Label = definition.Label,
+                    Description = $"{count} atividade(s) • {(canManage ? definition.ProfessorDescription : definition.StudentDescription)}",
+                    Count = count
+                });
+            }
+
+            return options;
+        }
+
+        private List<TeachingClassUiNotification> BuildTeachingClassAssignmentNotifications(TeachingClassInfo teachingClass, bool canManage)
+        {
+            var notifications = new List<TeachingClassUiNotification>();
+            var posts = GetTeachingClassAssignmentPosts(teachingClass);
+            var now = DateTime.Now;
+            var recentThreshold = now.AddDays(-3);
+            var currentUserId = GetCurrentUserId();
+
+            foreach (var post in posts)
+            {
+                var safeTitle = string.IsNullOrWhiteSpace(post.Title) ? "atividade sem título" : post.Title.Trim();
+                var submission = GetCurrentUserTeachingClassAssignmentSubmission(post);
+
+                if (post.ActivityDueAt.HasValue)
+                {
+                    var dueAt = post.ActivityDueAt.Value;
+                    if (dueAt > now && dueAt - now <= TimeSpan.FromHours(48))
+                    {
+                        if (canManage)
+                        {
+                            var submittedCount = GetTeachingClassAssignmentSubmittedCount(post);
+                            var totalStudents = Math.Max(1, teachingClass.StudentSummaries.Count);
+                            if (submittedCount < totalStudents)
+                            {
+                                notifications.Add(new TeachingClassUiNotification
+                                {
+                                    Id = $"deadline:{post.PostId}",
+                                    Title = "Prazo próximo",
+                                    Message = $"{safeTitle} vence {FormatRelativeDate(dueAt)}. {submittedCount}/{totalStudents} envio(s) recebidos até agora.",
+                                    Type = "deadline",
+                                    RelatedPostId = post.PostId,
+                                    CreatedAt = dueAt
+                                });
+                            }
+                        }
+                        else if (submission == null)
+                        {
+                            notifications.Add(new TeachingClassUiNotification
+                            {
+                                Id = $"deadline:{post.PostId}:{currentUserId}",
+                                Title = "Prazo próximo",
+                                Message = $"{safeTitle} vence em {dueAt:dd/MM 'às' HH:mm}. Organize sua entrega antes do fechamento do prazo.",
+                                Type = "deadline",
+                                RelatedPostId = post.PostId,
+                                CreatedAt = dueAt
+                            });
+                        }
+                    }
+                }
+
+                foreach (var item in post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                {
+                    if (canManage && item.UpdatedAt >= recentThreshold)
+                    {
+                        notifications.Add(new TeachingClassUiNotification
+                        {
+                            Id = $"submission:{post.PostId}:{item.StudentUserId}:{item.UpdatedAt.Ticks}",
+                            Title = "Nova entrega recebida",
+                            Message = $"{(string.IsNullOrWhiteSpace(item.StudentName) ? "Aluno da turma" : item.StudentName)} enviou {safeTitle}{(item.IsLate ? " com atraso" : string.Empty)}.",
+                            Type = "submission",
+                            RelatedPostId = post.PostId,
+                            CreatedAt = item.UpdatedAt
+                        });
+                    }
+
+                    if (item.Review != null && item.Review.GradedAt >= recentThreshold)
+                    {
+                        if (canManage)
+                        {
+                            notifications.Add(new TeachingClassUiNotification
+                            {
+                                Id = $"review:{post.PostId}:{item.StudentUserId}:{item.Review.GradedAt.Ticks}",
+                                Title = "Nota publicada",
+                                Message = $"{(string.IsNullOrWhiteSpace(item.StudentName) ? "Aluno da turma" : item.StudentName)} recebeu {item.Review.GradeValue}/{item.Review.MaxPoints} em {safeTitle}.",
+                                Type = "review",
+                                RelatedPostId = post.PostId,
+                                CreatedAt = item.Review.GradedAt
+                            });
+                        }
+                        else if (!string.IsNullOrWhiteSpace(currentUserId)
+                            && string.Equals(item.StudentUserId, currentUserId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            notifications.Add(new TeachingClassUiNotification
+                            {
+                                Id = $"review:{post.PostId}:{currentUserId}:{item.Review.GradedAt.Ticks}",
+                                Title = "Nota publicada",
+                                Message = $"Sua entrega em {safeTitle} recebeu {item.Review.GradeValue}/{item.Review.MaxPoints}.",
+                                Type = "review",
+                                RelatedPostId = post.PostId,
+                                CreatedAt = item.Review.GradedAt
+                            });
+                        }
+                    }
+                }
+            }
+
+            return notifications
+                .OrderByDescending(item => item.CreatedAt)
+                .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .Take(6)
+                .ToList();
+        }
+
+        private Brush GetTeachingClassNotificationBrush(string notificationType)
+        {
+            return notificationType switch
+            {
+                "deadline" => new SolidColorBrush(Color.FromRgb(234, 88, 12)),
+                "submission" => new SolidColorBrush(Color.FromRgb(37, 99, 235)),
+                "review" => new SolidColorBrush(Color.FromRgb(22, 163, 74)),
+                _ => GetThemeBrush("AccentBrush")
+            };
+        }
+
+        private string GetTeachingClassNotificationTypeLabel(string notificationType)
+        {
+            return notificationType switch
+            {
+                "deadline" => "Prazo",
+                "submission" => "Entrega",
+                "review" => "Nota",
+                _ => "Aviso"
+            };
+        }
+
+        private Border CreateTeachingClassNotificationCard(TeachingClassInfo teachingClass, TeachingClassUiNotification notification, Brush accentBrush)
+        {
+            var notificationBrush = GetTeachingClassNotificationBrush(notification.Type);
+            var relatedPost = GetTeachingClassAssignmentPosts(teachingClass)
+                .FirstOrDefault(item => string.Equals(item.PostId, notification.RelatedPostId, StringComparison.OrdinalIgnoreCase));
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var content = new StackPanel();
+            var chipRow = new WrapPanel();
+            chipRow.Children.Add(CreateStaticTeamChip(GetTeachingClassNotificationTypeLabel(notification.Type), CreateSoftAccentBrush(notificationBrush, 24), notificationBrush));
+            chipRow.Children.Add(CreateStaticTeamChip(notification.CreatedAt > DateTime.Now ? $"Vence {notification.CreatedAt:dd/MM HH:mm}" : notification.CreatedAt.ToString("dd/MM HH:mm"), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+            content.Children.Add(chipRow);
+            content.Children.Add(new TextBlock
+            {
+                Text = notification.Title,
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 12.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = notification.Message,
+                Margin = new Thickness(0, 6, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+            layout.Children.Add(content);
+
+            if (relatedPost != null)
+            {
+                var openButton = CreateDialogActionButton("Abrir atividade", Brushes.Transparent, accentBrush, GetThemeBrush("CardBorderBrush"), 132);
+                openButton.Margin = new Thickness(14, 0, 0, 0);
+                openButton.Click += (_, __) => ShowTeachingClassAssignmentDetailsDialog(teachingClass, relatedPost, accentBrush);
+                Grid.SetColumn(openButton, 1);
+                layout.Children.Add(openButton);
+            }
+
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 0, 12),
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Child = layout
+            };
+        }
+
         private bool CanCurrentUserInteractWithTeachingClassFeed(TeachingClassInfo teachingClass)
         {
             var currentUserId = GetCurrentUserId();
@@ -15604,8 +16983,16 @@ namespace MeuApp
 
             if (ProfessorDashboardStatusText != null)
             {
-                ProfessorDashboardStatusText.Text = $"Publicação removida de {teachingClass.ClassName}.";
+                ProfessorDashboardStatusText.Text = post.AssignmentEnabled
+                    ? $"Atividade formal removida de {teachingClass.ClassName}."
+                    : $"Publicação removida de {teachingClass.ClassName}.";
                 ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+            }
+
+            if (post.AssignmentEnabled)
+            {
+                teachingClass.AssignmentsReady = true;
+                teachingClass.AssignmentsLoadedAt = DateTime.Now;
             }
 
             RenderProfessorDashboard();
@@ -18316,6 +19703,17 @@ namespace MeuApp
                     _ = EnsureTeachingClassHomeFeedAsync(teachingClass);
                     RenderProfessorDashboard();
                 }));
+            sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
+                "Tarefas e avaliações",
+                PackIconMaterialKind.ClipboardTextOutline,
+                accentBrush,
+                string.Equals(_activeTeachingClassModule, TeachingClassModuleAssignments, StringComparison.OrdinalIgnoreCase),
+                () =>
+                {
+                    _activeTeachingClassModule = TeachingClassModuleAssignments;
+                    _ = EnsureTeachingClassAssignmentsAsync(teachingClass);
+                    RenderProfessorDashboard();
+                }));
 
             var sectionsScroll = new ScrollViewer
             {
@@ -18345,6 +19743,10 @@ namespace MeuApp
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand
             };
+            if (TryFindResource("DialogStepButtonStyle") is Style stepButtonStyle)
+            {
+                button.Style = stepButtonStyle;
+            }
             button.Click += (_, __) => onClick();
 
             var layout = new Grid();
@@ -18483,16 +19885,21 @@ namespace MeuApp
         private UIElement CreateTeachingClassTeamsShellContent(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
         {
             var canPublish = CanCurrentUserPublishTeachingClassFeed(teachingClass);
+            var isAssignmentsModule = string.Equals(_activeTeachingClassModule, TeachingClassModuleAssignments, StringComparison.OrdinalIgnoreCase);
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             var topBar = CreateTeachingClassWorkspaceHeader(
-                "Docência / Página inicial da turma",
-                $"Mural pedagógico de {teachingClass.ClassName}",
-                canManage
-                    ? "O topo concentra Turmas, atualização, edição, código e operação docente. A página principal fica dedicada ao mural da turma."
-                    : "O topo concentra Turmas, atualização, código e consulta da composição da sala. A página principal fica dedicada ao mural da turma.",
+                isAssignmentsModule ? "Docência / tarefas e avaliações" : "Docência / página inicial da turma",
+                isAssignmentsModule ? $"Tarefas e avaliações de {teachingClass.ClassName}" : $"Mural pedagógico de {teachingClass.ClassName}",
+                isAssignmentsModule
+                    ? (canManage
+                        ? "Fluxo formal de atividades, entregas, notas e feedback da turma."
+                        : "Veja o que está pendente, entregue sua atividade e acompanhe nota e feedback.")
+                    : (canManage
+                        ? "O topo concentra Turmas, atualização, edição, código e operação docente. A página principal fica dedicada ao mural da turma."
+                        : "O topo concentra Turmas, atualização, código e consulta da composição da sala. A página principal fica dedicada ao mural da turma."),
                 _teachingClasses,
                 teachingClass,
                 accentBrush,
@@ -18504,8 +19911,15 @@ namespace MeuApp
                 Margin = new Thickness(22)
             };
 
-            var homeFeed = CreateTeachingClassHomeFeedSurface(teachingClass, accentBrush, canManage);
-            mainStack.Children.Add(homeFeed);
+            if (isAssignmentsModule)
+            {
+                mainStack.Children.Add(CreateTeachingClassAssignmentsSurface(teachingClass, accentBrush, canManage));
+            }
+            else
+            {
+                var homeFeed = CreateTeachingClassHomeFeedSurface(teachingClass, accentBrush, canManage);
+                mainStack.Children.Add(homeFeed);
+            }
 
             var contentScrollViewer = new ScrollViewer
             {
@@ -18516,7 +19930,7 @@ namespace MeuApp
             var contentHost = new Grid();
             contentHost.Children.Add(contentScrollViewer);
 
-            if (canPublish)
+            if (!isAssignmentsModule && canPublish)
             {
                 var composeButton = new Button
                 {
@@ -18562,6 +19976,53 @@ namespace MeuApp
                 };
                 composeButton.Click += (_, __) => ShowTeachingClassPostComposerDialog(teachingClass, accentBrush);
                 contentHost.Children.Add(composeButton);
+            }
+            else if (isAssignmentsModule && canManage)
+            {
+                var assignmentButton = new Button
+                {
+                    Padding = new Thickness(16, 12, 16, 12),
+                    Margin = new Thickness(0, 0, 24, 24),
+                    Background = accentBrush,
+                    Foreground = Brushes.White,
+                    BorderThickness = new Thickness(0),
+                    Cursor = Cursors.Hand,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Effect = new System.Windows.Media.Effects.DropShadowEffect
+                    {
+                        BlurRadius = 20,
+                        ShadowDepth = 4,
+                        Opacity = 0.18,
+                        Color = Colors.Black
+                    },
+                    Content = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Children =
+                        {
+                            new PackIconMaterial
+                            {
+                                Kind = PackIconMaterialKind.ClipboardTextOutline,
+                                Width = 16,
+                                Height = 16,
+                                Foreground = Brushes.White,
+                                VerticalAlignment = VerticalAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = "Nova atividade",
+                                Margin = new Thickness(8, 0, 0, 0),
+                                FontSize = 12,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = Brushes.White,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        }
+                    }
+                };
+                assignmentButton.Click += (_, __) => ShowTeachingClassAssignmentComposerDialog(teachingClass, accentBrush);
+                contentHost.Children.Add(assignmentButton);
             }
 
             Grid.SetRow(contentHost, 1);
@@ -18667,12 +20128,12 @@ namespace MeuApp
             var postTypeBox = new ComboBox
             {
                 Height = 46,
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Aviso / material", Value = "announcement" },
-                    new { Label = "Atividade", Value = "activity" }
+                    new DialogSelectionOption { Label = "Aviso / material", Value = "announcement" },
+                    new DialogSelectionOption { Label = "Atividade", Value = "activity" }
                 },
                 SelectedValue = "announcement"
             };
@@ -18693,14 +20154,14 @@ namespace MeuApp
             var permissionScopeBox = new ComboBox
             {
                 Height = 46,
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Turma", Value = "class" },
-                    new { Label = "Curso", Value = "course" },
-                    new { Label = "Equipe docente", Value = "staff" },
-                    new { Label = "Privado", Value = "private" }
+                    new DialogSelectionOption { Label = "Turma", Value = "class" },
+                    new DialogSelectionOption { Label = "Curso", Value = "course" },
+                    new DialogSelectionOption { Label = "Equipe docente", Value = "staff" },
+                    new DialogSelectionOption { Label = "Privado", Value = "private" }
                 },
                 SelectedValue = "class"
             };
@@ -19032,12 +20493,12 @@ namespace MeuApp
             var postTypeBox = new ComboBox
             {
                 Height = 46,
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Aviso / material", Value = "announcement" },
-                    new { Label = "Atividade", Value = "activity" }
+                    new DialogSelectionOption { Label = "Aviso / material", Value = "announcement" },
+                    new DialogSelectionOption { Label = "Atividade", Value = "activity" }
                 },
                 SelectedValue = string.IsNullOrWhiteSpace(post.PostType) ? "announcement" : post.PostType
             };
@@ -21239,7 +22700,3388 @@ namespace MeuApp
             return sidebar;
         }
 
-        private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
+        private UIElement CreateTeachingClassAssignmentsSurface(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage)
+        {
+            var assignmentPosts = GetTeachingClassAssignmentPosts(teachingClass);
+            var selectedFilter = GetTeachingClassAssignmentFilter(teachingClass);
+            var filterOptions = BuildTeachingClassAssignmentFilterOptions(teachingClass, canManage);
+            var filteredPosts = assignmentPosts
+                .Where(post => DoesTeachingClassAssignmentMatchFilter(teachingClass, post, canManage, selectedFilter))
+                .ToList();
+            var notifications = BuildTeachingClassAssignmentNotifications(teachingClass, canManage);
+            var summaryStack = new StackPanel();
+            var metrics = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+
+            if (canManage)
+            {
+                var totalStudents = teachingClass.StudentSummaries.Count;
+                var totalAssignments = assignmentPosts.Count;
+                var totalSubmitted = assignmentPosts.Sum(GetTeachingClassAssignmentSubmittedCount);
+                var totalReviewed = assignmentPosts.Sum(GetTeachingClassAssignmentReviewedCount);
+                var pendingReview = Math.Max(0, totalSubmitted - totalReviewed);
+
+                metrics.Children.Add(CreateTeamMetricCard("Atividades", totalAssignments.ToString(), "publicadas", Color.FromRgb(37, 99, 235)));
+                metrics.Children.Add(CreateTeamMetricCard("Entregas", totalSubmitted.ToString(), totalStudents == 1 ? "aluno com envio" : "envios recebidos", Color.FromRgb(16, 185, 129)));
+                metrics.Children.Add(CreateTeamMetricCard("Correções", totalReviewed.ToString(), "devolutivas concluídas", Color.FromRgb(124, 58, 237)));
+                metrics.Children.Add(CreateTeamMetricCard("Pendentes", pendingReview.ToString(), "aguardando nota", Color.FromRgb(245, 158, 11)));
+
+                summaryStack.Children.Add(new TextBlock
+                {
+                    Text = pendingReview > 0
+                        ? $"Existem {pendingReview} entrega(s) aguardando nota ou feedback. Este módulo separa o fluxo formal de avaliação do mural pedagógico da turma."
+                        : "O fluxo formal já está organizado: atividades, questionários, entregas e devolutivas ficam concentrados aqui, sem poluir a Página inicial.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                });
+            }
+            else
+            {
+                var studentRows = assignmentPosts
+                    .Select(post => new { Post = post, Submission = GetCurrentUserTeachingClassAssignmentSubmission(post) })
+                    .ToList();
+                var newCount = studentRows.Count(item => item.Submission == null && DateTime.Now - item.Post.PublishedAt <= TimeSpan.FromHours(72));
+                var onTimeCount = studentRows.Count(item => item.Submission == null && (!item.Post.ActivityDueAt.HasValue || item.Post.ActivityDueAt.Value.Date >= DateTime.Today));
+                var overdueCount = studentRows.Count(item => item.Submission == null && item.Post.ActivityDueAt.HasValue && item.Post.ActivityDueAt.Value.Date < DateTime.Today);
+                var gradedCount = studentRows.Count(item => item.Submission?.Review != null);
+
+                metrics.Children.Add(CreateTeamMetricCard("Novas", newCount.ToString(), "ainda sem envio", Color.FromRgb(37, 99, 235)));
+                metrics.Children.Add(CreateTeamMetricCard("Em dia", onTimeCount.ToString(), "com prazo ativo", Color.FromRgb(16, 185, 129)));
+                metrics.Children.Add(CreateTeamMetricCard("Em atraso", overdueCount.ToString(), "exigem atenção", Color.FromRgb(220, 38, 38)));
+                metrics.Children.Add(CreateTeamMetricCard("Corrigidas", gradedCount.ToString(), "nota devolvida", Color.FromRgb(124, 58, 237)));
+
+                summaryStack.Children.Add(new TextBlock
+                {
+                    Text = overdueCount > 0
+                        ? $"Há {overdueCount} atividade(s) com prazo original encerrado. Abra cada tarefa para verificar se a entrega tardia ainda está liberada e acompanhar a devolutiva quando ela chegar."
+                        : "Aqui você acompanha o que precisa entregar, o que já foi enviado e o que já recebeu nota e feedback.",
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                });
+            }
+
+            summaryStack.Children.Add(metrics);
+
+            if (!string.Equals(selectedFilter, TeachingClassAssignmentFilterAll, StringComparison.OrdinalIgnoreCase))
+            {
+                summaryStack.Children.Add(new TextBlock
+                {
+                    Text = $"Filtro ativo: {filterOptions.FirstOrDefault(item => string.Equals(item.Key, selectedFilter, StringComparison.OrdinalIgnoreCase))?.Label ?? "Personalizado"}.",
+                    Margin = new Thickness(0, 12, 0, 0),
+                    FontSize = 11.5,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+
+            var filtersHost = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            foreach (var option in filterOptions)
+            {
+                var capturedOption = option;
+                filtersHost.Children.Add(CreateDialogChoiceCard(
+                    capturedOption.Label,
+                    capturedOption.Description,
+                    accentBrush,
+                    string.Equals(selectedFilter, capturedOption.Key, StringComparison.OrdinalIgnoreCase),
+                    (_, __) => SetTeachingClassAssignmentFilter(teachingClass, capturedOption.Key),
+                    188));
+            }
+
+            var notificationsHost = new StackPanel();
+            if (notifications.Count == 0)
+            {
+                notificationsHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Sem alertas críticos agora",
+                    canManage
+                        ? "Novas entregas, prazo próximo e notas publicadas aparecem aqui para evitar que a correção se perca no meio do mural."
+                        : "Quando surgir prazo próximo ou quando a nota da sua entrega for publicada, este painel vai destacar a atualização."));
+            }
+            else
+            {
+                foreach (var notification in notifications)
+                {
+                    notificationsHost.Children.Add(CreateTeachingClassNotificationCard(teachingClass, notification, accentBrush));
+                }
+            }
+
+            if (_teachingClassAssignmentsLoadInFlight
+                && string.Equals(_teachingClassAssignmentsLoadingClassId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase)
+                && !teachingClass.AssignmentsReady)
+            {
+                summaryStack.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 16, 0, 0),
+                    Child = CreateSearchSlideInfoCard(
+                        "Carregando tarefas e avaliações",
+                        "Estamos sincronizando entregas, respostas de questionário, notas e feedbacks desta turma.")
+                });
+            }
+
+            var listHost = new StackPanel();
+            if (assignmentPosts.Count == 0)
+            {
+                listHost.Children.Add(CreateSearchSlideInfoCard(
+                    canManage ? "Nenhuma atividade formal publicada" : "Nenhuma tarefa publicada ainda",
+                    canManage
+                        ? "Publique sua primeira atividade ou avaliação pelo botão flutuante para abrir um fluxo com entrega, correção e feedback."
+                        : "Quando o professor publicar uma atividade formal ou um questionário, ela aparecerá aqui com prazo, status e devolutiva."));
+            }
+            else if (filteredPosts.Count == 0)
+            {
+                listHost.Children.Add(CreateSearchSlideInfoCard(
+                    "Nenhuma atividade corresponde ao filtro atual",
+                    "Troque o filtro acima para voltar à lista completa ou para focar em outro recorte do fluxo."));
+            }
+            else
+            {
+                foreach (var post in filteredPosts)
+                {
+                    listHost.Children.Add(CreateTeachingClassAssignmentOverviewCard(teachingClass, post, accentBrush, canManage));
+                }
+            }
+
+            var host = new StackPanel();
+            host.Children.Add(CreateDialogSectionCard(
+                "Pulso acadêmico",
+                canManage
+                    ? "Visão rápida do fluxo formal de tarefas, avaliações e correções desta turma."
+                    : "Sua fila atual de entregas, prazos e devolutivas.",
+                accentBrush,
+                summaryStack,
+                new Thickness(0, 0, 0, 16)));
+            host.Children.Add(CreateDialogSectionCard(
+                "Filtros rápidos",
+                canManage
+                    ? "Separe as atividades que ainda precisam de ação, as que já foram corrigidas ou as que ainda não receberam nenhuma entrega."
+                    : "Filtre sua lista por etapa do fluxo para encontrar mais rápido o que falta enviar, o que atrasou e o que já foi corrigido.",
+                accentBrush,
+                filtersHost,
+                new Thickness(0, 0, 0, 16)));
+            host.Children.Add(CreateDialogSectionCard(
+                "Alertas da Docência",
+                canManage
+                    ? "Prazo próximo, novas entregas e notas publicadas aparecem aqui como um radar operacional da turma."
+                    : "Prazo próximo e publicação de nota aparecem aqui para você não depender só do mural da turma.",
+                accentBrush,
+                notificationsHost,
+                new Thickness(0, 0, 0, 16)));
+            host.Children.Add(CreateDialogSectionCard(
+                "Tarefas e avaliações",
+                canManage
+                    ? "Abra uma atividade para receber entregas, lançar nota, editar instruções ou devolver feedback para cada aluno."
+                    : "Abra uma atividade para consultar instruções, responder questionários, anexar arquivos e acompanhar a correção.",
+                accentBrush,
+                listHost,
+                new Thickness(0, 0, 0, 0)));
+
+            return host;
+        }
+
+        private Border CreateTeachingClassAssignmentOverviewCard(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, Brush accentBrush, bool canManage)
+        {
+            var submission = GetCurrentUserTeachingClassAssignmentSubmission(post);
+            var uniqueSubmittedCount = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                .Select(item => item.StudentUserId)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count();
+            var reviewedCount = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>()).Count(item => item.Review != null);
+            var statusBrush = GetTeachingClassAssignmentStudentStatusBrush(post, submission);
+            var primaryLabel = canManage
+                ? "Abrir entregas"
+                : submission == null
+                    ? "Entregar"
+                    : "Ver atividade";
+
+            var card = new Border
+            {
+                Margin = new Thickness(0, 0, 0, 14),
+                Padding = new Thickness(18),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(20),
+                Effect = new DropShadowEffect
+                {
+                    BlurRadius = 18,
+                    ShadowDepth = 0,
+                    Opacity = _appDarkModeEnabled ? 0.28 : 0.08,
+                    Color = Colors.Black
+                }
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new Border
+            {
+                Width = 76,
+                Height = 5,
+                Margin = new Thickness(0, 0, 0, 16),
+                CornerRadius = new CornerRadius(999),
+                Background = accentBrush,
+                Opacity = 0.92,
+                HorizontalAlignment = HorizontalAlignment.Left
+            });
+
+            stack.Children.Add(new WrapPanel
+            {
+                Children =
+                {
+                    CreateStaticTeamChip(GetTeachingClassAssignmentModeLabel(post), CreateSoftAccentBrush(accentBrush, 24), accentBrush),
+                    CreateStaticTeamChip(post.ActivityDueAt.HasValue ? $"Prazo {post.ActivityDueAt.Value:dd/MM/yyyy}" : "Sem prazo", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip($"{post.MaxPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip(post.AllowLateSubmission ? "Aceita atraso" : "Fecha no prazo", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                    CreateStaticTeamChip(post.Attachments.Count == 0 ? "Sem anexos" : $"{post.Attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                }
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(post.Title) ? "Atividade sem título" : post.Title,
+                Margin = new Thickness(0, 14, 0, 0),
+                FontSize = 17,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            if (!string.IsNullOrWhiteSpace(post.Content))
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = post.Content,
+                    Margin = new Thickness(0, 10, 0, 0),
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20,
+                    MaxWidth = 780
+                });
+            }
+
+            if (canManage)
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = $"{uniqueSubmittedCount}/{Math.Max(1, teachingClass.StudentSummaries.Count)} aluno(s) já enviaram entrega. {Math.Max(0, uniqueSubmittedCount - reviewedCount)} ainda aguardam nota ou feedback.",
+                    Margin = new Thickness(0, 12, 0, 0),
+                    FontSize = 11.5,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+            else
+            {
+                stack.Children.Add(new Border
+                {
+                    Margin = new Thickness(0, 12, 0, 0),
+                    Padding = new Thickness(12),
+                    Background = CreateSoftAccentBrush(statusBrush, 18),
+                    BorderBrush = statusBrush,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(14),
+                    Child = new TextBlock
+                    {
+                        Text = submission?.Review != null
+                            ? $"{GetTeachingClassAssignmentStudentStatusLabel(post, submission)} • Nota {submission.Review.GradeValue}/{submission.Review.MaxPoints}"
+                            : GetTeachingClassAssignmentStudentStatusLabel(post, submission),
+                        FontSize = 11.5,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = statusBrush,
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                });
+            }
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+            var openButton = CreateDialogActionButton(primaryLabel, accentBrush, Brushes.White, Brushes.Transparent, 144);
+            openButton.Margin = new Thickness(0, 0, 10, 0);
+            openButton.Click += async (_, __) =>
+            {
+                await EnsureTeachingClassAssignmentsAsync(teachingClass, force: true);
+                ShowTeachingClassAssignmentDetailsDialog(teachingClass, post, accentBrush);
+            };
+            actions.Children.Add(openButton);
+
+            if (canManage)
+            {
+                var editButton = CreateDialogActionButton("Editar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 112);
+                editButton.Click += (_, __) => ShowTeachingClassAssignmentComposerDialog(teachingClass, accentBrush, post);
+                actions.Children.Add(editButton);
+
+                if (CanCurrentUserDeleteTeachingClassPost(teachingClass, post))
+                {
+                    var deleteBrush = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    var deleteButton = CreateDialogActionButton("Excluir", Brushes.Transparent, deleteBrush, GetThemeBrush("CardBorderBrush"), 112);
+                    deleteButton.Click += async (_, __) =>
+                    {
+                        if (!ShowStyledConfirmationDialog(
+                                "DOCÊNCIA",
+                                "Excluir atividade",
+                                $"A atividade {(string.IsNullOrWhiteSpace(post.Title) ? "sem título" : post.Title)} será removida desta turma, junto com entregas e feedbacks vinculados.",
+                                "Excluir",
+                                deleteBrush))
+                        {
+                            return;
+                        }
+
+                        await DeleteTeachingClassPostAsync(teachingClass, post);
+                    };
+                    actions.Children.Add(deleteButton);
+                }
+            }
+
+            stack.Children.Add(actions);
+            card.Child = stack;
+            return card;
+        }
+
+        private void ShowTeachingClassAssignmentComposerDialog(TeachingClassInfo teachingClass, Brush accentBrush, TeachingClassHomePostInfo? existingPost = null)
+        {
+            if (_teachingClassService == null || !CanManageTeachingClass(teachingClass))
+            {
+                return;
+            }
+
+            var isEditing = existingPost != null;
+            var dialog = CreateStyledDialogWindow(
+                isEditing ? $"Editar atividade • {teachingClass.ClassName}" : $"Nova atividade • {teachingClass.ClassName}",
+                1040,
+                900,
+                760,
+                true);
+
+            var selectedAssignmentMode = string.Equals(existingPost?.AssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase) ? "quiz" : "material";
+            var allowLateSubmission = existingPost?.AllowLateSubmission ?? true;
+            var selectedComposerSection = "essencial";
+
+            var titleBox = new TextBox { Height = 46, Text = existingPost?.Title ?? string.Empty };
+            var descriptionBox = new TextBox
+            {
+                MinHeight = 132,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Text = existingPost?.Content ?? string.Empty
+            };
+            var linkBox = new TextBox { Height = 46, Text = existingPost?.LinkUrl ?? string.Empty };
+            var dueDatePicker = new DatePicker
+            {
+                Height = 46,
+                SelectedDate = existingPost?.ActivityDueAt
+            };
+            var maxPointsBox = new TextBox
+            {
+                Height = 46,
+                Text = Math.Max(1, existingPost?.MaxPoints ?? 10).ToString()
+            };
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+
+            var existingAttachments = (existingPost?.Attachments ?? new List<TeachingClassPostAttachmentInfo>())
+                .Select(item => new TeachingClassPostAttachmentInfo
+                {
+                    AttachmentId = item.AttachmentId,
+                    FileName = item.FileName,
+                    PreviewImageDataUri = item.PreviewImageDataUri,
+                    PermissionScope = item.PermissionScope,
+                    StorageKind = item.StorageKind,
+                    StorageReference = item.StorageReference,
+                    MimeType = item.MimeType,
+                    SizeBytes = item.SizeBytes,
+                    Version = item.Version,
+                    AddedByUserId = item.AddedByUserId,
+                    AddedAt = item.AddedAt
+                })
+                .ToList();
+            var pendingAttachments = new List<PendingAttachmentFile>();
+            var attachmentsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+
+            var questionDrafts = (existingPost?.Questions ?? new List<TeachingClassActivityQuestionInfo>())
+                .Select(item => new TeachingClassActivityQuestionInfo
+                {
+                    QuestionId = item.QuestionId,
+                    Prompt = item.Prompt,
+                    HelpText = item.HelpText,
+                    ResponseKind = item.ResponseKind,
+                    Required = item.Required,
+                    Options = item.Options?.ToList() ?? new List<string>(),
+                    CorrectOptions = item.CorrectOptions?.ToList() ?? new List<string>()
+                })
+                .ToList();
+            var questionsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var questionPromptBox = new TextBox
+            {
+                MinHeight = 74,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            var questionHelpBox = new TextBox { Height = 46 };
+            var selectedQuestionResponseKind = "short-answer";
+            var editingQuestionId = string.Empty;
+            var questionOptionDrafts = new List<string>();
+            var questionOptionDraftText = string.Empty;
+            var questionOptionsEditorHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var questionCorrectOptionDrafts = new List<string>();
+            var questionAnswerKeyEditorHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var questionKindPreviewText = new TextBlock
+            {
+                FontSize = 11.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var questionStatusText = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var assignmentModeChoicesHost = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var latePolicyChoicesHost = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var questionKindChoicesHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var composerSidebarHost = new StackPanel();
+            Button? addQuestionButton = null;
+            Button? cancelQuestionEditButton = null;
+
+            Border? essentialSectionCard = null;
+            Border? materialsSectionCard = null;
+            Border? questionnaireSectionCard = null;
+
+            ApplyDialogInputStyle(titleBox);
+            ApplyDialogInputStyle(descriptionBox);
+            ApplyDialogInputStyle(linkBox);
+            ApplyDialogInputStyle(dueDatePicker);
+            ApplyDialogInputStyle(maxPointsBox);
+            ApplyDialogInputStyle(questionPromptBox);
+            ApplyDialogInputStyle(questionHelpBox);
+
+            bool QuestionUsesManualOptions(string responseKind)
+            {
+                return string.Equals(responseKind, "single-choice", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(responseKind, "multiple-choice", StringComparison.OrdinalIgnoreCase);
+            }
+
+            bool QuestionUsesAnswerKey(string responseKind)
+            {
+                return TeachingClassQuestionUsesChoiceOptions(responseKind);
+            }
+
+            List<string> BuildQuestionOptionsDraft()
+            {
+                if (string.Equals(selectedQuestionResponseKind, "true-false", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new List<string> { "Verdadeiro", "Falso" };
+                }
+
+                if (!QuestionUsesManualOptions(selectedQuestionResponseKind))
+                {
+                    return new List<string>();
+                }
+
+                return questionOptionDrafts
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .Select(item => item.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            void SyncQuestionCorrectOptionDrafts()
+            {
+                var availableOptions = BuildQuestionOptionsDraft();
+                questionCorrectOptionDrafts = questionCorrectOptionDrafts
+                    .Where(item => !string.IsNullOrWhiteSpace(item))
+                    .Select(item => item.Trim())
+                    .Where(item => availableOptions.Any(option => string.Equals(option, item, StringComparison.OrdinalIgnoreCase)))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (TeachingClassQuestionUsesSingleCorrectSelection(selectedQuestionResponseKind) && questionCorrectOptionDrafts.Count > 1)
+                {
+                    questionCorrectOptionDrafts = questionCorrectOptionDrafts.Take(1).ToList();
+                }
+            }
+
+            List<string> BuildQuestionCorrectOptionsDraft()
+            {
+                SyncQuestionCorrectOptionDrafts();
+                return questionCorrectOptionDrafts.ToList();
+            }
+
+            void RefreshQuestionEditorActionState()
+            {
+                if (addQuestionButton != null)
+                {
+                    addQuestionButton.Content = string.IsNullOrWhiteSpace(editingQuestionId)
+                        ? "Adicionar pergunta"
+                        : "Salvar edição";
+                }
+
+                if (cancelQuestionEditButton != null)
+                {
+                    cancelQuestionEditButton.Visibility = string.IsNullOrWhiteSpace(editingQuestionId)
+                        ? Visibility.Collapsed
+                        : Visibility.Visible;
+                }
+            }
+
+            void ResetQuestionDraftEditor(string? statusMessage = null)
+            {
+                editingQuestionId = string.Empty;
+                questionPromptBox.Clear();
+                questionHelpBox.Clear();
+                selectedQuestionResponseKind = "short-answer";
+                questionOptionDrafts.Clear();
+                questionOptionDraftText = string.Empty;
+                questionCorrectOptionDrafts.Clear();
+                RenderQuestionKindChoices();
+                RenderQuestionOptionsEditor();
+                RenderQuestionAnswerKeyEditor();
+                RefreshQuestionEditorActionState();
+
+                if (!string.IsNullOrWhiteSpace(statusMessage))
+                {
+                    questionStatusText.Text = statusMessage;
+                    questionStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                }
+            }
+
+            void LoadQuestionDraftForEditing(TeachingClassActivityQuestionInfo question)
+            {
+                editingQuestionId = question.QuestionId;
+                questionPromptBox.Text = question.Prompt ?? string.Empty;
+                questionHelpBox.Text = question.HelpText ?? string.Empty;
+                selectedQuestionResponseKind = question.ResponseKind;
+                questionOptionDrafts = GetTeachingClassQuestionEffectiveOptions(question);
+                if (!QuestionUsesManualOptions(selectedQuestionResponseKind))
+                {
+                    questionOptionDrafts.Clear();
+                }
+
+                questionOptionDraftText = string.Empty;
+                questionCorrectOptionDrafts = GetTeachingClassQuestionCorrectOptions(question);
+                RenderQuestionKindChoices();
+                RenderQuestionOptionsEditor();
+                RenderQuestionAnswerKeyEditor();
+                RefreshQuestionEditorActionState();
+                questionStatusText.Text = "Pergunta carregada para edição. Ajuste o enunciado, as alternativas ou o gabarito e salve novamente.";
+                questionStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                questionPromptBox.Focus();
+                questionPromptBox.Select(questionPromptBox.Text.Length, 0);
+            }
+
+            void NavigateComposerSection(string sectionKey)
+            {
+                Border? target = sectionKey switch
+                {
+                    "materiais" => materialsSectionCard,
+                    "questionario" => questionnaireSectionCard?.Visibility == Visibility.Visible ? questionnaireSectionCard : null,
+                    _ => essentialSectionCard
+                };
+
+                if (target == null)
+                {
+                    return;
+                }
+
+                selectedComposerSection = sectionKey;
+                RenderComposerSidebar();
+                target.BringIntoView();
+            }
+
+            Border CreateComposerSidebarCard()
+            {
+                var chips = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                chips.Children.Add(CreateStaticTeamChip(
+                    string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase) ? "Questionário" : "Atividade com entrega",
+                    CreateSoftAccentBrush(accentBrush, 24),
+                    accentBrush));
+                chips.Children.Add(CreateStaticTeamChip(
+                    allowLateSubmission ? "Aceita atraso" : "Encerra no prazo",
+                    GetThemeBrush("CardBackgroundBrush"),
+                    GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateStaticTeamChip(
+                    dueDatePicker.SelectedDate.HasValue ? $"Prazo {dueDatePicker.SelectedDate.Value:dd/MM}" : "Prazo pendente",
+                    GetThemeBrush("CardBackgroundBrush"),
+                    GetThemeBrush("PrimaryTextBrush")));
+
+                return new Border
+                {
+                    Padding = new Thickness(16),
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(18),
+                    Child = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Editor por etapas",
+                                FontSize = 13,
+                                FontWeight = FontWeights.Bold,
+                                Foreground = GetThemeBrush("PrimaryTextBrush")
+                            },
+                            new TextBlock
+                            {
+                                Text = "Use a navegação lateral para revisar o essencial, os materiais e o questionário sem perder contraste no modo noturno.",
+                                Margin = new Thickness(0, 8, 0, 0),
+                                FontSize = 11,
+                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                TextWrapping = TextWrapping.Wrap,
+                                LineHeight = 18
+                            },
+                            chips
+                        }
+                    }
+                };
+            }
+
+            void RenderComposerSidebar()
+            {
+                composerSidebarHost.Children.Clear();
+                composerSidebarHost.Children.Add(CreateComposerSidebarCard());
+                composerSidebarHost.Children.Add(new Border { Height = 12, Background = Brushes.Transparent });
+                composerSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Essencial", PackIconMaterialKind.ClipboardTextOutline, accentBrush, string.Equals(selectedComposerSection, "essencial", StringComparison.OrdinalIgnoreCase), () => NavigateComposerSection("essencial")));
+                composerSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Materiais", PackIconMaterialKind.FolderOutline, accentBrush, string.Equals(selectedComposerSection, "materiais", StringComparison.OrdinalIgnoreCase), () => NavigateComposerSection("materiais")));
+
+                if (string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+                {
+                    composerSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Questionário", PackIconMaterialKind.MessageTextOutline, accentBrush, string.Equals(selectedComposerSection, "questionario", StringComparison.OrdinalIgnoreCase), () => NavigateComposerSection("questionario")));
+                }
+            }
+
+            void RenderAssignmentModeChoices()
+            {
+                assignmentModeChoicesHost.Children.Clear();
+
+                foreach (var option in new[]
+                {
+                    (Label: "Atividade com entrega", Description: "Arquivos, links, observações e avaliação manual.", Value: "material"),
+                    (Label: "Questionário", Description: "Perguntas abertas no estilo formulário, com correção posterior.", Value: "quiz")
+                })
+                {
+                    var localOption = option;
+                    assignmentModeChoicesHost.Children.Add(CreateDialogChoiceCard(
+                        localOption.Label,
+                        localOption.Description,
+                        accentBrush,
+                        string.Equals(selectedAssignmentMode, localOption.Value, StringComparison.OrdinalIgnoreCase),
+                        (_, __) =>
+                        {
+                            selectedAssignmentMode = localOption.Value;
+                            if (string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+                            {
+                                selectedComposerSection = "questionario";
+                            }
+                            else if (string.Equals(selectedComposerSection, "questionario", StringComparison.OrdinalIgnoreCase))
+                            {
+                                selectedComposerSection = "essencial";
+                            }
+
+                            RenderAssignmentModeChoices();
+                            RefreshModeState();
+                            RenderComposerSidebar();
+
+                            if (string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+                            {
+                                questionnaireSectionCard?.BringIntoView();
+                            }
+                            else
+                            {
+                                essentialSectionCard?.BringIntoView();
+                            }
+                        },
+                        256));
+                }
+            }
+
+            void RenderLatePolicyChoices()
+            {
+                latePolicyChoicesHost.Children.Clear();
+
+                foreach (var option in new[]
+                {
+                    (Label: "Aceitar atraso", Description: "O aluno continua podendo enviar depois da data original.", Value: true, Brush: (Brush)new SolidColorBrush(Color.FromRgb(234, 88, 12))),
+                    (Label: "Encerrar no prazo", Description: "A entrega é bloqueada assim que o prazo expirar.", Value: false, Brush: (Brush)new SolidColorBrush(Color.FromRgb(220, 38, 38)))
+                })
+                {
+                    var localOption = option;
+                    latePolicyChoicesHost.Children.Add(CreateDialogChoiceCard(
+                        localOption.Label,
+                        localOption.Description,
+                        localOption.Brush,
+                        allowLateSubmission == localOption.Value,
+                        (_, __) =>
+                        {
+                            allowLateSubmission = localOption.Value;
+                            RenderLatePolicyChoices();
+                            RenderComposerSidebar();
+                        },
+                        256));
+                }
+            }
+
+            void RenderQuestionKindChoices()
+            {
+                questionKindChoicesHost.Children.Clear();
+                questionKindPreviewText.Text = $"Formato selecionado: {GetTeachingClassQuestionResponseKindLabel(selectedQuestionResponseKind)}";
+
+                foreach (var option in new[]
+                {
+                    (Label: "Resposta curta", Description: "Campo mais direto, ideal para respostas objetivas e rápidas.", Value: "short-answer"),
+                    (Label: "Parágrafo", Description: "Campo expandido para respostas mais longas, com contexto e argumentação.", Value: "paragraph"),
+                    (Label: "Escolha única", Description: "O aluno seleciona apenas uma alternativa entre várias opções.", Value: "single-choice"),
+                    (Label: "Múltipla escolha", Description: "Permite marcar mais de uma alternativa quando a pergunta pedir combinações.", Value: "multiple-choice"),
+                    (Label: "Verdadeiro ou falso", Description: "Cria automaticamente duas opções fixas para uma decisão rápida.", Value: "true-false")
+                })
+                {
+                    var localOption = option;
+                    var optionCard = CreateDialogChoiceCard(
+                        localOption.Label,
+                        localOption.Description,
+                        accentBrush,
+                        string.Equals(selectedQuestionResponseKind, localOption.Value, StringComparison.OrdinalIgnoreCase),
+                        (_, __) =>
+                        {
+                            selectedQuestionResponseKind = localOption.Value;
+                            if (!QuestionUsesManualOptions(selectedQuestionResponseKind))
+                            {
+                                questionOptionDrafts.Clear();
+                                questionOptionDraftText = string.Empty;
+                            }
+
+                            if (!QuestionUsesAnswerKey(selectedQuestionResponseKind))
+                            {
+                                questionCorrectOptionDrafts.Clear();
+                            }
+
+                            RenderQuestionKindChoices();
+                            RenderQuestionOptionsEditor();
+                            RenderQuestionAnswerKeyEditor();
+                        },
+                        double.NaN);
+                    optionCard.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    optionCard.Margin = new Thickness(0, 0, 0, 10);
+                    questionKindChoicesHost.Children.Add(optionCard);
+                }
+            }
+
+            void RenderQuestionOptionsEditor()
+            {
+                questionOptionsEditorHost.Children.Clear();
+
+                if (QuestionUsesManualOptions(selectedQuestionResponseKind))
+                {
+                    questionOptionsEditorHost.Children.Add(new TextBlock
+                    {
+                        Text = string.Equals(selectedQuestionResponseKind, "multiple-choice", StringComparison.OrdinalIgnoreCase)
+                            ? "Cadastre as alternativas que o aluno poderá marcar. Use pelo menos duas opções diferentes."
+                            : "Cadastre as alternativas que o aluno poderá escolher. Use pelo menos duas opções diferentes.",
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+
+                    var optionRow = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+                    optionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    optionRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var questionOptionBox = new TextBox
+                    {
+                        Height = 46,
+                        Margin = new Thickness(0, 0, 12, 0),
+                        Text = questionOptionDraftText
+                    };
+                    ApplyDialogInputStyle(questionOptionBox);
+                    questionOptionBox.TextChanged += (_, __) => questionOptionDraftText = questionOptionBox.Text;
+                    optionRow.Children.Add(questionOptionBox);
+
+                    var addQuestionOptionButton = CreateDialogActionButton("Adicionar opção", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 150);
+                    addQuestionOptionButton.Click += (_, __) =>
+                    {
+                        var optionText = questionOptionDraftText.Trim();
+                        if (string.IsNullOrWhiteSpace(optionText))
+                        {
+                            questionStatusText.Text = "Digite uma alternativa antes de adicioná-la à pergunta.";
+                            questionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        if (questionOptionDrafts.Any(item => string.Equals(item, optionText, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            questionStatusText.Text = "Essa alternativa já foi adicionada para esta pergunta.";
+                            questionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        questionOptionDrafts.Add(optionText);
+                        questionOptionDraftText = string.Empty;
+                        SyncQuestionCorrectOptionDrafts();
+                        questionStatusText.Text = $"{questionOptionDrafts.Count} alternativa(s) preparada(s) para esta pergunta.";
+                        questionStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                        RenderQuestionOptionsEditor();
+                        RenderQuestionAnswerKeyEditor();
+                    };
+
+                    Grid.SetColumn(addQuestionOptionButton, 1);
+                    optionRow.Children.Add(addQuestionOptionButton);
+                    questionOptionsEditorHost.Children.Add(optionRow);
+
+                    if (questionOptionDrafts.Count == 0)
+                    {
+                        questionOptionsEditorHost.Children.Add(new TextBlock
+                        {
+                            Margin = new Thickness(0, 10, 0, 0),
+                            Text = "Nenhuma alternativa adicionada ainda.",
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        });
+                    }
+                    else
+                    {
+                        foreach (var option in questionOptionDrafts.ToList())
+                        {
+                            var optionRowCard = new Grid();
+                            optionRowCard.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                            optionRowCard.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                            optionRowCard.Children.Add(new TextBlock
+                            {
+                                Text = option,
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                TextWrapping = TextWrapping.Wrap,
+                                VerticalAlignment = VerticalAlignment.Center
+                            });
+
+                            var removeOptionButton = new Button
+                            {
+                                Content = "Remover",
+                                Background = Brushes.Transparent,
+                                BorderThickness = new Thickness(0),
+                                Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                                FontSize = 10,
+                                FontWeight = FontWeights.SemiBold,
+                                Cursor = Cursors.Hand,
+                                Padding = new Thickness(12, 0, 0, 0)
+                            };
+                            removeOptionButton.Click += (_, __) =>
+                            {
+                                questionOptionDrafts.Remove(option);
+                                SyncQuestionCorrectOptionDrafts();
+                                RenderQuestionOptionsEditor();
+                                RenderQuestionAnswerKeyEditor();
+                            };
+                            Grid.SetColumn(removeOptionButton, 1);
+                            optionRowCard.Children.Add(removeOptionButton);
+
+                            questionOptionsEditorHost.Children.Add(new Border
+                            {
+                                Margin = new Thickness(0, 10, 0, 0),
+                                Padding = new Thickness(12),
+                                Background = GetThemeBrush("CardBackgroundBrush"),
+                                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                BorderThickness = new Thickness(1),
+                                CornerRadius = new CornerRadius(14),
+                                Child = optionRowCard
+                            });
+                        }
+                    }
+
+                    return;
+                }
+
+                if (string.Equals(selectedQuestionResponseKind, "true-false", StringComparison.OrdinalIgnoreCase))
+                {
+                    questionOptionsEditorHost.Children.Add(new TextBlock
+                    {
+                        Text = "As alternativas Verdadeiro e Falso serão criadas automaticamente para esta pergunta.",
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+
+                    var trueFalsePreview = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+                    trueFalsePreview.Children.Add(CreateStaticTeamChip("Verdadeiro", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    trueFalsePreview.Children.Add(CreateStaticTeamChip("Falso", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    questionOptionsEditorHost.Children.Add(trueFalsePreview);
+                    return;
+                }
+
+                questionOptionsEditorHost.Children.Add(new TextBlock
+                {
+                    Text = "Perguntas abertas usam resposta livre e não precisam de alternativas cadastradas.",
+                    FontSize = 10.5,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+            }
+
+            void RenderQuestionAnswerKeyEditor()
+            {
+                questionAnswerKeyEditorHost.Children.Clear();
+
+                if (!QuestionUsesAnswerKey(selectedQuestionResponseKind))
+                {
+                    questionAnswerKeyEditorHost.Children.Add(new TextBlock
+                    {
+                        Text = "Perguntas abertas não precisam de gabarito. O professor corrige a resposta livre manualmente depois do envio.",
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                SyncQuestionCorrectOptionDrafts();
+                var availableOptions = BuildQuestionOptionsDraft();
+                if (availableOptions.Count == 0)
+                {
+                    questionAnswerKeyEditorHost.Children.Add(new TextBlock
+                    {
+                        Text = "Adicione as alternativas primeiro e depois marque o gabarito desta pergunta.",
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                var singleCorrectSelection = TeachingClassQuestionUsesSingleCorrectSelection(selectedQuestionResponseKind);
+                questionAnswerKeyEditorHost.Children.Add(new TextBlock
+                {
+                    Text = string.Equals(selectedQuestionResponseKind, "true-false", StringComparison.OrdinalIgnoreCase)
+                        ? "Marque se a afirmação desta pergunta deve ser respondida como verdadeira ou falsa."
+                        : singleCorrectSelection
+                            ? "Selecione a única alternativa correta desta pergunta."
+                            : "Selecione todas as alternativas corretas desta pergunta.",
+                    FontSize = 10.5,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+
+                foreach (var option in availableOptions)
+                {
+                    var optionValue = option;
+                    var optionCard = CreateDialogChoiceCard(
+                        optionValue,
+                        singleCorrectSelection
+                            ? "Clique para definir esta alternativa como o gabarito."
+                            : "Clique para incluir ou remover esta alternativa do gabarito.",
+                        accentBrush,
+                        questionCorrectOptionDrafts.Any(item => string.Equals(item, optionValue, StringComparison.OrdinalIgnoreCase)),
+                        (_, __) =>
+                        {
+                            var existingIndex = questionCorrectOptionDrafts.FindIndex(item => string.Equals(item, optionValue, StringComparison.OrdinalIgnoreCase));
+                            if (singleCorrectSelection)
+                            {
+                                questionCorrectOptionDrafts.Clear();
+                                if (existingIndex < 0)
+                                {
+                                    questionCorrectOptionDrafts.Add(optionValue);
+                                }
+                            }
+                            else if (existingIndex >= 0)
+                            {
+                                questionCorrectOptionDrafts.RemoveAt(existingIndex);
+                            }
+                            else
+                            {
+                                questionCorrectOptionDrafts.Add(optionValue);
+                            }
+
+                            RenderQuestionAnswerKeyEditor();
+                        },
+                        double.NaN);
+                    optionCard.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    optionCard.Margin = new Thickness(0, 10, 0, 0);
+                    questionAnswerKeyEditorHost.Children.Add(optionCard);
+                }
+            }
+
+            void RenderAttachmentSummary()
+            {
+                attachmentsHost.Children.Clear();
+                if (existingAttachments.Count == 0 && pendingAttachments.Count == 0)
+                {
+                    attachmentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum anexo preparado ainda. Os arquivos serão enviados quando a atividade for salva.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var attachment in existingAttachments)
+                {
+                    attachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = new TextBlock
+                        {
+                            Text = $"{attachment.FileName} • já publicado",
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    });
+                }
+
+                foreach (var attachment in pendingAttachments.ToList())
+                {
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = $"{attachment.FileName} • novo arquivo",
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+
+                    var removeButton = new Button
+                    {
+                        Content = "Remover",
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(12, 0, 0, 0)
+                    };
+                    removeButton.Click += (_, __) =>
+                    {
+                        pendingAttachments.Remove(attachment);
+                        RenderAttachmentSummary();
+                    };
+                    Grid.SetColumn(removeButton, 1);
+                    row.Children.Add(removeButton);
+
+                    attachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = row
+                    });
+                }
+            }
+
+            void RenderQuestions()
+            {
+                questionsHost.Children.Clear();
+                if (questionDrafts.Count == 0)
+                {
+                    questionsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhuma pergunta adicionada ainda. Questionários precisam de pelo menos uma questão.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var question in questionDrafts.ToList())
+                {
+                    var questionOptions = GetTeachingClassQuestionEffectiveOptions(question);
+                    var questionCorrectOptions = GetTeachingClassQuestionCorrectOptions(question);
+                    var editButton = CreateDialogActionButton("Editar", Brushes.Transparent, accentBrush, GetThemeBrush("CardBorderBrush"), 96);
+                    editButton.Click += (_, __) => LoadQuestionDraftForEditing(question);
+                    var removeButton = CreateDialogActionButton("Remover", Brushes.Transparent, new SolidColorBrush(Color.FromRgb(220, 38, 38)), GetThemeBrush("CardBorderBrush"), 108);
+                    removeButton.Click += (_, __) =>
+                    {
+                        if (string.Equals(editingQuestionId, question.QuestionId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ResetQuestionDraftEditor();
+                        }
+
+                        questionDrafts.Remove(question);
+                        RenderQuestions();
+                    };
+
+                    var metaWrap = new WrapPanel
+                    {
+                        Margin = new Thickness(0, 8, 0, 0)
+                    };
+                    metaWrap.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(question.ResponseKind), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    metaWrap.Children.Add(CreateStaticTeamChip(question.Required ? "Obrigatória" : "Opcional", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+
+                    var questionCardStack = new StackPanel();
+                    questionCardStack.Children.Add(new TextBlock
+                    {
+                        Text = question.Prompt,
+                        FontSize = 12,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    questionCardStack.Children.Add(metaWrap);
+                    questionCardStack.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(question.HelpText) ? "Sem orientação extra." : question.HelpText,
+                        Margin = new Thickness(0, 8, 0, 0),
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+
+                    if (questionOptions.Count > 0)
+                    {
+                        var optionsWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                        foreach (var option in questionOptions)
+                        {
+                            optionsWrap.Children.Add(CreateStaticTeamChip(option, CreateSoftAccentBrush(accentBrush, 18), accentBrush));
+                        }
+
+                        questionCardStack.Children.Add(optionsWrap);
+                    }
+
+                    if (questionCorrectOptions.Count > 0)
+                    {
+                        questionCardStack.Children.Add(new TextBlock
+                        {
+                            Text = "Gabarito",
+                            Margin = new Thickness(0, 10, 0, 0),
+                            FontSize = 10.5,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush")
+                        });
+
+                        var correctOptionsWrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+                        foreach (var option in questionCorrectOptions)
+                        {
+                            correctOptionsWrap.Children.Add(CreateStaticTeamChip(option, CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 18), new SolidColorBrush(Color.FromRgb(22, 163, 74))));
+                        }
+
+                        questionCardStack.Children.Add(correctOptionsWrap);
+                    }
+
+                    questionCardStack.Children.Add(new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        Margin = new Thickness(0, 12, 0, 0),
+                        Children = { editButton, removeButton }
+                    });
+
+                    questionsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 10),
+                        Padding = new Thickness(14),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(16),
+                        Child = questionCardStack
+                    });
+                }
+            }
+
+            void RefreshModeState()
+            {
+                var isQuiz = string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase);
+                if (questionnaireSectionCard != null)
+                {
+                    questionnaireSectionCard.Visibility = isQuiz ? Visibility.Visible : Visibility.Collapsed;
+                }
+
+                if (!isQuiz && string.Equals(selectedComposerSection, "questionario", StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedComposerSection = "essencial";
+                }
+
+                questionStatusText.Visibility = isQuiz ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            var addAttachmentButton = CreateDialogActionButton("Adicionar arquivo", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 150);
+            addAttachmentButton.Margin = new Thickness(0);
+            addAttachmentButton.Click += (_, __) =>
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Multiselect = true,
+                    Title = $"Selecionar anexos para {teachingClass.ClassName}",
+                    Filter = "Todos os arquivos|*.*"
+                };
+
+                if (openDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                foreach (var filePath in openDialog.FileNames)
+                {
+                    if (pendingAttachments.Any(existing => string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    pendingAttachments.Add(new PendingAttachmentFile
+                    {
+                        FilePath = filePath,
+                        FileName = IOPath.GetFileName(filePath),
+                        PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                            ? TryCreateCompressedImageDataUri(filePath, 240, 72) ?? string.Empty
+                            : string.Empty
+                    });
+                }
+
+                RenderAttachmentSummary();
+            };
+
+            addQuestionButton = CreateDialogActionButton("Adicionar pergunta", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 172);
+            addQuestionButton.Margin = new Thickness(0);
+            addQuestionButton.Click += (_, __) =>
+            {
+                var prompt = questionPromptBox.Text.Trim();
+                var questionOptions = BuildQuestionOptionsDraft();
+                var questionCorrectOptions = BuildQuestionCorrectOptionsDraft();
+                if (string.IsNullOrWhiteSpace(prompt))
+                {
+                    questionStatusText.Text = "Escreva o enunciado antes de adicionar a pergunta.";
+                    questionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (QuestionUsesManualOptions(selectedQuestionResponseKind) && questionOptions.Count < 2)
+                {
+                    questionStatusText.Text = "Perguntas de escolha precisam de pelo menos duas alternativas.";
+                    questionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (QuestionUsesAnswerKey(selectedQuestionResponseKind) && questionCorrectOptions.Count == 0)
+                {
+                    questionStatusText.Text = "Defina o gabarito antes de adicionar esta pergunta objetiva ao questionário.";
+                    questionStatusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var questionToSave = new TeachingClassActivityQuestionInfo
+                {
+                    QuestionId = string.IsNullOrWhiteSpace(editingQuestionId) ? Guid.NewGuid().ToString("N") : editingQuestionId,
+                    Prompt = prompt,
+                    HelpText = questionHelpBox.Text.Trim(),
+                    ResponseKind = selectedQuestionResponseKind,
+                    Required = true,
+                    Options = questionOptions,
+                    CorrectOptions = questionCorrectOptions
+                };
+
+                var existingQuestionIndex = questionDrafts.FindIndex(item => string.Equals(item.QuestionId, questionToSave.QuestionId, StringComparison.OrdinalIgnoreCase));
+                if (existingQuestionIndex >= 0)
+                {
+                    questionDrafts[existingQuestionIndex] = questionToSave;
+                }
+                else
+                {
+                    questionDrafts.Add(questionToSave);
+                }
+
+                var savedQuestionCount = questionDrafts.Count;
+                var wasEditing = !string.IsNullOrWhiteSpace(editingQuestionId);
+                ResetQuestionDraftEditor(wasEditing
+                    ? $"Pergunta atualizada. O questionário agora tem {savedQuestionCount} pergunta(s)."
+                    : $"{savedQuestionCount} pergunta(s) preparada(s).");
+                RenderQuestions();
+            };
+
+            cancelQuestionEditButton = CreateDialogActionButton("Cancelar edição", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 148);
+            cancelQuestionEditButton.Margin = new Thickness(10, 0, 0, 0);
+            cancelQuestionEditButton.Visibility = Visibility.Collapsed;
+            cancelQuestionEditButton.Click += (_, __) => ResetQuestionDraftEditor("Edição da pergunta cancelada.");
+
+            var saveButton = CreateDialogActionButton(isEditing ? "Salvar atividade" : "Publicar atividade", accentBrush, Brushes.White, Brushes.Transparent, 164);
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 118);
+            cancelButton.Click += (_, __) => dialog.Close();
+
+            saveButton.Click += async (_, __) =>
+            {
+                if (_teachingClassService == null)
+                {
+                    return;
+                }
+
+                var title = titleBox.Text.Trim();
+                var description = descriptionBox.Text.Trim();
+                var linkUrl = linkBox.Text.Trim();
+
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    statusText.Text = "Informe um título antes de salvar a atividade.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (!dueDatePicker.SelectedDate.HasValue)
+                {
+                    statusText.Text = "Defina um prazo para a atividade ou avaliação.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (!int.TryParse(maxPointsBox.Text.Trim(), out var maxPoints) || maxPoints <= 0)
+                {
+                    statusText.Text = "Informe uma pontuação máxima válida.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                if (string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase) && questionDrafts.Count == 0)
+                {
+                    statusText.Text = "Questionários precisam de pelo menos uma pergunta.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                saveButton.IsEnabled = false;
+                addAttachmentButton.IsEnabled = false;
+                addQuestionButton.IsEnabled = false;
+                statusText.Text = isEditing ? "Salvando ajustes da atividade..." : "Publicando atividade...";
+                statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var mergedAttachments = existingAttachments
+                        .Select(item => new TeachingClassPostAttachmentInfo
+                        {
+                            AttachmentId = item.AttachmentId,
+                            FileName = item.FileName,
+                            PreviewImageDataUri = item.PreviewImageDataUri,
+                            PermissionScope = item.PermissionScope,
+                            StorageKind = item.StorageKind,
+                            StorageReference = item.StorageReference,
+                            MimeType = item.MimeType,
+                            SizeBytes = item.SizeBytes,
+                            Version = item.Version,
+                            AddedByUserId = item.AddedByUserId,
+                            AddedAt = item.AddedAt
+                        })
+                        .ToList();
+
+                    foreach (var pendingAttachment in pendingAttachments)
+                    {
+                        var attachmentResult = await CreateTeachingClassPostAttachmentFromFileAsync(teachingClass, pendingAttachment.FilePath, "class");
+                        if (!attachmentResult.Success || attachmentResult.Attachment == null)
+                        {
+                            statusText.Text = attachmentResult.ErrorMessage ?? "Não foi possível sincronizar um dos anexos desta atividade.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        mergedAttachments.Add(attachmentResult.Attachment);
+                    }
+
+                    var updatedPost = new TeachingClassHomePostInfo
+                    {
+                        PostId = existingPost?.PostId ?? Guid.NewGuid().ToString("N"),
+                        PostType = "activity",
+                        AuthorUserId = existingPost?.AuthorUserId ?? GetCurrentUserId(),
+                        AuthorName = existingPost?.AuthorName ?? (_currentProfile?.Name ?? "Professor da turma"),
+                        Title = title,
+                        Content = description,
+                        LinkUrl = linkUrl,
+                        ActivityLabel = string.Equals(selectedAssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase) ? "Avaliação publicada" : "Atividade publicada",
+                        ActivityDueAt = dueDatePicker.SelectedDate,
+                        AssignmentEnabled = true,
+                        AssignmentMode = selectedAssignmentMode,
+                        AllowLateSubmission = allowLateSubmission,
+                        MaxPoints = maxPoints,
+                        PublishedAt = existingPost?.PublishedAt ?? DateTime.Now,
+                        UpdatedAt = DateTime.Now,
+                        Attachments = mergedAttachments,
+                        Questions = questionDrafts.Select(item => new TeachingClassActivityQuestionInfo
+                        {
+                            QuestionId = item.QuestionId,
+                            Prompt = item.Prompt,
+                            HelpText = item.HelpText,
+                            ResponseKind = item.ResponseKind,
+                            Required = item.Required,
+                            Options = item.Options?.ToList() ?? new List<string>(),
+                            CorrectOptions = item.CorrectOptions?.ToList() ?? new List<string>()
+                        }).ToList(),
+                        Submissions = existingPost?.Submissions?.ToList() ?? new List<TeachingClassActivitySubmissionInfo>(),
+                        Comments = existingPost?.Comments?.ToList() ?? new List<TeachingClassPostCommentInfo>(),
+                        Reactions = existingPost?.Reactions?.ToList() ?? new List<TeachingClassPostReactionInfo>()
+                    };
+
+                    var saveResult = await _teachingClassService.SaveHomePostAsync(teachingClass.ClassId, updatedPost);
+                    if (!saveResult.Success || saveResult.Post == null)
+                    {
+                        statusText.Text = saveResult.ErrorMessage ?? "Não foi possível salvar esta atividade agora.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    var existingIndex = teachingClass.HomePosts.FindIndex(item => string.Equals(item.PostId, saveResult.Post.PostId, StringComparison.OrdinalIgnoreCase));
+                    if (existingIndex >= 0)
+                    {
+                        teachingClass.HomePosts[existingIndex] = saveResult.Post;
+                    }
+                    else
+                    {
+                        teachingClass.HomePosts.Insert(0, saveResult.Post);
+                    }
+
+                    teachingClass.HomeFeedReady = true;
+                    teachingClass.HomeFeedLoadedAt = DateTime.Now;
+                    teachingClass.AssignmentsReady = true;
+                    teachingClass.AssignmentsLoadedAt = DateTime.Now;
+                    TrackTeachingClassLocally(teachingClass);
+
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = isEditing
+                            ? $"Atividade {saveResult.Post.Title} atualizada em {teachingClass.ClassName}."
+                            : $"Nova atividade publicada em {teachingClass.ClassName}.";
+                        ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    }
+
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                    RenderProfessorDashboard();
+                }
+                finally
+                {
+                    saveButton.IsEnabled = true;
+                    addAttachmentButton.IsEnabled = true;
+                    addQuestionButton.IsEnabled = true;
+                }
+            };
+
+            var essentialContent = new StackPanel();
+            essentialContent.Children.Add(CreateDialogFieldLabel("Formato da atividade"));
+            essentialContent.Children.Add(assignmentModeChoicesHost);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Título", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(titleBox);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Instruções e contexto", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(descriptionBox);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Link de apoio", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(linkBox);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Prazo", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(dueDatePicker);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Pontuação máxima", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(maxPointsBox);
+            essentialContent.Children.Add(CreateDialogFieldLabel("Política de atraso", new Thickness(0, 16, 0, 6)));
+            essentialContent.Children.Add(latePolicyChoicesHost);
+
+            essentialSectionCard = CreateDialogSectionCard(
+                "Configuração da atividade",
+                "Defina o formato, o prazo, a pontuação e a política de envio com a mesma linguagem visual do restante do workspace.",
+                accentBrush,
+                essentialContent,
+                new Thickness(0, 0, 0, 18));
+
+            var materialsSectionContent = new StackPanel();
+            materialsSectionContent.Children.Add(addAttachmentButton);
+            materialsSectionContent.Children.Add(attachmentsHost);
+            materialsSectionCard = CreateDialogSectionCard(
+                "Materiais e anexos",
+                "Publique PDFs, slides, planilhas, imagens e outros arquivos que o aluno precisa consultar antes da entrega.",
+                accentBrush,
+                materialsSectionContent,
+                new Thickness(0, 0, 0, 18));
+
+            var questionnaireContent = new StackPanel();
+            questionnaireContent.Children.Add(CreateDialogFieldLabel("Enunciado da pergunta"));
+            questionnaireContent.Children.Add(questionPromptBox);
+            questionnaireContent.Children.Add(CreateDialogFieldLabel("Ajuda opcional", new Thickness(0, 12, 0, 6)));
+            questionnaireContent.Children.Add(questionHelpBox);
+            questionnaireContent.Children.Add(CreateDialogFieldLabel("Formato de resposta", new Thickness(0, 12, 0, 6)));
+            questionnaireContent.Children.Add(new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Child = new StackPanel
+                {
+                    Children =
+                    {
+                        questionKindPreviewText,
+                        new TextBlock
+                        {
+                            Text = "Escolha como o aluno vai responder esta pergunta antes de adicioná-la ao questionário.",
+                            Margin = new Thickness(0, 6, 0, 0),
+                            FontSize = 10.5,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            LineHeight = 18
+                        },
+                        questionKindChoicesHost
+                    }
+                }
+            });
+            questionnaireContent.Children.Add(CreateDialogFieldLabel("Alternativas", new Thickness(0, 12, 0, 6)));
+            questionnaireContent.Children.Add(new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Child = questionOptionsEditorHost
+            });
+            questionnaireContent.Children.Add(CreateDialogFieldLabel("Gabarito", new Thickness(0, 12, 0, 6)));
+            questionnaireContent.Children.Add(new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16),
+                Child = questionAnswerKeyEditorHost
+            });
+            questionnaireContent.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 12, 0, 0),
+                Children =
+                {
+                    addQuestionButton,
+                    cancelQuestionEditButton
+                }
+            });
+            questionnaireContent.Children.Add(questionStatusText);
+            questionnaireContent.Children.Add(questionsHost);
+
+            questionnaireSectionCard = CreateDialogSectionCard(
+                "Questionário",
+                "Monte perguntas abertas, de escolha única, múltipla escolha e verdadeiro ou falso dentro da própria turma.",
+                accentBrush,
+                questionnaireContent,
+                new Thickness(0, 0, 0, 0));
+
+            var form = new StackPanel();
+            form.Children.Add(essentialSectionCard);
+            form.Children.Add(materialsSectionCard);
+            form.Children.Add(questionnaireSectionCard);
+            form.Children.Add(statusText);
+
+            var bodyGrid = new Grid();
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(252) });
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var sidebarBorder = new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Child = composerSidebarHost
+            };
+            bodyGrid.Children.Add(sidebarBorder);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetColumn(scrollViewer, 2);
+            bodyGrid.Children.Add(scrollViewer);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(
+                "DOCÊNCIA",
+                isEditing ? "Editar atividade formal" : "Nova atividade formal",
+                "Monte a atividade com etapas claras, materiais organizados e questionário opcional, mantendo a mesma leitura visual de Perfil e Configurações.",
+                accentBrush));
+
+            Grid.SetRow(bodyGrid, 1);
+            root.Children.Add(bodyGrid);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { cancelButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            RenderAssignmentModeChoices();
+            RenderLatePolicyChoices();
+            RenderQuestionKindChoices();
+            RenderQuestionOptionsEditor();
+            RenderQuestionAnswerKeyEditor();
+            RefreshQuestionEditorActionState();
+            RenderAttachmentSummary();
+            RenderQuestions();
+            RefreshModeState();
+            RenderComposerSidebar();
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+                                private void ShowTeachingClassAssignmentDetailsDialog(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, Brush accentBrush)
+                                {
+                                    var canManage = CanManageTeachingClass(teachingClass);
+                                    var canSubmit = CanCurrentUserSubmitTeachingClassAssignments(teachingClass);
+                                    var dialog = CreateStyledDialogWindow($"{post.Title} • {teachingClass.ClassName}", 940, 920, 760, true);
+
+                                    var submission = GetCurrentUserTeachingClassAssignmentSubmission(post);
+                                    var root = new Grid();
+                                    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                                    root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                                    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                                    root.Children.Add(CreateDialogHeader(
+                                        "DOCÊNCIA",
+                                        string.IsNullOrWhiteSpace(post.Title) ? "Atividade" : post.Title,
+                                        canManage
+                                            ? "Receba entregas, corrija respostas e devolva feedback com nota sem sair da mesma atividade."
+                                            : "Leia as instruções, entregue sua resposta e acompanhe a devolutiva nesta mesma tela.",
+                                        accentBrush));
+
+                                    var body = new StackPanel();
+                                    body.Children.Add(CreateDialogSectionCard(
+                                        "Visão geral",
+                                        "Resumo rápido da atividade selecionada.",
+                                        accentBrush,
+                                        new StackPanel
+                                        {
+                                            Children =
+                                            {
+                                                new WrapPanel
+                                                {
+                                                    Children =
+                                                    {
+                                                        CreateStaticTeamChip(GetTeachingClassAssignmentModeLabel(post), CreateSoftAccentBrush(accentBrush, 24), accentBrush),
+                                                        CreateStaticTeamChip(post.ActivityDueAt.HasValue ? $"Prazo {post.ActivityDueAt.Value:dd/MM/yyyy}" : "Sem prazo", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                                        CreateStaticTeamChip($"{post.MaxPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                                        CreateStaticTeamChip(post.AllowLateSubmission ? "Atraso permitido" : "Sem atraso", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                                                    }
+                                                },
+                                                new TextBlock
+                                                {
+                                                    Text = string.IsNullOrWhiteSpace(post.Content) ? "Sem descrição adicional." : post.Content,
+                                                    Margin = new Thickness(0, 12, 0, 0),
+                                                    FontSize = 12,
+                                                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                    TextWrapping = TextWrapping.Wrap,
+                                                    LineHeight = 20
+                                                }
+                                            }
+                                        },
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    var instructionsStack = new StackPanel();
+                                    if (!string.IsNullOrWhiteSpace(post.LinkUrl))
+                                    {
+                                        var openLinkButton = CreateDialogActionButton("Abrir link", accentBrush, Brushes.White, Brushes.Transparent, 112);
+                                        openLinkButton.Click += (_, __) => OpenTeachingClassPostLink(post.LinkUrl);
+                                        instructionsStack.Children.Add(openLinkButton);
+                                    }
+
+                                    if (post.Attachments.Count == 0)
+                                    {
+                                        instructionsStack.Children.Add(new TextBlock
+                                        {
+                                            Text = "Nenhum anexo publicado para esta atividade.",
+                                            Margin = new Thickness(0, instructionsStack.Children.Count == 0 ? 0 : 12, 0, 0),
+                                            FontSize = 11,
+                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                            TextWrapping = TextWrapping.Wrap
+                                        });
+                                    }
+                                    else
+                                    {
+                                        foreach (var attachment in post.Attachments.OrderBy(item => item.FileName))
+                                        {
+                                            var openAttachmentButton = CreateDialogActionButton("Abrir", accentBrush, Brushes.White, Brushes.Transparent, 92);
+                                            openAttachmentButton.Click += async (_, __) => await OpenTeachingClassAttachmentPreviewAsync(teachingClass, attachment);
+
+                                            instructionsStack.Children.Add(new Border
+                                            {
+                                                Margin = new Thickness(0, 12, 0, 0),
+                                                Padding = new Thickness(12),
+                                                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                                                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                BorderThickness = new Thickness(1),
+                                                CornerRadius = new CornerRadius(14),
+                                                Child = new Grid
+                                                {
+                                                    ColumnDefinitions =
+                                                    {
+                                                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
+                                                        new ColumnDefinition { Width = GridLength.Auto }
+                                                    },
+                                                    Children =
+                                                    {
+                                                        new TextBlock
+                                                        {
+                                                            Text = attachment.FileName,
+                                                            FontSize = 11,
+                                                            FontWeight = FontWeights.SemiBold,
+                                                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                            TextWrapping = TextWrapping.Wrap
+                                                        }
+                                                    }
+                                                }
+                                            });
+                                            if (instructionsStack.Children[^1] is Border attachmentBorder && attachmentBorder.Child is Grid attachmentGrid)
+                                            {
+                                                Grid.SetColumn(openAttachmentButton, 1);
+                                                attachmentGrid.Children.Add(openAttachmentButton);
+                                            }
+                                        }
+                                    }
+
+                                    if (string.Equals(post.AssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var questionsPreview = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+                                        foreach (var question in post.Questions)
+                                        {
+                                            var questionOptions = GetTeachingClassQuestionEffectiveOptions(question);
+                                            var questionCorrectOptions = GetTeachingClassQuestionCorrectOptions(question);
+                                            var questionCardStack = new StackPanel();
+                                            questionCardStack.Children.Add(new TextBlock
+                                            {
+                                                Text = question.Prompt,
+                                                FontSize = 11.5,
+                                                FontWeight = FontWeights.Bold,
+                                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap
+                                            });
+
+                                            var questionMetaWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                            questionMetaWrap.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(question.ResponseKind), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                            questionMetaWrap.Children.Add(CreateStaticTeamChip(question.Required ? "Obrigatória" : "Opcional", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                            questionCardStack.Children.Add(questionMetaWrap);
+                                            questionCardStack.Children.Add(new TextBlock
+                                            {
+                                                Text = string.IsNullOrWhiteSpace(question.HelpText) ? "Sem orientação extra." : question.HelpText,
+                                                Margin = new Thickness(0, 6, 0, 0),
+                                                FontSize = 10.5,
+                                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap
+                                            });
+
+                                            if (questionOptions.Count > 0)
+                                            {
+                                                var optionsWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                                foreach (var option in questionOptions)
+                                                {
+                                                    optionsWrap.Children.Add(CreateStaticTeamChip(option, CreateSoftAccentBrush(accentBrush, 18), accentBrush));
+                                                }
+
+                                                questionCardStack.Children.Add(optionsWrap);
+                                            }
+
+                                            if (canManage && questionCorrectOptions.Count > 0)
+                                            {
+                                                questionCardStack.Children.Add(new TextBlock
+                                                {
+                                                    Text = "Gabarito do professor",
+                                                    Margin = new Thickness(0, 10, 0, 0),
+                                                    FontSize = 10.5,
+                                                    FontWeight = FontWeights.SemiBold,
+                                                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                                                });
+
+                                                var correctOptionsWrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+                                                foreach (var correctOption in questionCorrectOptions)
+                                                {
+                                                    correctOptionsWrap.Children.Add(CreateStaticTeamChip(correctOption, CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 18), new SolidColorBrush(Color.FromRgb(22, 163, 74))));
+                                                }
+
+                                                questionCardStack.Children.Add(correctOptionsWrap);
+                                            }
+
+                                            questionsPreview.Children.Add(new Border
+                                            {
+                                                Margin = new Thickness(0, 0, 0, 10),
+                                                Padding = new Thickness(12),
+                                                Background = GetThemeBrush("CardBackgroundBrush"),
+                                                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                BorderThickness = new Thickness(1),
+                                                CornerRadius = new CornerRadius(14),
+                                                Child = questionCardStack
+                                            });
+                                        }
+
+                                        instructionsStack.Children.Add(CreateDialogSectionCard(
+                                            "Perguntas",
+                                            "Estrutura do questionário com perguntas abertas e objetivas que o aluno vai responder no envio.",
+                                            accentBrush,
+                                            questionsPreview,
+                                            new Thickness(0, 16, 0, 0)));
+                                    }
+
+                                    body.Children.Add(CreateDialogSectionCard(
+                                        "Material de apoio",
+                                        "Arquivos, links e perguntas publicados nesta atividade.",
+                                        accentBrush,
+                                        instructionsStack,
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    if (canManage)
+                                    {
+                                        var submissionsHost = new StackPanel();
+                                        var orderedSubmissions = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                                            .OrderBy(item => item.Review == null ? 0 : 1)
+                                            .ThenBy(item => item.StudentName)
+                                            .ToList();
+
+                                        if (orderedSubmissions.Count == 0)
+                                        {
+                                            submissionsHost.Children.Add(CreateSearchSlideInfoCard(
+                                                "Nenhuma entrega recebida ainda",
+                                                "Assim que os alunos enviarem arquivos, links ou respostas do questionário, eles aparecerão aqui para correção."));
+                                        }
+                                        else
+                                        {
+                                            foreach (var item in orderedSubmissions)
+                                            {
+                                                var submissionCard = new StackPanel();
+                                                submissionCard.Children.Add(new TextBlock
+                                                {
+                                                    Text = string.IsNullOrWhiteSpace(item.StudentName) ? "Aluno da turma" : item.StudentName,
+                                                    FontSize = 13,
+                                                    FontWeight = FontWeights.Bold,
+                                                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                                                });
+
+                                                var chipWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                                chipWrap.Children.Add(CreateStaticTeamChip(item.Review != null ? "Corrigida" : "Pendente", item.Review != null ? CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 24) : CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(245, 158, 11)), 24), item.Review != null ? new SolidColorBrush(Color.FromRgb(22, 163, 74)) : new SolidColorBrush(Color.FromRgb(245, 158, 11))));
+                                                chipWrap.Children.Add(CreateStaticTeamChip(item.IsLate ? "Com atraso" : "No prazo", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                                chipWrap.Children.Add(CreateStaticTeamChip(item.SubmittedAt == default ? "Sem data" : item.SubmittedAt.ToString("dd/MM HH:mm"), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                                if (item.Review != null)
+                                                {
+                                                    chipWrap.Children.Add(CreateStaticTeamChip($"Nota {item.Review.GradeValue}/{item.Review.MaxPoints}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                                }
+                                                submissionCard.Children.Add(chipWrap);
+
+                                                if (!string.IsNullOrWhiteSpace(item.Notes))
+                                                {
+                                                    submissionCard.Children.Add(new TextBlock
+                                                    {
+                                                        Text = item.Notes,
+                                                        Margin = new Thickness(0, 10, 0, 0),
+                                                        FontSize = 11.5,
+                                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                        TextWrapping = TextWrapping.Wrap,
+                                                        LineHeight = 18
+                                                    });
+                                                }
+
+                                                if (!string.IsNullOrWhiteSpace(item.SubmissionLink))
+                                                {
+                                                    var openSubmissionLinkButton = CreateDialogActionButton("Abrir link", accentBrush, Brushes.White, Brushes.Transparent, 112);
+                                                    openSubmissionLinkButton.Margin = new Thickness(0, 10, 0, 0);
+                                                    openSubmissionLinkButton.Click += (_, __) => OpenTeachingClassPostLink(item.SubmissionLink);
+                                                    submissionCard.Children.Add(openSubmissionLinkButton);
+                                                }
+
+                                                if (item.Answers.Count > 0)
+                                                {
+                                                    foreach (var answer in item.Answers)
+                                                    {
+                                                        var answerQuestion = post.Questions.FirstOrDefault(question => string.Equals(question.QuestionId, answer.QuestionId, StringComparison.OrdinalIgnoreCase));
+                                                        var correctOptions = GetTeachingClassQuestionCorrectOptions(answerQuestion);
+                                                        var answerCardStack = new StackPanel();
+                                                        answerCardStack.Children.Add(new TextBlock
+                                                        {
+                                                            Text = string.IsNullOrWhiteSpace(answer.PromptSnapshot) ? "Pergunta" : answer.PromptSnapshot,
+                                                            FontSize = 11.5,
+                                                            FontWeight = FontWeights.Bold,
+                                                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                            TextWrapping = TextWrapping.Wrap
+                                                        });
+
+                                                        if (!string.IsNullOrWhiteSpace(answer.ResponseKindSnapshot))
+                                                        {
+                                                            var answerMetaWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                                            answerMetaWrap.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(answer.ResponseKindSnapshot), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+
+                                                            foreach (var selectedOption in (answer.SelectedOptions ?? new List<string>())
+                                                                .Where(option => !string.IsNullOrWhiteSpace(option))
+                                                                .Select(option => option.Trim())
+                                                                .Distinct(StringComparer.OrdinalIgnoreCase))
+                                                            {
+                                                                answerMetaWrap.Children.Add(CreateStaticTeamChip(selectedOption, CreateSoftAccentBrush(accentBrush, 18), accentBrush));
+                                                            }
+
+                                                            answerCardStack.Children.Add(answerMetaWrap);
+                                                        }
+
+                                                        if (correctOptions.Count > 0)
+                                                        {
+                                                            answerCardStack.Children.Add(new TextBlock
+                                                            {
+                                                                Text = "Gabarito esperado",
+                                                                Margin = new Thickness(0, 8, 0, 0),
+                                                                FontSize = 10.5,
+                                                                FontWeight = FontWeights.SemiBold,
+                                                                Foreground = GetThemeBrush("PrimaryTextBrush")
+                                                            });
+
+                                                            var correctOptionsWrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+                                                            foreach (var correctOption in correctOptions)
+                                                            {
+                                                                correctOptionsWrap.Children.Add(CreateStaticTeamChip(correctOption, CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 18), new SolidColorBrush(Color.FromRgb(22, 163, 74))));
+                                                            }
+
+                                                            answerCardStack.Children.Add(correctOptionsWrap);
+                                                        }
+
+                                                        answerCardStack.Children.Add(new TextBlock
+                                                        {
+                                                            Text = GetTeachingClassAnswerDisplayText(answer),
+                                                            Margin = new Thickness(0, 6, 0, 0),
+                                                            FontSize = 11,
+                                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                            TextWrapping = TextWrapping.Wrap,
+                                                            LineHeight = 18
+                                                        });
+
+                                                        submissionCard.Children.Add(new Border
+                                                        {
+                                                            Margin = new Thickness(0, 10, 0, 0),
+                                                            Padding = new Thickness(12),
+                                                            Background = GetThemeBrush("CardBackgroundBrush"),
+                                                            BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                            BorderThickness = new Thickness(1),
+                                                            CornerRadius = new CornerRadius(14),
+                                                            Child = answerCardStack
+                                                        });
+                                                    }
+                                                }
+
+                                                if (item.Attachments.Count > 0)
+                                                {
+                                                    var attachmentWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+                                                    foreach (var attachment in item.Attachments)
+                                                    {
+                                                        var openAttachmentButton = CreateDialogActionButton($"Abrir {attachment.FileName}", accentBrush, Brushes.White, Brushes.Transparent, 160);
+                                                        openAttachmentButton.Margin = new Thickness(0, 0, 8, 8);
+                                                        openAttachmentButton.Click += async (_, __) => await OpenTeachingClassAttachmentPreviewAsync(teachingClass, attachment);
+                                                        attachmentWrap.Children.Add(openAttachmentButton);
+                                                    }
+                                                    submissionCard.Children.Add(attachmentWrap);
+                                                }
+
+                                                if (item.Review != null)
+                                                {
+                                                    submissionCard.Children.Add(new Border
+                                                    {
+                                                        Margin = new Thickness(0, 12, 0, 0),
+                                                        Padding = new Thickness(12),
+                                                        Background = CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 16),
+                                                        BorderBrush = new SolidColorBrush(Color.FromRgb(22, 163, 74)),
+                                                        BorderThickness = new Thickness(1),
+                                                        CornerRadius = new CornerRadius(14),
+                                                        Child = new TextBlock
+                                                        {
+                                                            Text = string.IsNullOrWhiteSpace(item.Review.FeedbackText)
+                                                                ? $"Nota lancada em {item.Review.GradedAt:dd/MM HH:mm}."
+                                                                : item.Review.FeedbackText,
+                                                            FontSize = 11,
+                                                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                            TextWrapping = TextWrapping.Wrap,
+                                                            LineHeight = 18
+                                                        }
+                                                    });
+                                                }
+
+                                                var reviewButton = CreateDialogActionButton(item.Review == null ? "Dar nota e feedback" : "Editar feedback", accentBrush, Brushes.White, Brushes.Transparent, 184);
+                                                reviewButton.Margin = new Thickness(0, 12, 0, 0);
+                                                reviewButton.Click += (_, __) =>
+                                                {
+                                                    dialog.Close();
+                                                    ShowTeachingClassAssignmentReviewDialog(teachingClass, post, item, accentBrush);
+                                                };
+                                                submissionCard.Children.Add(reviewButton);
+
+                                                submissionsHost.Children.Add(new Border
+                                                {
+                                                    Margin = new Thickness(0, 0, 0, 12),
+                                                    Padding = new Thickness(14),
+                                                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                                                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                    BorderThickness = new Thickness(1),
+                                                    CornerRadius = new CornerRadius(16),
+                                                    Child = submissionCard
+                                                });
+                                            }
+                                        }
+
+                                        body.Children.Add(CreateDialogSectionCard(
+                                            "Entregas recebidas",
+                                            "Receba a produção dos alunos, leia respostas e devolva nota com feedback individual.",
+                                            accentBrush,
+                                            submissionsHost,
+                                            new Thickness(0, 0, 0, 0)));
+                                    }
+                                    else
+                                    {
+                                        var studentStack = new StackPanel();
+                                        if (submission == null)
+                                        {
+                                            studentStack.Children.Add(CreateSearchSlideInfoCard(
+                                                "Nenhuma entrega enviada ainda",
+                                                post.ActivityDueAt.HasValue && post.ActivityDueAt.Value.Date < DateTime.Today && post.AllowLateSubmission
+                                                    ? "O prazo original já passou, mas esta atividade ainda aceita entrega com atraso."
+                                                    : "Abra o formulário de entrega para anexar arquivos, responder o questionário e registrar observações."));
+                                        }
+                                        else
+                                        {
+                                            studentStack.Children.Add(new TextBlock
+                                            {
+                                                Text = $"Entrega registrada em {submission.SubmittedAt:dd/MM/yyyy 'as' HH:mm}.",
+                                                FontSize = 11.5,
+                                                FontWeight = FontWeights.SemiBold,
+                                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap
+                                            });
+
+                                            if (!string.IsNullOrWhiteSpace(submission.Notes))
+                                            {
+                                                studentStack.Children.Add(new TextBlock
+                                                {
+                                                    Text = submission.Notes,
+                                                    Margin = new Thickness(0, 10, 0, 0),
+                                                    FontSize = 11,
+                                                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                    TextWrapping = TextWrapping.Wrap,
+                                                    LineHeight = 18
+                                                });
+                                            }
+
+                                            if (!string.IsNullOrWhiteSpace(submission.SubmissionLink))
+                                            {
+                                                var openSubmissionLinkButton = CreateDialogActionButton("Abrir link enviado", accentBrush, Brushes.White, Brushes.Transparent, 148);
+                                                openSubmissionLinkButton.Margin = new Thickness(0, 10, 0, 0);
+                                                openSubmissionLinkButton.Click += (_, __) => OpenTeachingClassPostLink(submission.SubmissionLink);
+                                                studentStack.Children.Add(openSubmissionLinkButton);
+                                            }
+
+                                            if (submission.Answers.Count > 0)
+                                            {
+                                                foreach (var answer in submission.Answers)
+                                                {
+                                                    var answerCardStack = new StackPanel();
+                                                    answerCardStack.Children.Add(new TextBlock
+                                                    {
+                                                        Text = string.IsNullOrWhiteSpace(answer.PromptSnapshot) ? "Pergunta" : answer.PromptSnapshot,
+                                                        FontSize = 11.5,
+                                                        FontWeight = FontWeights.Bold,
+                                                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                        TextWrapping = TextWrapping.Wrap
+                                                    });
+
+                                                    if (!string.IsNullOrWhiteSpace(answer.ResponseKindSnapshot))
+                                                    {
+                                                        var answerMetaWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                                        answerMetaWrap.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(answer.ResponseKindSnapshot), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+
+                                                        foreach (var selectedOption in (answer.SelectedOptions ?? new List<string>())
+                                                            .Where(option => !string.IsNullOrWhiteSpace(option))
+                                                            .Select(option => option.Trim())
+                                                            .Distinct(StringComparer.OrdinalIgnoreCase))
+                                                        {
+                                                            answerMetaWrap.Children.Add(CreateStaticTeamChip(selectedOption, CreateSoftAccentBrush(accentBrush, 18), accentBrush));
+                                                        }
+
+                                                        answerCardStack.Children.Add(answerMetaWrap);
+                                                    }
+
+                                                    answerCardStack.Children.Add(new TextBlock
+                                                    {
+                                                        Text = GetTeachingClassAnswerDisplayText(answer),
+                                                        Margin = new Thickness(0, 6, 0, 0),
+                                                        FontSize = 11,
+                                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                        TextWrapping = TextWrapping.Wrap,
+                                                        LineHeight = 18
+                                                    });
+
+                                                    studentStack.Children.Add(new Border
+                                                    {
+                                                        Margin = new Thickness(0, 10, 0, 0),
+                                                        Padding = new Thickness(12),
+                                                        Background = GetThemeBrush("CardBackgroundBrush"),
+                                                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                        BorderThickness = new Thickness(1),
+                                                        CornerRadius = new CornerRadius(14),
+                                                        Child = answerCardStack
+                                                    });
+                                                }
+                                            }
+
+                                            if (submission.Attachments.Count > 0)
+                                            {
+                                                var attachmentWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+                                                foreach (var attachment in submission.Attachments)
+                                                {
+                                                    var openAttachmentButton = CreateDialogActionButton($"Abrir {attachment.FileName}", accentBrush, Brushes.White, Brushes.Transparent, 160);
+                                                    openAttachmentButton.Margin = new Thickness(0, 0, 8, 8);
+                                                    openAttachmentButton.Click += async (_, __) => await OpenTeachingClassAttachmentPreviewAsync(teachingClass, attachment);
+                                                    attachmentWrap.Children.Add(openAttachmentButton);
+                                                }
+                                                studentStack.Children.Add(attachmentWrap);
+                                            }
+                                        }
+
+                                        body.Children.Add(CreateDialogSectionCard(
+                                            "Sua entrega",
+                                            "Tudo o que você já enviou para esta atividade ou avaliação.",
+                                            accentBrush,
+                                            studentStack,
+                                            new Thickness(0, 0, 0, submission?.Review != null ? 16 : 0)));
+
+                                        if (submission?.Review != null)
+                                        {
+                                            body.Children.Add(CreateDialogSectionCard(
+                                                "Nota e feedback",
+                                                "Devolutiva registrada pelo professor para a sua entrega.",
+                                                accentBrush,
+                                                new StackPanel
+                                                {
+                                                    Children =
+                                                    {
+                                                        new WrapPanel
+                                                        {
+                                                            Children =
+                                                            {
+                                                                CreateStaticTeamChip($"Nota {submission.Review.GradeValue}/{submission.Review.MaxPoints}", CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 24), new SolidColorBrush(Color.FromRgb(22, 163, 74))),
+                                                                CreateStaticTeamChip($"Corrigida em {submission.Review.GradedAt:dd/MM HH:mm}", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                                                            }
+                                                        },
+                                                        new TextBlock
+                                                        {
+                                                            Text = string.IsNullOrWhiteSpace(submission.Review.FeedbackText) ? "Sem observações adicionais nesta correção." : submission.Review.FeedbackText,
+                                                            Margin = new Thickness(0, 12, 0, 0),
+                                                            FontSize = 11.5,
+                                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                            TextWrapping = TextWrapping.Wrap,
+                                                            LineHeight = 18
+                                                        }
+                                                    }
+                                                },
+                                                new Thickness(0, 0, 0, 0)));
+                                        }
+                                    }
+
+                                    var scrollViewer = new ScrollViewer
+                                    {
+                                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                                        Content = body
+                                    };
+                                    Grid.SetRow(scrollViewer, 1);
+                                    root.Children.Add(scrollViewer);
+
+                                    var closeButton = CreateDialogActionButton("Fechar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+                                    closeButton.Click += (_, __) => dialog.Close();
+                                    var footer = new StackPanel
+                                    {
+                                        Orientation = Orientation.Horizontal,
+                                        HorizontalAlignment = HorizontalAlignment.Right,
+                                        Margin = new Thickness(0, 18, 0, 0),
+                                        Children = { closeButton }
+                                    };
+
+                                    if (canManage)
+                                    {
+                                        var editButton = CreateDialogActionButton("Editar atividade", accentBrush, Brushes.White, Brushes.Transparent, 160);
+                                        editButton.Margin = new Thickness(10, 0, 0, 0);
+                                        editButton.Click += (_, __) =>
+                                        {
+                                            dialog.Close();
+                                            ShowTeachingClassAssignmentComposerDialog(teachingClass, accentBrush, post);
+                                        };
+                                        footer.Children.Add(editButton);
+                                    }
+                                    else if (canSubmit)
+                                    {
+                                        var submitButton = CreateDialogActionButton(submission == null ? "Entregar agora" : "Atualizar entrega", accentBrush, Brushes.White, Brushes.Transparent, 156);
+                                        submitButton.Margin = new Thickness(10, 0, 0, 0);
+                                        submitButton.Click += (_, __) =>
+                                        {
+                                            dialog.Close();
+                                            ShowTeachingClassAssignmentSubmissionDialog(teachingClass, post, submission, accentBrush);
+                                        };
+                                        footer.Children.Add(submitButton);
+                                    }
+
+                                    Grid.SetRow(footer, 2);
+                                    root.Children.Add(footer);
+
+                                    dialog.Content = CreateStyledDialogShell(root);
+                                    dialog.ShowDialog();
+                                }
+
+        private void ShowTeachingClassAssignmentSubmissionDialog(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo? existingSubmission, Brush accentBrush)
+        {
+            if (_teachingClassService == null || !CanCurrentUserSubmitTeachingClassAssignments(teachingClass))
+            {
+                return;
+            }
+
+            var dialog = CreateStyledDialogWindow($"Entrega • {post.Title}", 980, 860, 720, true);
+            var selectedSubmissionSection = "resposta";
+
+            var notesBox = new TextBox
+            {
+                MinHeight = 132,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Text = existingSubmission?.Notes ?? string.Empty
+            };
+            var linkBox = new TextBox { Height = 46, Text = existingSubmission?.SubmissionLink ?? string.Empty };
+            var statusText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            };
+            var pendingAttachments = new List<PendingAttachmentFile>();
+            var attachmentsHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var existingAttachments = (existingSubmission?.Attachments ?? new List<TeachingClassPostAttachmentInfo>())
+                .Select(item => new TeachingClassPostAttachmentInfo
+                {
+                    AttachmentId = item.AttachmentId,
+                    FileName = item.FileName,
+                    PreviewImageDataUri = item.PreviewImageDataUri,
+                    PermissionScope = item.PermissionScope,
+                    StorageKind = item.StorageKind,
+                    StorageReference = item.StorageReference,
+                    MimeType = item.MimeType,
+                    SizeBytes = item.SizeBytes,
+                    Version = item.Version,
+                    AddedByUserId = item.AddedByUserId,
+                    AddedAt = item.AddedAt
+                })
+                .ToList();
+            var textAnswerInputs = new Dictionary<string, TextBox>(StringComparer.OrdinalIgnoreCase);
+            var choiceAnswerSelections = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var submissionSidebarHost = new StackPanel();
+
+            Border? responseSectionCard = null;
+            Border? questionnaireSectionCard = null;
+            Border? filesSectionCard = null;
+
+            ApplyDialogInputStyle(notesBox);
+            ApplyDialogInputStyle(linkBox);
+
+            List<string> GetInitialSelectedAnswerOptions(TeachingClassActivityQuestionInfo question, TeachingClassActivityAnswerInfo? existingAnswer)
+            {
+                var questionOptions = GetTeachingClassQuestionEffectiveOptions(question);
+                var selectedOptions = (existingAnswer?.SelectedOptions ?? new List<string>())
+                    .Where(option => !string.IsNullOrWhiteSpace(option))
+                    .Select(option => option.Trim())
+                    .Where(option => questionOptions.Any(item => string.Equals(item, option, StringComparison.OrdinalIgnoreCase)))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (selectedOptions.Count == 0 && !string.IsNullOrWhiteSpace(existingAnswer?.ResponseText))
+                {
+                    var fallbackOption = questionOptions.FirstOrDefault(option => string.Equals(option, existingAnswer.ResponseText.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrWhiteSpace(fallbackOption))
+                    {
+                        selectedOptions.Add(fallbackOption);
+                    }
+                }
+
+                return selectedOptions;
+            }
+
+            void RenderChoiceAnswerOptions(TeachingClassActivityQuestionInfo question, Panel host)
+            {
+                host.Children.Clear();
+                var questionOptions = GetTeachingClassQuestionEffectiveOptions(question);
+                if (questionOptions.Count == 0)
+                {
+                    host.Children.Add(new TextBlock
+                    {
+                        Text = "Esta pergunta ainda não possui alternativas publicadas.",
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                var allowsMultiple = TeachingClassQuestionUsesMultipleSelection(question.ResponseKind);
+                host.Children.Add(new TextBlock
+                {
+                    Text = allowsMultiple
+                        ? "Selecione uma ou mais alternativas para responder esta pergunta."
+                        : "Selecione a alternativa que melhor responde a esta pergunta.",
+                    FontSize = 10.5,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                });
+
+                foreach (var option in questionOptions)
+                {
+                    var isSelected = choiceAnswerSelections.TryGetValue(question.QuestionId, out var selectedItems)
+                        && selectedItems.Any(item => string.Equals(item, option, StringComparison.OrdinalIgnoreCase));
+
+                    var optionCard = CreateDialogChoiceCard(
+                        option,
+                        allowsMultiple
+                            ? "Clique para marcar ou desmarcar esta alternativa."
+                            : "Clique para definir esta alternativa como sua resposta.",
+                        accentBrush,
+                        isSelected,
+                        (_, __) =>
+                        {
+                            if (!choiceAnswerSelections.TryGetValue(question.QuestionId, out var currentSelections))
+                            {
+                                currentSelections = new List<string>();
+                                choiceAnswerSelections[question.QuestionId] = currentSelections;
+                            }
+
+                            var existingIndex = currentSelections.FindIndex(item => string.Equals(item, option, StringComparison.OrdinalIgnoreCase));
+                            if (allowsMultiple)
+                            {
+                                if (existingIndex >= 0)
+                                {
+                                    currentSelections.RemoveAt(existingIndex);
+                                }
+                                else
+                                {
+                                    currentSelections.Add(option);
+                                }
+                            }
+                            else
+                            {
+                                if (existingIndex >= 0)
+                                {
+                                    currentSelections.Clear();
+                                }
+                                else
+                                {
+                                    currentSelections.Clear();
+                                    currentSelections.Add(option);
+                                }
+                            }
+
+                            RenderChoiceAnswerOptions(question, host);
+                        },
+                        double.NaN);
+                    optionCard.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    optionCard.Margin = new Thickness(0, 10, 0, 0);
+                    host.Children.Add(optionCard);
+                }
+            }
+
+            void NavigateSubmissionSection(string sectionKey)
+            {
+                Border? target = sectionKey switch
+                {
+                    "questionario" => questionnaireSectionCard?.Visibility == Visibility.Visible ? questionnaireSectionCard : null,
+                    "arquivos" => filesSectionCard,
+                    _ => responseSectionCard
+                };
+
+                if (target == null)
+                {
+                    return;
+                }
+
+                selectedSubmissionSection = sectionKey;
+                RenderSubmissionSidebar();
+                target.BringIntoView();
+            }
+
+            Border CreateSubmissionSidebarCard()
+            {
+                var statusBrush = GetTeachingClassAssignmentStudentStatusBrush(post, existingSubmission);
+                var chips = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                chips.Children.Add(CreateStaticTeamChip(
+                    GetTeachingClassAssignmentModeLabel(post),
+                    CreateSoftAccentBrush(accentBrush, 24),
+                    accentBrush));
+                chips.Children.Add(CreateStaticTeamChip(
+                    GetTeachingClassAssignmentStudentStatusLabel(post, existingSubmission),
+                    CreateSoftAccentBrush(statusBrush, 22),
+                    statusBrush));
+                chips.Children.Add(CreateStaticTeamChip(
+                    post.ActivityDueAt.HasValue ? $"Prazo {post.ActivityDueAt.Value:dd/MM}" : "Sem prazo",
+                    GetThemeBrush("CardBackgroundBrush"),
+                    GetThemeBrush("PrimaryTextBrush")));
+
+                return new Border
+                {
+                    Padding = new Thickness(16),
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(18),
+                    Child = new StackPanel
+                    {
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Entrega guiada",
+                                FontSize = 13,
+                                FontWeight = FontWeights.Bold,
+                                Foreground = GetThemeBrush("PrimaryTextBrush")
+                            },
+                            new TextBlock
+                            {
+                                Text = post.AllowLateSubmission
+                                    ? "A atividade aceita atraso. Organize sua resposta, revise o questionário e anexe os arquivos antes de enviar."
+                                    : "A entrega fecha no prazo. Revise sua resposta e os anexos antes de confirmar o envio.",
+                                Margin = new Thickness(0, 8, 0, 0),
+                                FontSize = 11,
+                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                TextWrapping = TextWrapping.Wrap,
+                                LineHeight = 18
+                            },
+                            chips
+                        }
+                    }
+                };
+            }
+
+            void RenderSubmissionSidebar()
+            {
+                submissionSidebarHost.Children.Clear();
+                submissionSidebarHost.Children.Add(CreateSubmissionSidebarCard());
+                submissionSidebarHost.Children.Add(new Border { Height = 12, Background = Brushes.Transparent });
+                submissionSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Resposta", PackIconMaterialKind.ClipboardTextOutline, accentBrush, string.Equals(selectedSubmissionSection, "resposta", StringComparison.OrdinalIgnoreCase), () => NavigateSubmissionSection("resposta")));
+
+                if (questionnaireSectionCard?.Visibility != Visibility.Collapsed)
+                {
+                    submissionSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Questionário", PackIconMaterialKind.MessageTextOutline, accentBrush, string.Equals(selectedSubmissionSection, "questionario", StringComparison.OrdinalIgnoreCase), () => NavigateSubmissionSection("questionario")));
+                }
+
+                submissionSidebarHost.Children.Add(CreateTeachingClassSidebarNavButton("Arquivos", PackIconMaterialKind.FolderOutline, accentBrush, string.Equals(selectedSubmissionSection, "arquivos", StringComparison.OrdinalIgnoreCase), () => NavigateSubmissionSection("arquivos")));
+            }
+
+            void RenderAttachmentSummary()
+            {
+                attachmentsHost.Children.Clear();
+                if (existingAttachments.Count == 0 && pendingAttachments.Count == 0)
+                {
+                    attachmentsHost.Children.Add(new TextBlock
+                    {
+                        Text = "Nenhum arquivo preparado ainda para esta entrega.",
+                        FontSize = 11,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        LineHeight = 18
+                    });
+                    return;
+                }
+
+                foreach (var attachment in existingAttachments)
+                {
+                    attachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = new TextBlock
+                        {
+                            Text = $"{attachment.FileName} • já enviado",
+                            FontSize = 11,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap
+                        }
+                    });
+                }
+
+                foreach (var attachment in pendingAttachments.ToList())
+                {
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    row.Children.Add(new TextBlock
+                    {
+                        Text = $"{attachment.FileName} • novo arquivo",
+                        FontSize = 11,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+
+                    var removeButton = new Button
+                    {
+                        Content = "Remover",
+                        Background = Brushes.Transparent,
+                        BorderThickness = new Thickness(0),
+                        Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38)),
+                        FontSize = 10,
+                        FontWeight = FontWeights.SemiBold,
+                        Cursor = Cursors.Hand,
+                        Padding = new Thickness(12, 0, 0, 0)
+                    };
+                    removeButton.Click += (_, __) =>
+                    {
+                        pendingAttachments.Remove(attachment);
+                        RenderAttachmentSummary();
+                    };
+                    Grid.SetColumn(removeButton, 1);
+                    row.Children.Add(removeButton);
+
+                    attachmentsHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 8),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("CardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = row
+                    });
+                }
+            }
+
+            var addAttachmentButton = CreateDialogActionButton("Adicionar arquivo", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 150);
+            addAttachmentButton.Margin = new Thickness(0);
+            addAttachmentButton.Click += (_, __) =>
+            {
+                var openDialog = new OpenFileDialog
+                {
+                    Multiselect = true,
+                    Title = $"Selecionar arquivos para {post.Title}",
+                    Filter = "Todos os arquivos|*.*"
+                };
+
+                if (openDialog.ShowDialog() != true)
+                {
+                    return;
+                }
+
+                foreach (var filePath in openDialog.FileNames)
+                {
+                    if (pendingAttachments.Any(existing => string.Equals(existing.FilePath, filePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    pendingAttachments.Add(new PendingAttachmentFile
+                    {
+                        FilePath = filePath,
+                        FileName = IOPath.GetFileName(filePath),
+                        PreviewImageDataUri = IsFilesHubImageExtension(GetFilesHubExtension(filePath, string.Empty))
+                            ? TryCreateCompressedImageDataUri(filePath, 240, 72) ?? string.Empty
+                            : string.Empty
+                    });
+                }
+
+                RenderAttachmentSummary();
+            };
+
+            var answersHost = new StackPanel();
+            if (string.Equals(post.AssignmentMode, "quiz", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var question in post.Questions)
+                {
+                    var existingAnswer = (existingSubmission?.Answers ?? new List<TeachingClassActivityAnswerInfo>())
+                        .FirstOrDefault(item => string.Equals(item.QuestionId, question.QuestionId, StringComparison.OrdinalIgnoreCase));
+                    var questionCardStack = new StackPanel();
+                    questionCardStack.Children.Add(new TextBlock
+                    {
+                        Text = question.Prompt,
+                        FontSize = 11.5,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                    questionCardStack.Children.Add(new TextBlock
+                    {
+                        Text = string.IsNullOrWhiteSpace(question.HelpText) ? string.Empty : question.HelpText,
+                        Margin = new Thickness(0, 6, 0, 0),
+                        FontSize = 10.5,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        Visibility = string.IsNullOrWhiteSpace(question.HelpText) ? Visibility.Collapsed : Visibility.Visible
+                    });
+
+                    var questionMetaWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                    questionMetaWrap.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(question.ResponseKind), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    questionMetaWrap.Children.Add(CreateStaticTeamChip(question.Required ? "Obrigatória" : "Opcional", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                    questionCardStack.Children.Add(questionMetaWrap);
+
+                    if (TeachingClassQuestionUsesChoiceOptions(question.ResponseKind))
+                    {
+                        choiceAnswerSelections[question.QuestionId] = GetInitialSelectedAnswerOptions(question, existingAnswer);
+                        var choiceHost = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+                        RenderChoiceAnswerOptions(question, choiceHost);
+                        questionCardStack.Children.Add(choiceHost);
+                    }
+                    else
+                    {
+                        var answerBox = new TextBox
+                        {
+                            Margin = new Thickness(0, 12, 0, 0),
+                            MinHeight = string.Equals(question.ResponseKind, "paragraph", StringComparison.OrdinalIgnoreCase) ? 112 : 46,
+                            AcceptsReturn = string.Equals(question.ResponseKind, "paragraph", StringComparison.OrdinalIgnoreCase),
+                            TextWrapping = TextWrapping.Wrap,
+                            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                            Text = existingAnswer?.ResponseText ?? string.Empty
+                        };
+                        ApplyDialogInputStyle(answerBox);
+                        textAnswerInputs[question.QuestionId] = answerBox;
+                        questionCardStack.Children.Add(answerBox);
+                    }
+
+                    answersHost.Children.Add(new Border
+                    {
+                        Margin = new Thickness(0, 0, 0, 12),
+                        Padding = new Thickness(12),
+                        Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                        BorderBrush = GetThemeBrush("CardBorderBrush"),
+                        BorderThickness = new Thickness(1),
+                        CornerRadius = new CornerRadius(14),
+                        Child = questionCardStack
+                    });
+                }
+            }
+
+            var saveButton = CreateDialogActionButton(existingSubmission == null ? "Enviar entrega" : "Atualizar entrega", accentBrush, Brushes.White, Brushes.Transparent, 160);
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 118);
+            cancelButton.Click += (_, __) => dialog.Close();
+
+            saveButton.Click += async (_, __) =>
+            {
+                if (_teachingClassService == null)
+                {
+                    return;
+                }
+
+                var notes = notesBox.Text.Trim();
+                var submissionLink = linkBox.Text.Trim();
+                var hasLateWindow = !post.ActivityDueAt.HasValue || DateTime.Now <= post.ActivityDueAt.Value || post.AllowLateSubmission;
+                if (!hasLateWindow)
+                {
+                    statusText.Text = "Esta atividade não aceita mais envios porque o prazo expirou sem janela de atraso.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                var answers = new List<TeachingClassActivityAnswerInfo>();
+                foreach (var question in post.Questions)
+                {
+                    if (TeachingClassQuestionUsesChoiceOptions(question.ResponseKind))
+                    {
+                        var selectedOptions = choiceAnswerSelections.TryGetValue(question.QuestionId, out var selectedItems)
+                            ? selectedItems
+                                .Where(option => !string.IsNullOrWhiteSpace(option))
+                                .Select(option => option.Trim())
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList()
+                            : new List<string>();
+
+                        if (question.Required && selectedOptions.Count == 0)
+                        {
+                            statusText.Text = $"Selecione ao menos uma alternativa para a pergunta '{question.Prompt}'.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        if (selectedOptions.Count > 0)
+                        {
+                            answers.Add(new TeachingClassActivityAnswerInfo
+                            {
+                                QuestionId = question.QuestionId,
+                                PromptSnapshot = question.Prompt,
+                                ResponseKindSnapshot = question.ResponseKind,
+                                ResponseText = TeachingClassQuestionUsesMultipleSelection(question.ResponseKind)
+                                    ? string.Join(", ", selectedOptions)
+                                    : selectedOptions[0],
+                                SelectedOptions = selectedOptions
+                            });
+                        }
+
+                        continue;
+                    }
+
+                    if (!textAnswerInputs.TryGetValue(question.QuestionId, out var answerBox))
+                    {
+                        continue;
+                    }
+
+                    var responseText = answerBox.Text.Trim();
+                    if (question.Required && string.IsNullOrWhiteSpace(responseText))
+                    {
+                        statusText.Text = $"Responda a pergunta '{question.Prompt}' antes de enviar o questionário.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(responseText))
+                    {
+                        answers.Add(new TeachingClassActivityAnswerInfo
+                        {
+                            QuestionId = question.QuestionId,
+                            PromptSnapshot = question.Prompt,
+                            ResponseKindSnapshot = question.ResponseKind,
+                            ResponseText = responseText,
+                            SelectedOptions = new List<string>()
+                        });
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(notes) && string.IsNullOrWhiteSpace(submissionLink) && pendingAttachments.Count == 0 && existingAttachments.Count == 0 && answers.Count == 0)
+                {
+                    statusText.Text = "Escreva uma observação, anexe algo, informe um link ou responda o questionário antes de enviar.";
+                    statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                    return;
+                }
+
+                saveButton.IsEnabled = false;
+                addAttachmentButton.IsEnabled = false;
+                statusText.Text = existingSubmission == null ? "Enviando entrega..." : "Atualizando entrega...";
+                statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                try
+                {
+                    var mergedAttachments = existingAttachments
+                        .Select(item => new TeachingClassPostAttachmentInfo
+                        {
+                            AttachmentId = item.AttachmentId,
+                            FileName = item.FileName,
+                            PreviewImageDataUri = item.PreviewImageDataUri,
+                            PermissionScope = item.PermissionScope,
+                            StorageKind = item.StorageKind,
+                            StorageReference = item.StorageReference,
+                            MimeType = item.MimeType,
+                            SizeBytes = item.SizeBytes,
+                            Version = item.Version,
+                            AddedByUserId = item.AddedByUserId,
+                            AddedAt = item.AddedAt
+                        })
+                        .ToList();
+
+                    foreach (var pendingAttachment in pendingAttachments)
+                    {
+                        var attachmentResult = await CreateTeachingClassPostAttachmentFromFileAsync(teachingClass, pendingAttachment.FilePath, "private");
+                        if (!attachmentResult.Success || attachmentResult.Attachment == null)
+                        {
+                            statusText.Text = attachmentResult.ErrorMessage ?? "Não foi possível sincronizar um dos anexos desta entrega.";
+                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                            return;
+                        }
+
+                        mergedAttachments.Add(attachmentResult.Attachment);
+                    }
+
+                    var submissionPayload = new TeachingClassActivitySubmissionInfo
+                    {
+                        SubmissionId = existingSubmission?.SubmissionId ?? GetCurrentUserId(),
+                        ClassId = teachingClass.ClassId,
+                        PostId = post.PostId,
+                        StudentUserId = GetCurrentUserId(),
+                        StudentName = _currentProfile?.Name ?? "Aluno da turma",
+                        Notes = notes,
+                        SubmissionLink = submissionLink,
+                        SubmittedAt = existingSubmission?.SubmittedAt ?? DateTime.Now,
+                        UpdatedAt = DateTime.Now,
+                        IsLate = post.ActivityDueAt.HasValue && DateTime.Now > post.ActivityDueAt.Value,
+                        Attachments = mergedAttachments,
+                        Answers = answers,
+                        Review = existingSubmission?.Review
+                    };
+
+                    var saveResult = await _teachingClassService.SaveHomeActivitySubmissionAsync(teachingClass.ClassId, post.PostId, submissionPayload);
+                    if (!saveResult.Success || saveResult.Submission == null)
+                    {
+                        statusText.Text = saveResult.ErrorMessage ?? "Não foi possível registrar sua entrega agora.";
+                        statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                        return;
+                    }
+
+                    post.Submissions ??= new List<TeachingClassActivitySubmissionInfo>();
+                    post.Submissions.RemoveAll(item => string.Equals(item.StudentUserId, saveResult.Submission.StudentUserId, StringComparison.OrdinalIgnoreCase));
+                    post.Submissions.Add(saveResult.Submission);
+                    teachingClass.AssignmentsReady = true;
+                    teachingClass.AssignmentsLoadedAt = DateTime.Now;
+                    TrackTeachingClassLocally(teachingClass);
+
+                    if (ProfessorDashboardStatusText != null)
+                    {
+                        ProfessorDashboardStatusText.Text = $"Entrega registrada em {teachingClass.ClassName} para {post.Title}.";
+                        ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                    }
+
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                    RenderProfessorDashboard();
+                }
+                finally
+                {
+                    saveButton.IsEnabled = true;
+                    addAttachmentButton.IsEnabled = true;
+                }
+            };
+
+            var responseSectionContent = new StackPanel();
+            responseSectionContent.Children.Add(CreateDialogFieldLabel("Observações"));
+            responseSectionContent.Children.Add(notesBox);
+            responseSectionContent.Children.Add(CreateDialogFieldLabel("Link da entrega", new Thickness(0, 16, 0, 6)));
+            responseSectionContent.Children.Add(linkBox);
+            responseSectionCard = CreateDialogSectionCard(
+                "Resposta principal",
+                "Escreva observações, contexto do envio ou um link para complementar sua entrega.",
+                accentBrush,
+                responseSectionContent,
+                new Thickness(0, 0, 0, 18));
+
+            questionnaireSectionCard = CreateDialogSectionCard(
+                "Questionário",
+                "Responda cada pergunta com texto livre ou seleção de alternativas antes de enviar sua entrega.",
+                accentBrush,
+                answersHost,
+                new Thickness(0, 0, 0, 18));
+            questionnaireSectionCard.Visibility = answersHost.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            var filesSectionContent = new StackPanel();
+            filesSectionContent.Children.Add(addAttachmentButton);
+            filesSectionContent.Children.Add(attachmentsHost);
+            filesSectionCard = CreateDialogSectionCard(
+                "Arquivos da entrega",
+                "Envie anexos privados. O professor da turma consegue ver, mas eles não ficam públicos para a sala.",
+                accentBrush,
+                filesSectionContent,
+                new Thickness(0, 0, 0, 0));
+
+            var form = new StackPanel();
+            form.Children.Add(responseSectionCard);
+            form.Children.Add(questionnaireSectionCard);
+            form.Children.Add(filesSectionCard);
+            form.Children.Add(statusText);
+
+            var bodyGrid = new Grid();
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(252) });
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            bodyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var sidebarBorder = new Border
+            {
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Child = submissionSidebarHost
+            };
+            bodyGrid.Children.Add(sidebarBorder);
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = form
+            };
+            Grid.SetColumn(scrollViewer, 2);
+            bodyGrid.Children.Add(scrollViewer);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.Children.Add(CreateDialogHeader(
+                "DOCÊNCIA",
+                existingSubmission == null ? "Enviar entrega" : "Atualizar entrega",
+                post.AllowLateSubmission
+                    ? "A atividade aceita atraso. Organize sua resposta por etapas e confira tudo antes de enviar."
+                    : "Envie sua entrega antes do prazo e revise cada etapa para não bloquear a submissão.",
+                accentBrush));
+
+            Grid.SetRow(bodyGrid, 1);
+            root.Children.Add(bodyGrid);
+
+            var footer = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 18, 0, 0),
+                Children = { cancelButton, saveButton }
+            };
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            RenderAttachmentSummary();
+            RenderSubmissionSidebar();
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.ShowDialog();
+        }
+
+                                private void ShowTeachingClassAssignmentReviewDialog(TeachingClassInfo teachingClass, TeachingClassHomePostInfo post, TeachingClassActivitySubmissionInfo submission, Brush accentBrush)
+                                {
+                                    if (_teachingClassService == null || !CanManageTeachingClass(teachingClass))
+                                    {
+                                        return;
+                                    }
+
+                                    var dialog = CreateStyledDialogWindow($"Correção • {submission.StudentName}", 920, 760, 620, true);
+                                    var selectedRubricKey = string.Empty;
+                                    var rubricChoicesHost = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                                    var feedbackTemplatesHost = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+                                    var objectiveCorrectionSummary = BuildTeachingClassObjectiveCorrectionSummary(post, submission);
+                                    var rubricPresets = new List<TeachingClassFeedbackRubricPreset>
+                                    {
+                                        new TeachingClassFeedbackRubricPreset
+                                        {
+                                            Key = "excelente",
+                                            Label = "Excelente",
+                                            Description = "Entrega completa, clara e bem fundamentada.",
+                                            ScoreRatio = 1.0,
+                                            FeedbackText = "Entrega muito bem estruturada, com resposta consistente aos critérios da atividade. Continue mantendo esse nível de clareza e organização."
+                                        },
+                                        new TeachingClassFeedbackRubricPreset
+                                        {
+                                            Key = "bom",
+                                            Label = "Bom progresso",
+                                            Description = "Atende bem ao objetivo, com pequenos ajustes possíveis.",
+                                            ScoreRatio = 0.85,
+                                            FeedbackText = "Sua entrega atende bem ao objetivo proposto. Há pequenos pontos de refinamento, mas o conjunto demonstra boa compreensão da atividade."
+                                        },
+                                        new TeachingClassFeedbackRubricPreset
+                                        {
+                                            Key = "ajustar",
+                                            Label = "Requer ajustes",
+                                            Description = "Há base de resposta, mas faltam evidências ou profundidade.",
+                                            ScoreRatio = 0.7,
+                                            FeedbackText = "Há uma base válida na entrega, mas ainda faltam evidências, detalhamento ou fechamento mais consistente em alguns critérios. Revise esses pontos para fortalecer a atividade."
+                                        },
+                                        new TeachingClassFeedbackRubricPreset
+                                        {
+                                            Key = "refazer",
+                                            Label = "Refazer trecho",
+                                            Description = "Precisa reorganizar a resposta e revisitar critérios centrais.",
+                                            ScoreRatio = 0.4,
+                                            FeedbackText = "A entrega precisa ser reorganizada e revisitada com mais atenção aos critérios centrais da atividade. Recomendo retomar os requisitos, complementar a argumentação e revisar os pontos ainda incompletos."
+                                        }
+                                    };
+                                    var feedbackTemplatePresets = new List<TeachingClassFeedbackTemplatePreset>
+                                    {
+                                        new TeachingClassFeedbackTemplatePreset
+                                        {
+                                            Label = "Clareza",
+                                            FeedbackText = "A estrutura da resposta está clara e facilita a leitura."
+                                        },
+                                        new TeachingClassFeedbackTemplatePreset
+                                        {
+                                            Label = "Evidências",
+                                            FeedbackText = "Inclua mais evidências, exemplos ou justificativas para sustentar melhor a resposta apresentada."
+                                        },
+                                        new TeachingClassFeedbackTemplatePreset
+                                        {
+                                            Label = "Critérios",
+                                            FeedbackText = "Revise os critérios da atividade e confira se todos os itens solicitados foram contemplados na entrega."
+                                        },
+                                        new TeachingClassFeedbackTemplatePreset
+                                        {
+                                            Label = "Próximo passo",
+                                            FeedbackText = "No próximo envio, priorize objetividade, organização do raciocínio e fechamento mais direto da proposta."
+                                        }
+                                    };
+                                    var gradeBox = new TextBox
+                                    {
+                                        Height = 46,
+                                        Text = (submission.Review?.GradeValue
+                                            ?? (objectiveCorrectionSummary.ObjectiveQuestionCount > 0
+                                                ? objectiveCorrectionSummary.SuggestedPoints
+                                                : post.MaxPoints)).ToString()
+                                    };
+                                    var feedbackBox = new TextBox
+                                    {
+                                        MinHeight = 160,
+                                        AcceptsReturn = true,
+                                        TextWrapping = TextWrapping.Wrap,
+                                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                                        Text = submission.Review?.FeedbackText ?? string.Empty
+                                    };
+                                    var statusText = new TextBlock
+                                    {
+                                        Margin = new Thickness(0, 12, 0, 0),
+                                        FontSize = 11,
+                                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                        TextWrapping = TextWrapping.Wrap
+                                    };
+
+                                    ApplyDialogInputStyle(gradeBox);
+                                    ApplyDialogInputStyle(feedbackBox);
+
+                                    void ApplyRubricPreset(TeachingClassFeedbackRubricPreset preset)
+                                    {
+                                        selectedRubricKey = preset.Key;
+                                        var suggestedGrade = Math.Max(0, Math.Min(post.MaxPoints, (int)Math.Round(post.MaxPoints * preset.ScoreRatio, MidpointRounding.AwayFromZero)));
+                                        gradeBox.Text = suggestedGrade.ToString();
+                                        feedbackBox.Text = preset.FeedbackText;
+                                        statusText.Text = $"Rubrica '{preset.Label}' aplicada. Ajuste a nota e o texto livremente antes de salvar.";
+                                        statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                                        RenderRubricChoices();
+                                    }
+
+                                    void ApplyFeedbackTemplate(TeachingClassFeedbackTemplatePreset preset)
+                                    {
+                                        feedbackBox.Text = preset.FeedbackText;
+                                        statusText.Text = $"Modelo '{preset.Label}' aplicado ao feedback. Personalize o texto se quiser.";
+                                        statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                                    }
+
+                                    void ApplyObjectiveCorrectionSuggestion()
+                                    {
+                                        if (objectiveCorrectionSummary.ObjectiveQuestionCount == 0)
+                                        {
+                                            statusText.Text = "Não há questões objetivas com gabarito para aplicar correção automática nesta atividade.";
+                                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                                            return;
+                                        }
+
+                                        selectedRubricKey = string.Empty;
+                                        gradeBox.Text = objectiveCorrectionSummary.SuggestedPoints.ToString();
+                                        if (string.IsNullOrWhiteSpace(feedbackBox.Text))
+                                        {
+                                            feedbackBox.Text = objectiveCorrectionSummary.RemainingManualPoints > 0
+                                                ? $"Correção automática parcial aplicada nas questões objetivas: {objectiveCorrectionSummary.ObjectiveCorrectCount} de {objectiveCorrectionSummary.ObjectiveQuestionCount} corretas. Ainda restam até {objectiveCorrectionSummary.RemainingManualPoints} ponto(s) para avaliação manual das respostas abertas."
+                                                : $"Correção automática aplicada: {objectiveCorrectionSummary.ObjectiveCorrectCount} de {objectiveCorrectionSummary.ObjectiveQuestionCount} questão(ões) objetiva(s) corretas.";
+                                        }
+
+                                        statusText.Text = objectiveCorrectionSummary.RemainingManualPoints > 0
+                                            ? $"Sugestão automática aplicada com {objectiveCorrectionSummary.SuggestedPoints}/{post.MaxPoints} ponto(s). Revise as respostas abertas antes de salvar a nota final."
+                                            : $"Sugestão automática aplicada com {objectiveCorrectionSummary.SuggestedPoints}/{post.MaxPoints} ponto(s).";
+                                        statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                                        RenderRubricChoices();
+                                    }
+
+                                    void RenderRubricChoices()
+                                    {
+                                        rubricChoicesHost.Children.Clear();
+                                        foreach (var preset in rubricPresets)
+                                        {
+                                            var capturedPreset = preset;
+                                            rubricChoicesHost.Children.Add(CreateDialogChoiceCard(
+                                                capturedPreset.Label,
+                                                capturedPreset.Description,
+                                                accentBrush,
+                                                string.Equals(selectedRubricKey, capturedPreset.Key, StringComparison.OrdinalIgnoreCase),
+                                                (_, __) => ApplyRubricPreset(capturedPreset),
+                                                206));
+                                        }
+                                    }
+
+                                    void RenderFeedbackTemplates()
+                                    {
+                                        feedbackTemplatesHost.Children.Clear();
+                                        foreach (var preset in feedbackTemplatePresets)
+                                        {
+                                            var capturedPreset = preset;
+                                            var templateButton = CreateDialogActionButton(capturedPreset.Label, Brushes.Transparent, accentBrush, GetThemeBrush("CardBorderBrush"), 132);
+                                            templateButton.Margin = new Thickness(0, 0, 10, 10);
+                                            templateButton.Click += (_, __) => ApplyFeedbackTemplate(capturedPreset);
+                                            feedbackTemplatesHost.Children.Add(templateButton);
+                                        }
+                                    }
+
+                                    var objectiveCorrectionContent = new StackPanel();
+                                    if (objectiveCorrectionSummary.ObjectiveQuestionCount == 0)
+                                    {
+                                        objectiveCorrectionContent.Children.Add(new TextBlock
+                                        {
+                                            Text = "Nenhuma questão objetiva com gabarito foi encontrada nesta atividade. A nota continua 100% manual.",
+                                            FontSize = 11,
+                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                            TextWrapping = TextWrapping.Wrap,
+                                            LineHeight = 18
+                                        });
+                                    }
+                                    else
+                                    {
+                                        var objectiveMetrics = new WrapPanel();
+                                        objectiveMetrics.Children.Add(CreateStaticTeamChip($"{objectiveCorrectionSummary.ObjectiveCorrectCount}/{objectiveCorrectionSummary.ObjectiveQuestionCount} objetivas corretas", CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 22), new SolidColorBrush(Color.FromRgb(22, 163, 74))));
+                                        objectiveMetrics.Children.Add(CreateStaticTeamChip($"Sugestão {objectiveCorrectionSummary.SuggestedPoints}/{objectiveCorrectionSummary.ObjectivePointsBudget} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                        if (objectiveCorrectionSummary.RemainingManualPoints > 0)
+                                        {
+                                            objectiveMetrics.Children.Add(CreateStaticTeamChip($"Reserva manual {objectiveCorrectionSummary.RemainingManualPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                        }
+                                        objectiveCorrectionContent.Children.Add(objectiveMetrics);
+
+                                        objectiveCorrectionContent.Children.Add(new TextBlock
+                                        {
+                                            Margin = new Thickness(0, 12, 0, 0),
+                                            Text = objectiveCorrectionSummary.RemainingManualPoints > 0
+                                                ? "As questões objetivas já geram uma base automática de nota. Use o restante da pontuação para avaliar respostas abertas, anexos e qualidade geral da entrega."
+                                                : "Todas as perguntas deste questionário são objetivas com gabarito, então a nota sugerida já cobre a atividade inteira.",
+                                            FontSize = 11,
+                                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                            TextWrapping = TextWrapping.Wrap,
+                                            LineHeight = 18
+                                        });
+
+                                        foreach (var item in objectiveCorrectionSummary.Items)
+                                        {
+                                            var itemStack = new StackPanel();
+                                            itemStack.Children.Add(new TextBlock
+                                            {
+                                                Text = item.Prompt,
+                                                FontSize = 11.5,
+                                                FontWeight = FontWeights.Bold,
+                                                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap
+                                            });
+
+                                            var itemChips = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+                                            itemChips.Children.Add(CreateStaticTeamChip(GetTeachingClassQuestionResponseKindLabel(item.ResponseKind), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                                            itemChips.Children.Add(CreateStaticTeamChip(item.IsCorrect ? "Correta" : "Revisar", item.IsCorrect ? CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(22, 163, 74)), 22) : CreateSoftAccentBrush(new SolidColorBrush(Color.FromRgb(220, 38, 38)), 22), item.IsCorrect ? new SolidColorBrush(Color.FromRgb(22, 163, 74)) : new SolidColorBrush(Color.FromRgb(220, 38, 38))));
+                                            itemStack.Children.Add(itemChips);
+                                            itemStack.Children.Add(new TextBlock
+                                            {
+                                                Margin = new Thickness(0, 8, 0, 0),
+                                                Text = $"Gabarito: {string.Join(", ", item.CorrectOptions)}",
+                                                FontSize = 10.5,
+                                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap,
+                                                LineHeight = 18
+                                            });
+                                            itemStack.Children.Add(new TextBlock
+                                            {
+                                                Margin = new Thickness(0, 4, 0, 0),
+                                                Text = $"Resposta do aluno: {(item.SelectedOptions.Count == 0 ? "Sem resposta" : string.Join(", ", item.SelectedOptions))}",
+                                                FontSize = 10.5,
+                                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                                TextWrapping = TextWrapping.Wrap,
+                                                LineHeight = 18
+                                            });
+
+                                            objectiveCorrectionContent.Children.Add(new Border
+                                            {
+                                                Margin = new Thickness(0, 12, 0, 0),
+                                                Padding = new Thickness(12),
+                                                Background = GetThemeBrush("CardBackgroundBrush"),
+                                                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                                                BorderThickness = new Thickness(1),
+                                                CornerRadius = new CornerRadius(14),
+                                                Child = itemStack
+                                            });
+                                        }
+
+                                        var applyObjectiveSuggestionButton = CreateDialogActionButton("Aplicar sugestão automática", Brushes.Transparent, accentBrush, GetThemeBrush("CardBorderBrush"), 210);
+                                        applyObjectiveSuggestionButton.Margin = new Thickness(0, 14, 0, 0);
+                                        applyObjectiveSuggestionButton.Click += (_, __) => ApplyObjectiveCorrectionSuggestion();
+                                        objectiveCorrectionContent.Children.Add(applyObjectiveSuggestionButton);
+                                    }
+
+                                    var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 118);
+                                    cancelButton.Click += (_, __) => dialog.Close();
+                                    var saveButton = CreateDialogActionButton("Salvar feedback", accentBrush, Brushes.White, Brushes.Transparent, 156);
+                                    saveButton.Click += async (_, __) =>
+                                    {
+                                        if (_teachingClassService == null)
+                                        {
+                                            return;
+                                        }
+
+                                        if (!int.TryParse(gradeBox.Text.Trim(), out var gradeValue) || gradeValue < 0 || gradeValue > post.MaxPoints)
+                                        {
+                                            statusText.Text = $"A nota precisa ficar entre 0 e {post.MaxPoints}.";
+                                            statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                                            return;
+                                        }
+
+                                        saveButton.IsEnabled = false;
+                                        statusText.Text = "Salvando correção...";
+                                        statusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+
+                                        try
+                                        {
+                                            var reviewPayload = new TeachingClassActivityReviewInfo
+                                            {
+                                                ReviewId = submission.StudentUserId,
+                                                StudentUserId = submission.StudentUserId,
+                                                StudentName = submission.StudentName,
+                                                GradeValue = gradeValue,
+                                                MaxPoints = post.MaxPoints,
+                                                FeedbackText = feedbackBox.Text.Trim(),
+                                                GradedByUserId = GetCurrentUserId(),
+                                                GradedByName = _currentProfile?.Name ?? "Professor da turma",
+                                                GradedAt = DateTime.Now
+                                            };
+
+                                            var saveResult = await _teachingClassService.SaveHomeActivityReviewAsync(teachingClass.ClassId, post.PostId, reviewPayload);
+                                            if (!saveResult.Success || saveResult.Review == null)
+                                            {
+                                                statusText.Text = saveResult.ErrorMessage ?? "Não foi possível salvar a correção agora.";
+                                                statusText.Foreground = new SolidColorBrush(Color.FromRgb(220, 38, 38));
+                                                return;
+                                            }
+
+                                            submission.Review = saveResult.Review;
+                                            var targetSubmission = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>())
+                                                .FirstOrDefault(item => string.Equals(item.StudentUserId, submission.StudentUserId, StringComparison.OrdinalIgnoreCase));
+                                            if (targetSubmission != null)
+                                            {
+                                                targetSubmission.Review = saveResult.Review;
+                                            }
+
+                                            teachingClass.AssignmentsReady = true;
+                                            teachingClass.AssignmentsLoadedAt = DateTime.Now;
+                                            TrackTeachingClassLocally(teachingClass);
+
+                                            if (ProfessorDashboardStatusText != null)
+                                            {
+                                                ProfessorDashboardStatusText.Text = $"Correção registrada para {submission.StudentName} em {post.Title}.";
+                                                ProfessorDashboardStatusText.Foreground = new SolidColorBrush(Color.FromRgb(21, 128, 61));
+                                            }
+
+                                            dialog.DialogResult = true;
+                                            dialog.Close();
+                                            RenderProfessorDashboard();
+                                        }
+                                        finally
+                                        {
+                                            saveButton.IsEnabled = true;
+                                        }
+                                    };
+
+                                    var form = new StackPanel();
+                                    form.Children.Add(CreateDialogSectionCard(
+                                        "Panorama da correção",
+                                        "Lance a nota da atividade e registre uma devolutiva objetiva para o aluno.",
+                                        accentBrush,
+                                        new StackPanel
+                                        {
+                                            Children =
+                                            {
+                                                new WrapPanel
+                                                {
+                                                    Children =
+                                                    {
+                                                        CreateStaticTeamChip(submission.StudentName, CreateSoftAccentBrush(accentBrush, 24), accentBrush),
+                                                        CreateStaticTeamChip($"Máximo {post.MaxPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
+                                                        CreateStaticTeamChip(submission.IsLate ? "Entrega com atraso" : "Entrega no prazo", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
+                                                    }
+                                                },
+                                            }
+                                        },
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    form.Children.Add(CreateDialogSectionCard(
+                                        "Correção automática parcial",
+                                        "Use o gabarito das perguntas objetivas para partir de uma sugestão automática de nota antes do ajuste final do professor.",
+                                        accentBrush,
+                                        objectiveCorrectionContent,
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    form.Children.Add(CreateDialogSectionCard(
+                                        "Rubricas rápidas",
+                                        "Aplique um ponto de partida de correção para preencher nota e feedback em um clique.",
+                                        accentBrush,
+                                        rubricChoicesHost,
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    form.Children.Add(CreateDialogSectionCard(
+                                        "Modelos de feedback",
+                                        "Use atalhos de devolutiva para ganhar velocidade e depois ajuste o texto final da correção.",
+                                        accentBrush,
+                                        feedbackTemplatesHost,
+                                        new Thickness(0, 0, 0, 16)));
+
+                                    form.Children.Add(CreateDialogSectionCard(
+                                        "Lançamento final",
+                                        "Revise a nota e personalize o feedback antes de publicar a devolutiva para o aluno.",
+                                        accentBrush,
+                                        new StackPanel
+                                        {
+                                            Children =
+                                            {
+                                                CreateDialogFieldLabel("Nota", new Thickness(0, 0, 0, 6)),
+                                                gradeBox,
+                                                CreateDialogFieldLabel("Feedback", new Thickness(0, 16, 0, 6)),
+                                                feedbackBox,
+                                                statusText
+                                            }
+                                        },
+                                        new Thickness(0, 0, 0, 0)));
+
+                                    var root = new Grid();
+                                    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                                    root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                                    root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                                    root.Children.Add(CreateDialogHeader(
+                                        "DOCÊNCIA",
+                                        "Nota e feedback",
+                                        "A devolutiva fica visível para o aluno junto da própria entrega e agora pode partir de rubricas e modelos rápidos para acelerar a correção.",
+                                        accentBrush));
+
+                                    var scrollViewer = new ScrollViewer
+                                    {
+                                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                                        Content = form
+                                    };
+                                    Grid.SetRow(scrollViewer, 1);
+                                    root.Children.Add(scrollViewer);
+
+                                    var footer = new StackPanel
+                                    {
+                                        Orientation = Orientation.Horizontal,
+                                        HorizontalAlignment = HorizontalAlignment.Right,
+                                        Margin = new Thickness(0, 18, 0, 0),
+                                        Children = { cancelButton, saveButton }
+                                    };
+                                    Grid.SetRow(footer, 2);
+                                    root.Children.Add(footer);
+
+                                    RenderRubricChoices();
+                                    RenderFeedbackTemplates();
+
+                                    dialog.Content = CreateStyledDialogShell(root);
+                                    dialog.ShowDialog();
+                                }
+
+private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
         {
             var card = new Border
             {
@@ -22582,14 +27424,14 @@ namespace MeuApp
             {
                 Height = 46,
                 Margin = new Thickness(0, 8, 0, 0),
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Equipe", Value = "team" },
-                    new { Label = "Curso", Value = "course" },
-                    new { Label = "Liderança", Value = "leadership" },
-                    new { Label = "Privado", Value = "private" }
+                    new DialogSelectionOption { Label = "Equipe", Value = "team" },
+                    new DialogSelectionOption { Label = "Curso", Value = "course" },
+                    new DialogSelectionOption { Label = "Liderança", Value = "leadership" },
+                    new DialogSelectionOption { Label = "Privado", Value = "private" }
                 },
                 SelectedValue = team.DefaultFilePermissionScope
             };
@@ -23156,12 +27998,12 @@ namespace MeuApp
             {
                 Height = 48,
                 Margin = new Thickness(0, 8, 0, 0),
-                DisplayMemberPath = "Label",
-                SelectedValuePath = "Value",
+                DisplayMemberPath = nameof(DialogSelectionOption.Label),
+                SelectedValuePath = nameof(DialogSelectionOption.Value),
                 ItemsSource = new[]
                 {
-                    new { Label = "Aluno", Value = "student" },
-                    new { Label = "Líder", Value = "leader" }
+                    new DialogSelectionOption { Label = "Aluno", Value = "student" },
+                    new DialogSelectionOption { Label = "Líder", Value = "leader" }
                 },
                 SelectedValue = TeamPermissionService.NormalizeExecutionRole(existingCard?.RequiredRole)
             };
@@ -23789,6 +28631,10 @@ namespace MeuApp
                 Cursor = Cursors.Hand,
                 Content = contentGrid
             };
+            if (TryFindResource("DialogChoiceCardButtonStyle") is Style choiceCardStyle)
+            {
+                button.Style = choiceCardStyle;
+            }
             button.Click += onClick;
             return button;
         }
@@ -28187,7 +33033,7 @@ namespace MeuApp
                 quickTools.Children.Add(notesButton);
 
                 var mediaButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
-                mediaButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                mediaButton.Click += async (_, __) => await HandleConversationMediaSelectionAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
                 quickTools.Children.Add(mediaButton);
 
                 var filesButton = CreateComposerChipButton("Arquivos", PackIconMaterialKind.FolderOutline, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
@@ -28205,7 +33051,7 @@ namespace MeuApp
                 quickTools.Children.Add(filesButton);
 
                 var mediaButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
-                mediaButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                mediaButton.Click += async (_, __) => await HandleConversationMediaSelectionAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
                 quickTools.Children.Add(mediaButton);
 
                 var mentionButton = CreateComposerChipButton("@Professor", PackIconMaterialKind.SchoolOutline, new SolidColorBrush(Color.FromRgb(124, 58, 237)));
@@ -28271,8 +33117,14 @@ namespace MeuApp
             else
             {
                 var messagesList = new StackPanel { Orientation = Orientation.Vertical };
+                var renderedMediaGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var msg in conv.Messages.OrderBy(message => message.Timestamp))
                 {
+                    if (msg.IsMediaGroupItem && !renderedMediaGroupIds.Add(msg.MediaGroupId))
+                    {
+                        continue;
+                    }
+
                     messagesList.Children.Add(CreateMessageBubble(conv, msg));
                 }
 
@@ -28310,7 +33162,7 @@ namespace MeuApp
                 quickActionPanel.Children.Add(notesShortcutButton);
 
                 var mediaShortcutButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
-                mediaShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                mediaShortcutButton.Click += async (_, __) => await HandleConversationMediaSelectionAsync(conv, inputBox, "Selecionar midia para o chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
                 quickActionPanel.Children.Add(mediaShortcutButton);
 
                 var fileShortcutButton = CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
@@ -28332,7 +33184,7 @@ namespace MeuApp
                 quickActionPanel.Children.Add(quickActionButton);
 
                 var mediaShortcutButton = CreateComposerChipButton("Mídia", PackIconMaterialKind.ImageOutline, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
-                mediaShortcutButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
+                mediaShortcutButton.Click += async (_, __) => await HandleConversationMediaSelectionAsync(conv, inputBox, "Selecionar midia para compartilhar no chat", "Midia|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.bmp;*.mp4;*.mov;*.avi;*.wmv|Todos os arquivos|*.*");
                 quickActionPanel.Children.Add(mediaShortcutButton);
 
                 var fileShortcutButton = CreateComposerChipButton("Arquivo", PackIconMaterialKind.Paperclip, new SolidColorBrush(Color.FromRgb(59, 130, 246)));
@@ -28401,8 +33253,8 @@ namespace MeuApp
             Grid.SetColumn(inputBox, 2);
             inputGrid.Children.Add(inputBox);
 
-            var micButton = CreateHeaderIconButton(PackIconMaterialKind.MicrophoneOutline, "Adicionar audio", new SolidColorBrush(Color.FromRgb(20, 184, 166)));
-            micButton.Click += async (_, __) => await SendConversationAttachmentsAsync(conv, inputBox, "Selecionar audio para o chat", "Arquivos de audio|*.mp3;*.wav;*.m4a;*.aac;*.ogg;*.wma|Todos os arquivos|*.*");
+            var micButton = CreateHeaderIconButton(PackIconMaterialKind.MicrophoneOutline, "Gravar audio", new SolidColorBrush(Color.FromRgb(20, 184, 166)));
+            micButton.Click += async (_, __) => await RecordConversationAudioAsync(conv, inputBox);
             Grid.SetColumn(micButton, 3);
             inputGrid.Children.Add(micButton);
 
@@ -28549,17 +33401,139 @@ namespace MeuApp
                 return;
             }
 
+            var drafts = dialog.FileNames
+                .Where(filePath => !string.IsNullOrWhiteSpace(filePath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(filePath => new ChatAttachmentSendDraft
+                {
+                    FilePath = filePath
+                })
+                .ToList();
+
+            await SendConversationAttachmentDraftsAsync(conv, inputBox, drafts);
+        }
+
+        private async Task HandleConversationMediaSelectionAsync(Conversation conv, TextBox? inputBox, string title, string filter)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Multiselect = true,
+                Title = title,
+                Filter = filter
+            };
+
+            if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0)
+            {
+                return;
+            }
+
+            var selectedPaths = dialog.FileNames
+                .Where(filePath => !string.IsNullOrWhiteSpace(filePath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (selectedPaths.Count == 0)
+            {
+                return;
+            }
+
+            var imagePaths = selectedPaths
+                .Where(filePath => string.Equals(ResolveConversationAttachmentMessageType(filePath), "image", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var remainingPaths = selectedPaths
+                .Where(filePath => !imagePaths.Contains(filePath, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+
+            var draftsToSend = new List<ChatAttachmentSendDraft>();
+
+            if (imagePaths.Count > 0)
+            {
+                var imageDrafts = imagePaths
+                    .Select(CreateConversationImageComposerDraft)
+                    .Where(draft => draft != null)
+                    .Cast<ChatImageComposerDraft>()
+                    .ToList();
+
+                if (imageDrafts.Count > 0)
+                {
+                    var composerResult = ShowConversationImageComposerDialog(imageDrafts);
+                    if (composerResult.Confirmed && composerResult.Drafts.Count > 0)
+                    {
+                        var mediaGroupId = composerResult.Drafts.Count > 1
+                            ? Guid.NewGuid().ToString("N")
+                            : string.Empty;
+
+                        for (var index = 0; index < composerResult.Drafts.Count; index++)
+                        {
+                            var draft = composerResult.Drafts[index];
+                            draftsToSend.Add(new ChatAttachmentSendDraft
+                            {
+                                FilePath = draft.WorkingFilePath,
+                                Caption = index == 0 ? composerResult.Caption : string.Empty,
+                                PreviewDataUri = draft.PreviewDataUri,
+                                MediaGroupId = mediaGroupId,
+                                MediaGroupIndex = string.IsNullOrWhiteSpace(mediaGroupId) ? 0 : index,
+                                MediaGroupCount = string.IsNullOrWhiteSpace(mediaGroupId) ? 0 : composerResult.Drafts.Count
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Imagens indisponiveis",
+                        "As imagens selecionadas nao puderam ser preparadas para o composer agora.",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(234, 88, 12)));
+                }
+            }
+
+            draftsToSend.AddRange(remainingPaths.Select(filePath => new ChatAttachmentSendDraft
+            {
+                FilePath = filePath
+            }));
+
+            if (draftsToSend.Count == 0)
+            {
+                return;
+            }
+
+            await SendConversationAttachmentDraftsAsync(conv, inputBox, draftsToSend);
+        }
+
+        private async Task<bool> SendConversationAttachmentDraftsAsync(Conversation conv, TextBox? inputBox, IReadOnlyList<ChatAttachmentSendDraft> drafts)
+        {
+            var normalizedDrafts = (drafts ?? Array.Empty<ChatAttachmentSendDraft>())
+                .Where(draft => draft != null && !string.IsNullOrWhiteSpace(draft.FilePath))
+                .ToList();
+            if (normalizedDrafts.Count == 0)
+            {
+                return false;
+            }
+
             var sentMessages = new List<ChatMessage>();
             var failedFiles = new List<string>();
             ChatService? chatService = !string.IsNullOrWhiteSpace(_idToken)
                 ? new ChatService(_idToken, _currentProfile?.UserId ?? string.Empty)
                 : null;
 
-            foreach (var filePath in dialog.FileNames)
+            foreach (var draft in normalizedDrafts)
             {
                 try
                 {
-                    var localMessage = CreateLocalAttachmentMessage(filePath);
+                    if (!File.Exists(draft.FilePath))
+                    {
+                        failedFiles.Add($"{IOPath.GetFileName(draft.FilePath)} (arquivo nao encontrado)");
+                        continue;
+                    }
+
+                    var localMessage = CreateLocalAttachmentMessage(
+                        draft.FilePath,
+                        draft.Caption,
+                        draft.PreviewDataUri,
+                        draft.MediaGroupId,
+                        draft.MediaGroupIndex,
+                        draft.MediaGroupCount);
                     ChatMessage messageToAppend = localMessage;
 
                     if (chatService != null)
@@ -28568,11 +33542,16 @@ namespace MeuApp
                             conv.ContactId,
                             conv.ContactName,
                             localMessage.SenderName,
-                            filePath);
+                            draft.FilePath,
+                            caption: draft.Caption,
+                            attachmentPreviewDataUri: draft.PreviewDataUri,
+                            mediaGroupId: draft.MediaGroupId,
+                            mediaGroupIndex: draft.MediaGroupIndex,
+                            mediaGroupCount: draft.MediaGroupCount);
 
                         if (!sendResult.Success)
                         {
-                            failedFiles.Add($"{IOPath.GetFileName(filePath)} ({sendResult.ErrorMessage})");
+                            failedFiles.Add($"{IOPath.GetFileName(draft.FilePath)} ({sendResult.ErrorMessage})");
                             continue;
                         }
 
@@ -28587,8 +33566,8 @@ namespace MeuApp
                 }
                 catch (Exception ex)
                 {
-                    DebugHelper.WriteLine($"[ChatAttachment] Falha ao enviar {filePath}: {ex.Message}");
-                    failedFiles.Add($"{IOPath.GetFileName(filePath)} ({ex.Message})");
+                    DebugHelper.WriteLine($"[ChatAttachment] Falha ao enviar {draft.FilePath}: {ex.Message}");
+                    failedFiles.Add($"{IOPath.GetFileName(draft.FilePath)} ({ex.Message})");
                 }
             }
 
@@ -28600,7 +33579,7 @@ namespace MeuApp
 
             if (failedFiles.Count == 0)
             {
-                return;
+                return sentMessages.Count > 0;
             }
 
             var failureSummary = string.Join(Environment.NewLine, failedFiles.Take(4));
@@ -28617,6 +33596,1198 @@ namespace MeuApp
                     : $"Nenhum anexo foi enviado.{Environment.NewLine}{Environment.NewLine}{failureSummary}",
                 "Fechar",
                 new SolidColorBrush(Color.FromRgb(234, 88, 12)));
+
+            return sentMessages.Count > 0;
+        }
+
+        private Task RecordConversationAudioAsync(Conversation conv, TextBox? inputBox)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(20, 184, 166));
+            var dialog = CreateStyledDialogWindow("Gravar audio", 720, 560, 500);
+            var captionBox = new TextBox
+            {
+                MinHeight = 96,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            ApplyDialogInputStyle(captionBox);
+
+            var statusText = new TextBlock
+            {
+                Text = "Toque em iniciar para gravar pelo microfone do app.",
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            };
+            var timerText = new TextBlock
+            {
+                Text = "00:00",
+                FontSize = 32,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            };
+
+            var startButton = CreateDialogActionButton("Iniciar gravação", accentBrush, Brushes.White, Brushes.Transparent, 160);
+            var stopButton = CreateDialogActionButton("Parar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 120);
+            var retryButton = CreateDialogActionButton("Gravar de novo", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 150);
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 118);
+            var sendButton = CreateDialogActionButton("Enviar audio", accentBrush, Brushes.White, Brushes.Transparent, 138);
+
+            stopButton.IsEnabled = false;
+            retryButton.IsEnabled = false;
+            sendButton.IsEnabled = false;
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            root.Children.Add(CreateDialogHeader(
+                "CHAT",
+                "Gravação interna de áudio",
+                "O áudio agora é capturado dentro do aplicativo. Grave, revise a legenda e só envie quando estiver pronto.",
+                accentBrush));
+
+            var body = new StackPanel();
+            body.Children.Add(CreateDialogSectionCard(
+                "Status da gravação",
+                "O cronômetro corre só enquanto o microfone estiver ativo.",
+                accentBrush,
+                new StackPanel
+                {
+                    Children =
+                    {
+                        timerText,
+                        new Border
+                        {
+                            Margin = new Thickness(0, 10, 0, 0),
+                            Child = statusText
+                        }
+                    }
+                }));
+
+            var captionContent = new StackPanel();
+            captionContent.Children.Add(CreateDialogFieldLabel("Legenda opcional"));
+            captionContent.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 8, 0, 0),
+                Child = captionBox
+            });
+            captionContent.Children.Add(CreateDialogHintCard(
+                "Use a legenda para contextualizar a gravação antes do envio. O arquivo só sobe quando você clicar em enviar.",
+                accentBrush));
+
+            body.Children.Add(CreateDialogSectionCard(
+                "Legenda e envio",
+                "A mesma lógica do composer vale aqui: grave, confira e só então confirme o envio.",
+                accentBrush,
+                captionContent,
+                new Thickness(0, 0, 0, 0)));
+
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = body
+            };
+            Grid.SetRow(scrollViewer, 1);
+            root.Children.Add(scrollViewer);
+
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 18, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            var footerActions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            footerActions.Children.Add(startButton);
+            footerActions.Children.Add(stopButton);
+            footerActions.Children.Add(retryButton);
+            footerActions.Children.Add(cancelButton);
+            footerActions.Children.Add(sendButton);
+            footer.Child = footerActions;
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            dialog.Content = CreateStyledDialogShell(root);
+
+            ChatMicrophoneRecorder? recorder = null;
+            var recordingStartedAt = DateTime.MinValue;
+            var recordedFilePath = string.Empty;
+            var wasSent = false;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            timer.Tick += (_, __) =>
+            {
+                if (recordingStartedAt == DateTime.MinValue)
+                {
+                    timerText.Text = "00:00";
+                    return;
+                }
+
+                timerText.Text = FormatConversationAudioDuration(DateTime.Now - recordingStartedAt);
+            };
+
+            void ResetRecordingState(bool allowRestart)
+            {
+                timer.Stop();
+                timerText.Text = "00:00";
+                recordingStartedAt = DateTime.MinValue;
+                startButton.IsEnabled = allowRestart;
+                stopButton.IsEnabled = false;
+                retryButton.IsEnabled = !string.IsNullOrWhiteSpace(recordedFilePath) || !allowRestart;
+                sendButton.IsEnabled = !string.IsNullOrWhiteSpace(recordedFilePath) && File.Exists(recordedFilePath);
+            }
+
+            void ClearPendingRecording()
+            {
+                try
+                {
+                    recorder?.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    DebugHelper.WriteLine($"[ChatAudio] Falha ao cancelar gravação: {ex.Message}");
+                }
+
+                recorder?.Dispose();
+                recorder = null;
+
+                if (!wasSent && !string.IsNullOrWhiteSpace(recordedFilePath) && File.Exists(recordedFilePath))
+                {
+                    try
+                    {
+                        File.Delete(recordedFilePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugHelper.WriteLine($"[ChatAudio] Falha ao limpar áudio temporário: {ex.Message}");
+                    }
+                }
+
+                recordedFilePath = string.Empty;
+            }
+
+            startButton.Click += (_, __) =>
+            {
+                try
+                {
+                    ClearPendingRecording();
+                    recordedFilePath = CreateConversationAudioRecordingPath(conv);
+                    recorder = new ChatMicrophoneRecorder(recordedFilePath);
+                    recorder.Start();
+                    recordingStartedAt = DateTime.Now;
+                    statusText.Text = "Gravando pelo microfone do aplicativo. Clique em parar quando terminar.";
+                    timerText.Text = "00:00";
+                    timer.Start();
+                    startButton.IsEnabled = false;
+                    stopButton.IsEnabled = true;
+                    retryButton.IsEnabled = false;
+                    sendButton.IsEnabled = false;
+                }
+                catch (Exception ex)
+                {
+                    ClearPendingRecording();
+                    statusText.Text = "Não foi possível iniciar a gravação. Verifique o microfone e tente novamente.";
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Microfone indisponível",
+                        $"O aplicativo não conseguiu acessar o microfone agora.\n\n{ex.Message}",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    ResetRecordingState(allowRestart: true);
+                }
+            };
+
+            stopButton.Click += (_, __) =>
+            {
+                try
+                {
+                    recorder?.StopAndSave();
+                    timer.Stop();
+                    timerText.Text = FormatConversationAudioDuration(DateTime.Now - recordingStartedAt);
+                    statusText.Text = "Áudio pronto para envio. Revise a legenda e confirme quando quiser publicar no chat.";
+                    startButton.IsEnabled = false;
+                    stopButton.IsEnabled = false;
+                    retryButton.IsEnabled = true;
+                    sendButton.IsEnabled = !string.IsNullOrWhiteSpace(recordedFilePath) && File.Exists(recordedFilePath);
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = "A gravação falhou ao ser finalizada. Você pode tentar novamente.";
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Falha ao finalizar áudio",
+                        $"O áudio não pôde ser salvo agora.\n\n{ex.Message}",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    ClearPendingRecording();
+                    ResetRecordingState(allowRestart: true);
+                }
+            };
+
+            retryButton.Click += (_, __) =>
+            {
+                ClearPendingRecording();
+                statusText.Text = "Gravação descartada. Inicie outra captura quando quiser.";
+                ResetRecordingState(allowRestart: true);
+            };
+
+            cancelButton.Click += (_, __) => dialog.Close();
+            sendButton.Click += async (_, __) =>
+            {
+                if (string.IsNullOrWhiteSpace(recordedFilePath) || !File.Exists(recordedFilePath))
+                {
+                    statusText.Text = "Nenhum áudio pronto para envio. Grave novamente para continuar.";
+                    sendButton.IsEnabled = false;
+                    return;
+                }
+
+                startButton.IsEnabled = false;
+                stopButton.IsEnabled = false;
+                retryButton.IsEnabled = false;
+                sendButton.IsEnabled = false;
+                cancelButton.IsEnabled = false;
+                statusText.Text = "Enviando áudio para o chat...";
+
+                var sent = await SendConversationAttachmentDraftsAsync(
+                    conv,
+                    inputBox,
+                    new[]
+                    {
+                        new ChatAttachmentSendDraft
+                        {
+                            FilePath = recordedFilePath,
+                            Caption = captionBox.Text?.Trim() ?? string.Empty
+                        }
+                    });
+
+                if (sent)
+                {
+                    wasSent = true;
+                    dialog.DialogResult = true;
+                    dialog.Close();
+                    return;
+                }
+
+                cancelButton.IsEnabled = true;
+                retryButton.IsEnabled = true;
+                sendButton.IsEnabled = true;
+                statusText.Text = "O envio falhou. Você pode tentar de novo ou descartar esta gravação.";
+            };
+
+            dialog.Closed += (_, __) =>
+            {
+                timer.Stop();
+                ClearPendingRecording();
+            };
+
+            dialog.ShowDialog();
+            return Task.CompletedTask;
+        }
+
+        private ChatImageComposerDraft? CreateConversationImageComposerDraft(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return null;
+            }
+
+            var imageDataUri = TryCreateCompressedImageDataUri(filePath, 1480, 86) ?? string.Empty;
+            var previewDataUri = TryCreateCompressedImageDataUri(filePath, 480, 74) ?? imageDataUri;
+            if (string.IsNullOrWhiteSpace(imageDataUri) && string.IsNullOrWhiteSpace(previewDataUri))
+            {
+                return null;
+            }
+
+            return new ChatImageComposerDraft
+            {
+                OriginalFilePath = filePath,
+                WorkingFilePath = filePath,
+                DisplayFileName = IOPath.GetFileName(filePath),
+                ImageDataUri = string.IsNullOrWhiteSpace(imageDataUri) ? previewDataUri : imageDataUri,
+                PreviewDataUri = string.IsNullOrWhiteSpace(previewDataUri) ? imageDataUri : previewDataUri
+            };
+        }
+
+        private ChatImageComposerResult ShowConversationImageComposerDialog(IReadOnlyList<ChatImageComposerDraft> imageDrafts)
+        {
+            var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+            var dialog = CreateStyledDialogWindow("Preparar mídia do chat", 1180, 820, 720, true);
+            var workingDrafts = (imageDrafts ?? Array.Empty<ChatImageComposerDraft>())
+                .Where(draft => draft != null)
+                .Select(CloneConversationImageComposerDraft)
+                .ToList();
+            ChatImageComposerDraft? selectedDraft = workingDrafts.FirstOrDefault();
+
+            var captionBox = new TextBox
+            {
+                MinHeight = 110,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
+            ApplyDialogInputStyle(captionBox);
+
+            var previewHost = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(22),
+                Padding = new Thickness(14),
+                MinHeight = 390
+            };
+            var previewMetaText = new TextBlock
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            };
+            var thumbnailsPanel = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+
+            var editButton = CreateDialogActionButton("Editar imagem", accentBrush, Brushes.White, Brushes.Transparent, 146);
+            var removeButton = CreateDialogActionButton("Remover do lote", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 154);
+            var cancelButton = CreateDialogActionButton("Cancelar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 112);
+            var sendButton = CreateDialogActionButton("Enviar mídia", accentBrush, Brushes.White, Brushes.Transparent, 144);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            root.Children.Add(CreateDialogHeader(
+                "CHAT",
+                "Prévia antes do envio",
+                "Selecione as fotos, ajuste cada uma se precisar, escreva uma legenda e só então publique a galeria no chat.",
+                accentBrush));
+
+            var contentGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.25, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.95, GridUnitType.Star) });
+            Grid.SetRow(contentGrid, 1);
+            root.Children.Add(contentGrid);
+
+            var previewCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(18)
+            };
+            var previewStack = new StackPanel();
+            previewStack.Children.Add(new TextBlock
+            {
+                Text = "Imagem em foco",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            previewStack.Children.Add(new TextBlock
+            {
+                Text = "Edite a foto selecionada, aplique crop, escreva um texto sobre a imagem e arraste esse texto antes de salvar.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+            previewStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 16, 0, 0),
+                Child = previewHost
+            });
+            previewStack.Children.Add(previewMetaText);
+
+            var previewActions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+            previewActions.Children.Add(editButton);
+            previewActions.Children.Add(removeButton);
+            previewStack.Children.Add(previewActions);
+            previewCard.Child = previewStack;
+            contentGrid.Children.Add(previewCard);
+
+            var rightCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(18)
+            };
+            Grid.SetColumn(rightCard, 2);
+
+            var rightStack = new StackPanel();
+            rightStack.Children.Add(new TextBlock
+            {
+                Text = "Legenda da galeria",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            rightStack.Children.Add(new TextBlock
+            {
+                Text = "A legenda aparece junto do primeiro item do lote, como em uma galeria contínua. Se preferir, deixe em branco e envie só as imagens.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+            rightStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 14, 0, 0),
+                Child = captionBox
+            });
+            rightStack.Children.Add(CreateDialogHintCard(
+                "Você pode selecionar mais de uma foto, revisar miniatura por miniatura e remover qualquer uma antes do envio final.",
+                accentBrush));
+            rightStack.Children.Add(new TextBlock
+            {
+                Text = "Lote selecionado",
+                Margin = new Thickness(0, 18, 0, 0),
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            rightStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                Child = thumbnailsPanel
+            });
+            rightCard.Child = rightStack;
+            contentGrid.Children.Add(rightCard);
+
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 18, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            var footerActions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            footerActions.Children.Add(cancelButton);
+            footerActions.Children.Add(sendButton);
+            footer.Child = footerActions;
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            Button CreateThumbnailButton(ChatImageComposerDraft draft, bool isSelected)
+            {
+                var previewSource = TryCreateImageSourceFromDataUri(draft.PreviewDataUri)
+                    ?? TryCreateImageSourceFromDataUri(draft.ImageDataUri)
+                    ?? TryCreateDecodedBitmapImage(draft.WorkingFilePath, 260);
+                var tileGrid = new Grid();
+                tileGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                tileGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+                tileGrid.Children.Add(new Border
+                {
+                    Height = 118,
+                    CornerRadius = new CornerRadius(14),
+                    ClipToBounds = true,
+                    Background = GetThemeBrush("CardBackgroundBrush"),
+                    Child = previewSource == null
+                        ? new TextBlock
+                        {
+                            Text = "Prévia indisponível",
+                            FontSize = 11,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            TextAlignment = TextAlignment.Center,
+                            Margin = new Thickness(12)
+                        }
+                        : new Image
+                        {
+                            Source = previewSource,
+                            Stretch = Stretch.UniformToFill
+                        }
+                });
+
+                var labelStack = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+                labelStack.Children.Add(new TextBlock
+                {
+                    Text = draft.DisplayFileName,
+                    FontSize = 10.5,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxHeight = 32
+                });
+                if (!string.IsNullOrWhiteSpace(draft.OverlayText))
+                {
+                    labelStack.Children.Add(new TextBlock
+                    {
+                        Text = "Texto aplicado na imagem",
+                        Margin = new Thickness(0, 4, 0, 0),
+                        FontSize = 9.5,
+                        Foreground = accentBrush,
+                        TextWrapping = TextWrapping.Wrap
+                    });
+                }
+                Grid.SetRow(labelStack, 1);
+                tileGrid.Children.Add(labelStack);
+
+                var button = new Button
+                {
+                    Width = 150,
+                    Height = 192,
+                    Margin = new Thickness(0, 0, 12, 12),
+                    Padding = new Thickness(12),
+                    Background = isSelected ? CreateSoftAccentBrush(accentBrush, 28) : GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(isSelected ? 2 : 1),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Stretch,
+                    Cursor = Cursors.Hand,
+                    Tag = draft,
+                    Content = tileGrid
+                };
+                button.Click += (_, __) =>
+                {
+                    selectedDraft = draft;
+                    RenderComposerState();
+                };
+                return button;
+            }
+
+            void RenderComposerState()
+            {
+                if (selectedDraft == null && workingDrafts.Count > 0)
+                {
+                    selectedDraft = workingDrafts[0];
+                }
+
+                if (selectedDraft == null)
+                {
+                    previewHost.Child = new TextBlock
+                    {
+                        Text = "Nenhuma imagem no lote. Feche o composer ou volte para selecionar novas fotos.",
+                        FontSize = 12,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap,
+                        TextAlignment = TextAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(18)
+                    };
+                    previewMetaText.Text = "O lote ficou vazio.";
+                    editButton.IsEnabled = false;
+                    removeButton.IsEnabled = false;
+                    sendButton.IsEnabled = false;
+                }
+                else
+                {
+                    var previewSource = TryCreateImageSourceFromDataUri(selectedDraft.ImageDataUri)
+                        ?? TryCreateImageSourceFromDataUri(selectedDraft.PreviewDataUri)
+                        ?? TryCreateDecodedBitmapImage(selectedDraft.WorkingFilePath, 880);
+                    previewHost.Child = previewSource == null
+                        ? new TextBlock
+                        {
+                            Text = "Não foi possível carregar a prévia desta imagem.",
+                            FontSize = 12,
+                            Foreground = GetThemeBrush("SecondaryTextBrush"),
+                            TextWrapping = TextWrapping.Wrap,
+                            TextAlignment = TextAlignment.Center,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            Margin = new Thickness(18)
+                        }
+                        : new Border
+                        {
+                            CornerRadius = new CornerRadius(18),
+                            Background = GetThemeBrush("CardBackgroundBrush"),
+                            ClipToBounds = true,
+                            Child = new Image
+                            {
+                                Source = previewSource,
+                                Stretch = Stretch.Uniform,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center,
+                                Margin = new Thickness(10)
+                            }
+                        };
+                    previewMetaText.Text = string.IsNullOrWhiteSpace(selectedDraft.OverlayText)
+                        ? $"{workingDrafts.Count} item(ns) no lote. A legenda enviada fica ancorada no primeiro item da galeria."
+                        : $"Texto aplicado: \"{selectedDraft.OverlayText}\". Arraste e ajuste novamente se quiser mudar a posição.";
+                    editButton.IsEnabled = true;
+                    removeButton.IsEnabled = true;
+                    sendButton.IsEnabled = workingDrafts.Count > 0;
+                }
+
+                thumbnailsPanel.Children.Clear();
+                foreach (var draft in workingDrafts)
+                {
+                    thumbnailsPanel.Children.Add(CreateThumbnailButton(draft, selectedDraft != null && string.Equals(selectedDraft.DraftId, draft.DraftId, StringComparison.OrdinalIgnoreCase)));
+                }
+            }
+
+            editButton.Click += (_, __) =>
+            {
+                if (selectedDraft == null)
+                {
+                    return;
+                }
+
+                var editedDraft = ShowConversationImageEditorDialog(selectedDraft);
+                if (editedDraft == null)
+                {
+                    return;
+                }
+
+                var index = workingDrafts.FindIndex(item => string.Equals(item.DraftId, editedDraft.DraftId, StringComparison.OrdinalIgnoreCase));
+                if (index >= 0)
+                {
+                    workingDrafts[index] = editedDraft;
+                    selectedDraft = editedDraft;
+                    RenderComposerState();
+                }
+            };
+
+            removeButton.Click += (_, __) =>
+            {
+                if (selectedDraft == null)
+                {
+                    return;
+                }
+
+                workingDrafts.RemoveAll(item => string.Equals(item.DraftId, selectedDraft.DraftId, StringComparison.OrdinalIgnoreCase));
+                selectedDraft = workingDrafts.FirstOrDefault();
+                RenderComposerState();
+            };
+
+            cancelButton.Click += (_, __) => dialog.Close();
+            sendButton.Click += (_, __) =>
+            {
+                if (workingDrafts.Count == 0)
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Lote vazio",
+                        "Selecione pelo menos uma imagem antes de enviar a galeria.",
+                        "Fechar",
+                        accentBrush);
+                    return;
+                }
+
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.Loaded += (_, __) => RenderComposerState();
+
+            var confirmed = dialog.ShowDialog() == true;
+            return new ChatImageComposerResult
+            {
+                Confirmed = confirmed && workingDrafts.Count > 0,
+                Caption = captionBox.Text?.Trim() ?? string.Empty,
+                Drafts = workingDrafts.Select(CloneConversationImageComposerDraft).ToList()
+            };
+        }
+
+        private ChatImageComposerDraft? ShowConversationImageEditorDialog(ChatImageComposerDraft draft)
+        {
+            var initialSource = LoadConversationImageComposerSource(draft);
+            if (initialSource == null)
+            {
+                ShowStyledAlertDialog(
+                    "CHAT",
+                    "Imagem indisponível",
+                    "Não foi possível abrir esta imagem para edição agora.",
+                    "Fechar",
+                    new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                return null;
+            }
+
+            var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
+            var dialog = CreateStyledDialogWindow($"Editar {draft.DisplayFileName}", 1080, 840, 760, true);
+            var currentSource = initialSource;
+            var currentImageDataUri = string.IsNullOrWhiteSpace(draft.ImageDataUri)
+                ? TryCreateCompressedImageDataUri(draft.WorkingFilePath, 1480, 86) ?? string.Empty
+                : draft.ImageDataUri;
+            var overlayText = draft.OverlayText ?? string.Empty;
+            var overlayFontSize = draft.OverlayFontSize <= 0 ? 28 : draft.OverlayFontSize;
+            var overlayLeft = Math.Max(24, draft.OverlayLeft);
+            var overlayTop = Math.Max(24, draft.OverlayTop);
+            ChatImageComposerDraft? editedDraft = null;
+
+            var stageCanvas = new Canvas
+            {
+                Background = Brushes.White,
+                ClipToBounds = true
+            };
+            var stageImage = new Image
+            {
+                Stretch = Stretch.Fill,
+                SnapsToDevicePixels = true
+            };
+            stageCanvas.Children.Add(stageImage);
+
+            var overlayBorder = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(214, 15, 23, 42)),
+                CornerRadius = new CornerRadius(14),
+                Padding = new Thickness(14, 8, 14, 8),
+                Cursor = Cursors.SizeAll,
+                Visibility = Visibility.Collapsed
+            };
+            var overlayLabel = new TextBlock
+            {
+                Foreground = Brushes.White,
+                FontWeight = FontWeights.ExtraBold,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 280
+            };
+            overlayBorder.Child = overlayLabel;
+            stageCanvas.Children.Add(overlayBorder);
+
+            var stageHost = new Border
+            {
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(16),
+                Child = new Viewbox
+                {
+                    Stretch = Stretch.Uniform,
+                    Child = stageCanvas
+                }
+            };
+
+            var overlayTextBox = new TextBox
+            {
+                Height = 44,
+                Text = overlayText
+            };
+            ApplyDialogInputStyle(overlayTextBox);
+
+            var fontSizeSlider = new Slider
+            {
+                Minimum = 18,
+                Maximum = 54,
+                Value = overlayFontSize,
+                TickFrequency = 1,
+                IsSnapToTickEnabled = false,
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+            ApplyDialogSliderStyle(fontSizeSlider);
+
+            var overlayPositionHint = new TextBlock
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            };
+
+            var cropButton = CreateDialogActionButton("Recortar imagem", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 148);
+            var clearTextButton = CreateDialogActionButton("Limpar texto", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 126);
+            var cancelButton = CreateDialogActionButton("Voltar", Brushes.Transparent, GetThemeBrush("PrimaryTextBrush"), GetThemeBrush("CardBorderBrush"), 110);
+            var saveButton = CreateDialogActionButton("Aplicar edição", accentBrush, Brushes.White, Brushes.Transparent, 142);
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            root.Children.Add(CreateDialogHeader(
+                "CHAT",
+                "Crop e texto sobre a imagem",
+                "Use o recorte já existente, escreva um texto por cima da foto e arraste esse texto até ficar no lugar certo.",
+                accentBrush));
+
+            var contentGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.2, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.9, GridUnitType.Star) });
+            Grid.SetRow(contentGrid, 1);
+            root.Children.Add(contentGrid);
+
+            contentGrid.Children.Add(stageHost);
+
+            var controlsCard = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24),
+                Padding = new Thickness(18)
+            };
+            Grid.SetColumn(controlsCard, 2);
+
+            var controlsStack = new StackPanel();
+            controlsStack.Children.Add(new TextBlock
+            {
+                Text = "Texto na imagem",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            controlsStack.Children.Add(new TextBlock
+            {
+                Text = "Escreva uma legenda curta, ajuste o tamanho da fonte e arraste o bloco de texto dentro da foto.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 12,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 20
+            });
+            controlsStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 14, 0, 0),
+                Child = overlayTextBox
+            });
+            controlsStack.Children.Add(new TextBlock
+            {
+                Text = "Tamanho do texto",
+                Margin = new Thickness(0, 18, 0, 0),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            controlsStack.Children.Add(fontSizeSlider);
+            controlsStack.Children.Add(overlayPositionHint);
+
+            var toolActions = new WrapPanel { Margin = new Thickness(0, 18, 0, 0) };
+            toolActions.Children.Add(cropButton);
+            toolActions.Children.Add(clearTextButton);
+            controlsStack.Children.Add(toolActions);
+
+            controlsStack.Children.Add(CreateDialogHintCard(
+                "O recorte reaproveita o editor quadrado já usado no restante do app. Se você aplicar texto, a imagem final é exportada já com esse texto incorporado.",
+                accentBrush));
+
+            controlsCard.Child = controlsStack;
+            contentGrid.Children.Add(controlsCard);
+
+            var footer = new Border
+            {
+                Padding = new Thickness(0, 18, 0, 0),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 1, 0, 0)
+            };
+            var footerActions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            footerActions.Children.Add(cancelButton);
+            footerActions.Children.Add(saveButton);
+            footer.Child = footerActions;
+            Grid.SetRow(footer, 2);
+            root.Children.Add(footer);
+
+            Point? dragStart = null;
+            var dragOriginLeft = 0d;
+            var dragOriginTop = 0d;
+
+            void ClampOverlayPosition()
+            {
+                var maxLeft = Math.Max(0, stageCanvas.Width - overlayBorder.ActualWidth - 18);
+                var maxTop = Math.Max(0, stageCanvas.Height - overlayBorder.ActualHeight - 18);
+                overlayLeft = Math.Max(18, Math.Min(maxLeft, overlayLeft));
+                overlayTop = Math.Max(18, Math.Min(maxTop, overlayTop));
+                Canvas.SetLeft(overlayBorder, overlayLeft);
+                Canvas.SetTop(overlayBorder, overlayTop);
+            }
+
+            void RenderEditorState(bool preserveOverlay = true)
+            {
+                var surfaceSize = CalculateConversationPreviewSurfaceSize(currentSource, 540, 540);
+                stageCanvas.Width = Math.Max(180, surfaceSize.Width);
+                stageCanvas.Height = Math.Max(180, surfaceSize.Height);
+                stageImage.Width = stageCanvas.Width;
+                stageImage.Height = stageCanvas.Height;
+                stageImage.Source = currentSource;
+
+                overlayText = overlayTextBox.Text?.Trim() ?? string.Empty;
+                overlayLabel.Text = overlayText;
+                overlayLabel.FontSize = fontSizeSlider.Value;
+                overlayBorder.Visibility = string.IsNullOrWhiteSpace(overlayText) ? Visibility.Collapsed : Visibility.Visible;
+
+                overlayPositionHint.Text = string.IsNullOrWhiteSpace(overlayText)
+                    ? "Digite um texto para ativar a camada arrastável sobre a imagem."
+                    : "Arraste o texto dentro da imagem para posicionar a legenda onde fizer mais sentido.";
+
+                if (!preserveOverlay)
+                {
+                    overlayLeft = 24;
+                    overlayTop = Math.Max(24, stageCanvas.Height - 96);
+                }
+
+                stageCanvas.UpdateLayout();
+                ClampOverlayPosition();
+            }
+
+            overlayBorder.SizeChanged += (_, __) => ClampOverlayPosition();
+            overlayBorder.MouseLeftButtonDown += (_, args) =>
+            {
+                if (string.IsNullOrWhiteSpace(overlayTextBox.Text))
+                {
+                    return;
+                }
+
+                dragStart = args.GetPosition(stageCanvas);
+                dragOriginLeft = overlayLeft;
+                dragOriginTop = overlayTop;
+                overlayBorder.CaptureMouse();
+            };
+            overlayBorder.MouseMove += (_, args) =>
+            {
+                if (dragStart == null || !overlayBorder.IsMouseCaptured)
+                {
+                    return;
+                }
+
+                var currentPoint = args.GetPosition(stageCanvas);
+                overlayLeft = dragOriginLeft + (currentPoint.X - dragStart.Value.X);
+                overlayTop = dragOriginTop + (currentPoint.Y - dragStart.Value.Y);
+                ClampOverlayPosition();
+            };
+            overlayBorder.MouseLeftButtonUp += (_, __) =>
+            {
+                dragStart = null;
+                overlayBorder.ReleaseMouseCapture();
+            };
+
+            overlayTextBox.TextChanged += (_, __) => RenderEditorState();
+            fontSizeSlider.ValueChanged += (_, __) => RenderEditorState();
+
+            cropButton.Click += (_, __) =>
+            {
+                var croppedDataUri = ShowImageCropperDialog(
+                    draft.WorkingFilePath,
+                    eyebrow: "CHAT",
+                    dialogTitle: "Recortar imagem do chat",
+                    headerTitle: "Ajuste a foto antes do envio",
+                    description: "Use o cropper para reposicionar a imagem. Depois volte para esta tela se quiser adicionar ou mover texto por cima.",
+                    workspaceHint: "O recorte atual trabalha com enquadramento quadrado para manter leitura consistente no chat e na galeria.",
+                    previewDescription: "A primeira prévia simula a miniatura da conversa. A segunda mostra a mesma imagem em destaque maior.",
+                    firstPreviewLabel: "Miniatura do chat",
+                    firstPreviewCircular: false,
+                    secondPreviewLabel: "Destaque da galeria",
+                    secondPreviewCircular: false,
+                    tipText: "Dica: mantenha o elemento principal no centro se a imagem for entrar em um lote com mais fotos.",
+                    saveButtonLabel: "Aplicar crop",
+                    accentColor: accentBrush.Color,
+                    outputSize: 1280,
+                    quality: 86,
+                    invalidImageTitle: "Imagem inválida",
+                    invalidImageMessage: "Não foi possível abrir esta imagem para o recorte do chat.",
+                    exportErrorTitle: "Falha ao recortar",
+                    exportErrorMessage: "O recorte não pôde ser exportado agora.");
+                if (string.IsNullOrWhiteSpace(croppedDataUri))
+                {
+                    return;
+                }
+
+                if (TryCreateImageSourceFromDataUri(croppedDataUri) is BitmapSource croppedSource)
+                {
+                    currentImageDataUri = croppedDataUri;
+                    currentSource = croppedSource;
+                    RenderEditorState(preserveOverlay: false);
+                }
+            };
+
+            clearTextButton.Click += (_, __) =>
+            {
+                overlayTextBox.Clear();
+                overlayLeft = 24;
+                overlayTop = Math.Max(24, stageCanvas.Height - 96);
+                RenderEditorState();
+            };
+
+            cancelButton.Click += (_, __) => dialog.Close();
+            saveButton.Click += (_, __) =>
+            {
+                var finalDataUri = currentImageDataUri;
+                overlayText = overlayTextBox.Text?.Trim() ?? string.Empty;
+                overlayFontSize = fontSizeSlider.Value;
+
+                if (!string.IsNullOrWhiteSpace(overlayText))
+                {
+                    var outputSize = CalculateConversationImageOutputSize(currentSource, 1480);
+                    finalDataUri = CreateJpegDataUriFromVisual(stageCanvas, outputSize.Width, outputSize.Height, 86);
+                }
+
+                if (string.IsNullOrWhiteSpace(finalDataUri))
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Falha ao gerar imagem",
+                        "A edição não pôde ser exportada agora. Tente ajustar a imagem novamente.",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
+
+                var workingFilePath = string.Equals(finalDataUri, draft.ImageDataUri, StringComparison.Ordinal)
+                    && !string.IsNullOrWhiteSpace(draft.WorkingFilePath)
+                    && File.Exists(draft.WorkingFilePath)
+                        ? draft.WorkingFilePath
+                        : SaveConversationImageDataUriToWorkingFile(finalDataUri, draft.DisplayFileName) ?? draft.WorkingFilePath;
+                if (string.IsNullOrWhiteSpace(workingFilePath) || !File.Exists(workingFilePath))
+                {
+                    ShowStyledAlertDialog(
+                        "CHAT",
+                        "Falha ao salvar edição",
+                        "A imagem editada não conseguiu gerar um arquivo local para envio.",
+                        "Fechar",
+                        new SolidColorBrush(Color.FromRgb(220, 38, 38)));
+                    return;
+                }
+
+                editedDraft = new ChatImageComposerDraft
+                {
+                    DraftId = draft.DraftId,
+                    OriginalFilePath = draft.OriginalFilePath,
+                    WorkingFilePath = workingFilePath,
+                    DisplayFileName = IOPath.GetFileName(workingFilePath),
+                    ImageDataUri = finalDataUri,
+                    PreviewDataUri = TryCreateCompressedImageDataUriFromDataUri(finalDataUri, 480, 74) ?? finalDataUri,
+                    OverlayText = overlayText,
+                    OverlayLeft = overlayLeft,
+                    OverlayTop = overlayTop,
+                    OverlayFontSize = overlayFontSize
+                };
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            dialog.Content = CreateStyledDialogShell(root);
+            dialog.Loaded += (_, __) => RenderEditorState(preserveOverlay: false);
+            return dialog.ShowDialog() == true ? editedDraft : null;
+        }
+
+        private ChatImageComposerDraft CloneConversationImageComposerDraft(ChatImageComposerDraft draft)
+        {
+            return new ChatImageComposerDraft
+            {
+                DraftId = draft.DraftId,
+                OriginalFilePath = draft.OriginalFilePath,
+                WorkingFilePath = draft.WorkingFilePath,
+                DisplayFileName = draft.DisplayFileName,
+                ImageDataUri = draft.ImageDataUri,
+                PreviewDataUri = draft.PreviewDataUri,
+                OverlayText = draft.OverlayText,
+                OverlayLeft = draft.OverlayLeft,
+                OverlayTop = draft.OverlayTop,
+                OverlayFontSize = draft.OverlayFontSize
+            };
+        }
+
+        private BitmapSource? LoadConversationImageComposerSource(ChatImageComposerDraft draft)
+        {
+            return TryCreateImageSourceFromDataUri(draft?.ImageDataUri) as BitmapSource
+                ?? TryLoadBitmapSourceFromFile(draft?.WorkingFilePath ?? string.Empty)
+                ?? TryLoadBitmapSourceFromFile(draft?.OriginalFilePath ?? string.Empty);
+        }
+
+        private Size CalculateConversationPreviewSurfaceSize(BitmapSource source, double maxWidth, double maxHeight)
+        {
+            if (source == null || source.PixelWidth <= 0 || source.PixelHeight <= 0)
+            {
+                return new Size(Math.Max(260, maxWidth), Math.Max(260, maxHeight));
+            }
+
+            var scale = Math.Min(maxWidth / source.PixelWidth, maxHeight / source.PixelHeight);
+            if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
+            {
+                scale = 1;
+            }
+
+            scale = Math.Min(1, scale);
+            return new Size(
+                Math.Max(220, source.PixelWidth * scale),
+                Math.Max(180, source.PixelHeight * scale));
+        }
+
+        private (int Width, int Height) CalculateConversationImageOutputSize(BitmapSource source, int maxSide)
+        {
+            if (source == null || source.PixelWidth <= 0 || source.PixelHeight <= 0)
+            {
+                return (maxSide, maxSide);
+            }
+
+            var largestSide = Math.Max(source.PixelWidth, source.PixelHeight);
+            var scale = largestSide > maxSide
+                ? (double)maxSide / largestSide
+                : 1d;
+
+            return (
+                Math.Max(1, (int)Math.Round(source.PixelWidth * scale)),
+                Math.Max(1, (int)Math.Round(source.PixelHeight * scale)));
+        }
+
+        private string? SaveConversationImageDataUriToWorkingFile(string? dataUri, string preferredFileName)
+        {
+            var payload = TryExtractDataUriPayload(dataUri);
+            if (!payload.Success || payload.Bytes.Length == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                var directory = IOPath.Combine(GetFilesHubRootDirectory(), "chat-media");
+                Directory.CreateDirectory(directory);
+
+                var safeName = SanitizeFileNameSegment(IOPath.GetFileNameWithoutExtension(preferredFileName));
+                var extension = ResolveConversationGeneratedAttachmentExtension(payload.MimeType, preferredFileName);
+                var filePath = IOPath.Combine(directory, $"{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{safeName}{extension}");
+                File.WriteAllBytes(filePath, payload.Bytes);
+                return filePath;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatImageEdit] Falha ao salvar arquivo temporário da mídia: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string ResolveConversationGeneratedAttachmentExtension(string mimeType, string fallbackFileName)
+        {
+            var normalizedMimeType = (mimeType ?? string.Empty).Trim().ToLowerInvariant();
+            return normalizedMimeType switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                "image/bmp" => ".bmp",
+                "image/gif" => ".gif",
+                _ => string.Equals(normalizedMimeType, "image/jpeg", StringComparison.OrdinalIgnoreCase)
+                    ? ".jpg"
+                    : (string.IsNullOrWhiteSpace(IOPath.GetExtension(fallbackFileName)) ? ".jpg" : IOPath.GetExtension(fallbackFileName))
+            };
+        }
+
+        private string CreateConversationAudioRecordingPath(Conversation conv)
+        {
+            var directory = IOPath.Combine(GetFilesHubRootDirectory(), "chat-audio");
+            Directory.CreateDirectory(directory);
+            var contactName = SanitizeFileNameSegment(GetConversationParticipantName(conv));
+            return IOPath.Combine(directory, $"audio-{contactName}-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.wav");
+        }
+
+        private string FormatConversationAudioDuration(TimeSpan duration)
+        {
+            if (duration < TimeSpan.Zero)
+            {
+                duration = TimeSpan.Zero;
+            }
+
+            return duration.TotalHours >= 1
+                ? duration.ToString(@"hh\:mm\:ss")
+                : duration.ToString(@"mm\:ss");
         }
 
         private void AppendMessagesToConversation(Conversation conv, params ChatMessage[] messages)
@@ -28679,7 +34850,13 @@ namespace MeuApp
             return message;
         }
 
-        private ChatMessage CreateLocalAttachmentMessage(string filePath)
+        private ChatMessage CreateLocalAttachmentMessage(
+            string filePath,
+            string? caption = null,
+            string? previewDataUri = null,
+            string? mediaGroupId = null,
+            int mediaGroupIndex = 0,
+            int mediaGroupCount = 0)
         {
             var fileInfo = new FileInfo(filePath);
             var messageType = ResolveConversationAttachmentMessageType(fileInfo.Name);
@@ -28689,12 +34866,18 @@ namespace MeuApp
                 DocumentId = Guid.NewGuid().ToString("N"),
                 SenderId = _currentProfile?.UserId ?? "self",
                 SenderName = _currentProfile?.Name ?? "Voce",
-                Content = BuildConversationAttachmentPreviewText(messageType, fileInfo.Name),
+                Content = string.IsNullOrWhiteSpace(caption)
+                    ? BuildConversationAttachmentPreviewText(messageType, fileInfo.Name)
+                    : caption.Trim(),
                 MessageType = messageType,
                 AttachmentFileName = fileInfo.Name,
                 AttachmentContentType = GetConversationAttachmentContentType(fileInfo.Name),
                 AttachmentSizeBytes = fileInfo.Exists ? fileInfo.Length : 0,
                 AttachmentLocalPath = fileInfo.FullName,
+                AttachmentPreviewDataUri = string.IsNullOrWhiteSpace(previewDataUri) ? string.Empty : previewDataUri.Trim(),
+                MediaGroupId = string.IsNullOrWhiteSpace(mediaGroupId) ? string.Empty : mediaGroupId.Trim(),
+                MediaGroupIndex = Math.Max(0, mediaGroupIndex),
+                MediaGroupCount = Math.Max(0, mediaGroupCount),
                 Timestamp = DateTime.Now,
                 IsOwn = true
             };
@@ -28860,7 +35043,7 @@ namespace MeuApp
 
                 if (msg.HasAttachment)
                 {
-                    messageContent.Children.Add(CreateConversationAttachmentBubbleContent(msg, msg.IsOwn ? ownTextBrush : otherTextBrush));
+                    messageContent.Children.Add(CreateConversationAttachmentBubbleContent(conv, msg, msg.IsOwn ? ownTextBrush : otherTextBrush));
                 }
 
                 if (msg.HasLinkPreview)
@@ -28982,8 +35165,13 @@ namespace MeuApp
                 StringComparison.OrdinalIgnoreCase);
         }
 
-        private UIElement CreateConversationAttachmentBubbleContent(ChatMessage msg, Brush primaryTextBrush)
+        private UIElement CreateConversationAttachmentBubbleContent(Conversation conv, ChatMessage msg, Brush primaryTextBrush)
         {
+            if (msg.IsMediaGroupItem && CreateConversationMediaGroupBubbleContent(conv, msg, primaryTextBrush) is UIElement mediaGroupContent)
+            {
+                return mediaGroupContent;
+            }
+
             var cardBackground = msg.IsOwn
                 ? new SolidColorBrush(Color.FromArgb(34, 255, 255, 255))
                 : _appDarkModeEnabled
@@ -29080,6 +35268,183 @@ namespace MeuApp
             };
         }
 
+        private UIElement? CreateConversationMediaGroupBubbleContent(Conversation conv, ChatMessage anchorMessage, Brush primaryTextBrush)
+        {
+            var groupMessages = GetConversationMediaGroupMessages(conv, anchorMessage);
+            if (groupMessages.Count <= 1)
+            {
+                return null;
+            }
+
+            var cardBackground = anchorMessage.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(34, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            var cardBorder = anchorMessage.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(68, 255, 255, 255))
+                : _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(71, 85, 105))
+                    : new SolidColorBrush(Color.FromRgb(203, 213, 225));
+            var secondaryTextBrush = anchorMessage.IsOwn
+                ? new SolidColorBrush(Color.FromArgb(204, 255, 255, 255))
+                : GetThemeBrush("SecondaryTextBrush");
+
+            var previewSources = groupMessages
+                .Select(message => TryCreateConversationAttachmentDisplaySource(message, preferLocalFile: false, decodePixelWidth: 420))
+                .Where(source => source != null)
+                .Cast<ImageSource>()
+                .ToList();
+
+            var previewSurface = new Border
+            {
+                Height = groupMessages.Count > 3 ? 228 : 208,
+                CornerRadius = new CornerRadius(14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                ClipToBounds = true,
+                Cursor = Cursors.Hand,
+                Child = CreateProfileGalleryMetadataPreview(previewSources, isAlbum: true)
+            };
+            previewSurface.MouseLeftButtonUp += (_, __) => OpenConversationMediaGallery(groupMessages, anchorMessage);
+
+            var content = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                Margin = new Thickness(0, ShouldShowConversationMessageText(anchorMessage) ? 8 : 0, 0, 0)
+            };
+            content.Children.Add(previewSurface);
+            content.Children.Add(new TextBlock
+            {
+                Text = groupMessages.Count == 2 ? "2 fotos enviadas em galeria" : $"{groupMessages.Count} fotos enviadas em galeria",
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = secondaryTextBrush
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = BuildConversationMediaGroupLabel(groupMessages),
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12,
+                Foreground = primaryTextBrush,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+
+            var openButton = new Button
+            {
+                Content = "Abrir galeria",
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(12, 6, 12, 6),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = anchorMessage.IsOwn
+                    ? new SolidColorBrush(Color.FromArgb(56, 255, 255, 255))
+                    : GetThemeBrush("AccentBrush"),
+                Foreground = Brushes.White
+            };
+            openButton.Click += (_, __) => OpenConversationMediaGallery(groupMessages, anchorMessage);
+            content.Children.Add(openButton);
+
+            return new Border
+            {
+                Margin = new Thickness(0, ShouldShowConversationMessageText(anchorMessage) ? 8 : 0, 0, 0),
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(14),
+                Background = cardBackground,
+                BorderBrush = cardBorder,
+                BorderThickness = new Thickness(1),
+                Child = content
+            };
+        }
+
+        private List<ChatMessage> GetConversationMediaGroupMessages(Conversation conv, ChatMessage anchorMessage)
+        {
+            if (conv?.Messages == null || anchorMessage == null || string.IsNullOrWhiteSpace(anchorMessage.MediaGroupId))
+            {
+                return new List<ChatMessage>();
+            }
+
+            return conv.Messages
+                .Where(message => message != null
+                    && !message.IsDeleted
+                    && message.IsImageAttachment
+                    && string.Equals(message.MediaGroupId, anchorMessage.MediaGroupId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(message => message.MediaGroupIndex)
+                .ThenBy(message => message.Timestamp)
+                .ToList();
+        }
+
+        private string BuildConversationMediaGroupLabel(IReadOnlyList<ChatMessage> groupMessages)
+        {
+            if (groupMessages == null || groupMessages.Count == 0)
+            {
+                return "Galeria pronta para abrir.";
+            }
+
+            var firstName = groupMessages
+                .Select(message => message.AttachmentFileName)
+                .FirstOrDefault(fileName => !string.IsNullOrWhiteSpace(fileName));
+            if (groupMessages.Count == 1)
+            {
+                return string.IsNullOrWhiteSpace(firstName)
+                    ? "Imagem pronta para abrir."
+                    : firstName;
+            }
+
+            if (string.IsNullOrWhiteSpace(firstName))
+            {
+                return $"{groupMessages.Count} imagens prontas para abrir em sequência.";
+            }
+
+            return groupMessages.Count == 2
+                ? $"{firstName} e mais 1 imagem."
+                : $"{firstName} e mais {groupMessages.Count - 1} imagens.";
+        }
+
+        private void OpenConversationMediaGallery(IReadOnlyList<ChatMessage> groupMessages, ChatMessage anchorMessage)
+        {
+            var viewerItems = BuildConversationMediaGalleryItems(groupMessages);
+            if (viewerItems.Count == 0)
+            {
+                _ = OpenConversationAttachmentAsync(anchorMessage);
+                return;
+            }
+
+            var initialIndex = Math.Max(0, Math.Min(anchorMessage.MediaGroupIndex, viewerItems.Count - 1));
+            var viewer = new GalleryImageViewerWindow(
+                viewerItems,
+                initialIndex,
+                this,
+                GetThemeBrush("AccentBrush").Color,
+                allowAdjustment: false,
+                contextLabel: "Galeria do chat");
+            viewer.ShowDialog();
+        }
+
+        private List<GalleryViewerItem> BuildConversationMediaGalleryItems(IReadOnlyList<ChatMessage> groupMessages)
+        {
+            var safeMessages = groupMessages ?? Array.Empty<ChatMessage>();
+            return safeMessages
+                .Select((message, index) => new
+                {
+                    Message = message,
+                    Index = index,
+                    Source = TryCreateConversationAttachmentDisplaySource(message, preferLocalFile: true)
+                })
+                .Where(item => item.Source != null)
+                .Select(item => new GalleryViewerItem(
+                    string.IsNullOrWhiteSpace(item.Message.MessageId) ? item.Index.ToString(CultureInfo.InvariantCulture) : item.Message.MessageId,
+                    item.Source!,
+                    string.IsNullOrWhiteSpace(item.Message.AttachmentFileName) ? $"Imagem {item.Index + 1}" : item.Message.AttachmentFileName,
+                    $"{item.Index + 1} de {Math.Max(1, safeMessages.Count)} • {item.Message.Timestamp:dd/MM HH:mm}",
+                    ShouldShowConversationMessageText(item.Message) ? item.Message.Content : string.Empty))
+                .ToList();
+        }
+
         private UIElement CreateConversationLinkPreviewContent(ChatMessage msg, Brush primaryTextBrush)
         {
             var cardBackground = msg.IsOwn
@@ -29148,18 +35513,69 @@ namespace MeuApp
 
         private ImageSource? TryCreateConversationAttachmentPreviewSource(ChatMessage msg)
         {
-            if (msg == null || !msg.IsImageAttachment || string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) || !File.Exists(msg.AttachmentLocalPath))
+            return TryCreateConversationAttachmentDisplaySource(msg, preferLocalFile: false, decodePixelWidth: 420);
+        }
+
+        private ImageSource? TryCreateConversationAttachmentDisplaySource(ChatMessage msg, bool preferLocalFile, int decodePixelWidth = 0)
+        {
+            if (msg == null || !msg.IsImageAttachment)
+            {
+                return null;
+            }
+
+            if (preferLocalFile && !string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) && File.Exists(msg.AttachmentLocalPath))
+            {
+                var localSource = TryCreateDecodedBitmapImage(msg.AttachmentLocalPath, decodePixelWidth);
+                if (localSource != null)
+                {
+                    return localSource;
+                }
+            }
+
+            var previewSource = TryCreateImageSourceFromDataUri(msg.AttachmentPreviewDataUri);
+            if (previewSource != null)
+            {
+                return previewSource;
+            }
+
+            if (!preferLocalFile && !string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) && File.Exists(msg.AttachmentLocalPath))
+            {
+                return TryCreateDecodedBitmapImage(msg.AttachmentLocalPath, decodePixelWidth);
+            }
+
+            return null;
+        }
+
+        private BitmapImage? TryCreateDecodedBitmapImage(string filePath, int decodePixelWidth = 0)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             {
                 return null;
             }
 
             try
             {
-                return CreateFrozenBitmapImage(new Uri(msg.AttachmentLocalPath, UriKind.Absolute));
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+                if (decodePixelWidth > 0)
+                {
+                    bitmap.DecodePixelWidth = decodePixelWidth;
+                }
+
+                bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
+                bitmap.EndInit();
+                if (bitmap.CanFreeze)
+                {
+                    bitmap.Freeze();
+                }
+
+                return bitmap;
             }
             catch (Exception ex)
             {
-                DebugHelper.WriteLine($"[ChatAttachmentPreview] Falha ao montar preview de {msg.AttachmentLocalPath}: {ex.Message}");
+                DebugHelper.WriteLine($"[ChatAttachmentPreview] Falha ao montar preview de {filePath}: {ex.Message}");
                 return null;
             }
         }
@@ -31018,6 +37434,11 @@ namespace MeuApp
 
             if (control is ComboBox comboBox)
             {
+                if (TryFindResource("DialogComboBoxStyle") is Style comboBoxStyle)
+                {
+                    comboBox.Style = comboBoxStyle;
+                }
+
                 if (TryFindResource("DialogComboBoxItemStyle") is Style comboBoxItemStyle)
                 {
                     comboBox.ItemContainerStyle = comboBoxItemStyle;
@@ -31513,3 +37934,6 @@ namespace MeuApp
         }
     }
 }
+
+
+

@@ -98,7 +98,11 @@ service cloud.firestore {
       return hasOptionalString(data, 'attachmentFileName')
         && hasOptionalString(data, 'attachmentContentType')
         && hasOptionalString(data, 'attachmentStoragePath')
-        && hasOptionalInt(data, 'attachmentSizeBytes');
+        && hasOptionalInt(data, 'attachmentSizeBytes')
+        && hasOptionalString(data, 'attachmentPreviewDataUri')
+        && hasOptionalString(data, 'mediaGroupId')
+        && hasOptionalInt(data, 'mediaGroupIndex')
+        && hasOptionalInt(data, 'mediaGroupCount');
     }
 
     function hasConversationLinkPreviewFields(data) {
@@ -123,6 +127,24 @@ service cloud.firestore {
               && data.attachmentStoragePath.size() > 0
               && data.attachmentSizeBytes is int
               && data.attachmentSizeBytes >= 0
+              && data.attachmentPreviewDataUri is string
+              && data.mediaGroupId is string
+              && data.mediaGroupIndex is int
+              && data.mediaGroupIndex >= 0
+              && data.mediaGroupCount is int
+              && data.mediaGroupCount >= 0
+              && (
+                messageTypeOf(data) == 'image'
+                  ? (
+                    data.mediaGroupId == ''
+                      ? data.mediaGroupIndex == 0 && data.mediaGroupCount == 0
+                      : data.mediaGroupCount >= 2 && data.mediaGroupIndex < data.mediaGroupCount
+                  )
+                  : data.attachmentPreviewDataUri == ''
+                    && data.mediaGroupId == ''
+                    && data.mediaGroupIndex == 0
+                    && data.mediaGroupCount == 0
+              )
             : true
         );
     }
@@ -194,6 +216,10 @@ service cloud.firestore {
           'attachmentContentType',
           'attachmentStoragePath',
           'attachmentSizeBytes',
+          'attachmentPreviewDataUri',
+          'mediaGroupId',
+          'mediaGroupIndex',
+          'mediaGroupCount',
           'linkUrl',
           'linkTitle',
           'linkDescription',
@@ -215,6 +241,14 @@ service cloud.firestore {
         && newData.attachmentStoragePath == ''
         && newData.attachmentSizeBytes is int
         && newData.attachmentSizeBytes == 0
+        && newData.attachmentPreviewDataUri is string
+        && newData.attachmentPreviewDataUri == ''
+        && newData.mediaGroupId is string
+        && newData.mediaGroupId == ''
+        && newData.mediaGroupIndex is int
+        && newData.mediaGroupIndex == 0
+        && newData.mediaGroupCount is int
+        && newData.mediaGroupCount == 0
         && newData.linkUrl is string
         && newData.linkUrl == ''
         && newData.linkTitle is string
@@ -520,6 +554,10 @@ service cloud.firestore {
       return postType == 'announcement' || postType == 'activity';
     }
 
+    function validTeachingClassAssignmentMode(assignmentMode) {
+      return assignmentMode == 'material' || assignmentMode == 'quiz';
+    }
+
     function validTeachingClassHomePostPayload(data, postId) {
       return data.postId is string
         && data.postId == postId
@@ -532,10 +570,19 @@ service cloud.firestore {
         && data.linkUrl is string
         && data.activityLabel is string
         && hasOptionalTimestamp(data, 'activityDueAt')
+        && hasOptionalBool(data, 'assignmentEnabled')
+        && hasOptionalString(data, 'assignmentMode')
+        && hasOptionalBool(data, 'allowLateSubmission')
+        && hasOptionalInt(data, 'maxPoints')
+        && (!(('maxPoints' in data)) || data.maxPoints > 0)
         && data.publishedAt is timestamp
         && data.updatedAt is timestamp
         && data.attachments is list
-        && data.attachments.size() <= 10;
+        && data.attachments.size() <= 10
+        && (!(('questions' in data)) || (data.questions is list && data.questions.size() <= 20))
+        && (!data.get('assignmentEnabled', false) || data.postType == 'activity')
+        && (!data.get('assignmentEnabled', false) || validTeachingClassAssignmentMode(data.get('assignmentMode', 'material')))
+        && (data.get('assignmentMode', 'material') != 'quiz' || (data.questions is list && data.questions.size() > 0));
     }
 
     function validTeachingClassHomeCommentPayload(data, commentId) {
@@ -557,6 +604,102 @@ service cloud.firestore {
         && data.emoji.size() > 0
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
+    }
+
+    function teachingClassHomePostDocument(classId, postId) {
+      return get(/databases/$(database)/documents/teachingClasses/$(classId)/homePosts/$(postId));
+    }
+
+    function teachingClassHomePostExists(classId, postId) {
+      return teachingClassHomePostDocument(classId, postId).data != null;
+    }
+
+    function teachingClassFormalAssignmentVisible(classId, postId) {
+      return teachingClassFeedVisible(classId)
+        && teachingClassHomePostExists(classId, postId)
+        && teachingClassHomePostDocument(classId, postId).data.postType == 'activity'
+        && teachingClassHomePostDocument(classId, postId).data.get('assignmentEnabled', false) == true;
+    }
+
+    function canCreateTeachingClassHomePost(data, classData) {
+      return data.get('assignmentEnabled', false) == true
+        ? canManageTeachingClass(classData)
+        : canPublishTeachingClassFeed(classData);
+    }
+
+    function canUpdateTeachingClassHomePost(classData, newData, oldData) {
+      return oldData.get('assignmentEnabled', false) == true || newData.get('assignmentEnabled', false) == true
+        ? canManageTeachingClass(classData)
+        : (
+          canManageTeachingClass(classData)
+          || (
+            canPublishTeachingClassFeed(classData)
+            && oldData.authorUserId == request.auth.uid
+          )
+        );
+    }
+
+    function canDeleteTeachingClassHomePost(classData, oldData) {
+      return oldData.get('assignmentEnabled', false) == true
+        ? canManageTeachingClass(classData)
+        : (
+          canManageTeachingClass(classData)
+          || (
+            canPublishTeachingClassFeed(classData)
+            && oldData.authorUserId == request.auth.uid
+          )
+        );
+    }
+
+    function teachingClassAssignmentSubmissionWindowOpen(classId, postId) {
+      let assignment = teachingClassHomePostDocument(classId, postId).data;
+      return !(assignment.get('activityDueAt', null) is timestamp)
+        || request.time <= assignment.activityDueAt
+        || assignment.get('allowLateSubmission', false) == true;
+    }
+
+    function canSubmitTeachingClassFormalAssignment(classData) {
+      return signedIn()
+        && classData.studentIds is list
+        && request.auth.uid in classData.studentIds;
+    }
+
+    function validTeachingClassActivitySubmissionPayload(data, classId, postId, submissionId) {
+      return data.submissionId is string
+        && data.submissionId == submissionId
+        && data.classId is string
+        && data.classId == classId
+        && data.postId is string
+        && data.postId == postId
+        && data.studentUserId is string
+        && data.studentUserId == request.auth.uid
+        && data.studentName is string
+        && data.notes is string
+        && data.submissionLink is string
+        && data.submittedAt is timestamp
+        && data.updatedAt is timestamp
+        && data.isLate is bool
+        && data.attachments is list
+        && data.attachments.size() <= 10
+        && data.answers is list
+        && data.answers.size() <= 20;
+    }
+
+    function validTeachingClassActivityReviewPayload(data, reviewId) {
+      return data.reviewId is string
+        && data.reviewId == reviewId
+        && data.studentUserId is string
+        && data.studentUserId == reviewId
+        && data.studentName is string
+        && data.gradeValue is int
+        && data.gradeValue >= 0
+        && data.maxPoints is int
+        && data.maxPoints > 0
+        && data.feedbackText is string
+        && data.gradedByUserId is string
+        && data.gradedByUserId == request.auth.uid
+        && data.gradedByName is string
+        && data.gradedAt is timestamp;
     }
 
     function teachingClassFeedVisible(classId) {
@@ -1032,30 +1175,18 @@ service cloud.firestore {
       allow get, list: if teachingClassFeedVisible(classId);
 
       allow create: if teachingClassExists(classId)
-        && canPublishTeachingClassFeed(teachingClassDocument(classId).data)
+        && canCreateTeachingClassHomePost(request.resource.data, teachingClassDocument(classId).data)
         && validTeachingClassHomePostPayload(request.resource.data, postId)
         && request.resource.data.authorUserId == request.auth.uid;
 
       allow update: if teachingClassExists(classId)
-        && (
-          canManageTeachingClass(teachingClassDocument(classId).data)
-          || (
-            canPublishTeachingClassFeed(teachingClassDocument(classId).data)
-            && resource.data.authorUserId == request.auth.uid
-          )
-        )
+        && canUpdateTeachingClassHomePost(teachingClassDocument(classId).data, request.resource.data, resource.data)
         && validTeachingClassHomePostPayload(request.resource.data, postId)
         && request.resource.data.authorUserId == resource.data.authorUserId
         && request.resource.data.publishedAt == resource.data.publishedAt;
 
       allow delete: if teachingClassExists(classId)
-        && (
-          canManageTeachingClass(teachingClassDocument(classId).data)
-          || (
-            canPublishTeachingClassFeed(teachingClassDocument(classId).data)
-            && resource.data.authorUserId == request.auth.uid
-          )
-        );
+        && canDeleteTeachingClassHomePost(teachingClassDocument(classId).data, resource.data);
     }
 
     match /teachingClasses/{classId}/homePosts/{postId}/comments/{commentId} {
@@ -1094,6 +1225,50 @@ service cloud.firestore {
           reactionId == request.auth.uid
           || canManageTeachingClass(teachingClassDocument(classId).data)
         );
+    }
+
+    match /teachingClasses/{classId}/homePosts/{postId}/submissions/{submissionId} {
+      allow get: if teachingClassFormalAssignmentVisible(classId, postId)
+        && (
+          submissionId == request.auth.uid
+          || canManageTeachingClass(teachingClassDocument(classId).data)
+        );
+
+      allow list: if teachingClassFormalAssignmentVisible(classId, postId)
+        && canManageTeachingClass(teachingClassDocument(classId).data);
+
+      allow create: if teachingClassFormalAssignmentVisible(classId, postId)
+        && canSubmitTeachingClassFormalAssignment(teachingClassDocument(classId).data)
+        && teachingClassAssignmentSubmissionWindowOpen(classId, postId)
+        && validTeachingClassActivitySubmissionPayload(request.resource.data, classId, postId, submissionId);
+
+      allow update: if teachingClassFormalAssignmentVisible(classId, postId)
+        && submissionId == request.auth.uid
+        && canSubmitTeachingClassFormalAssignment(teachingClassDocument(classId).data)
+        && teachingClassAssignmentSubmissionWindowOpen(classId, postId)
+        && validTeachingClassActivitySubmissionPayload(request.resource.data, classId, postId, submissionId)
+        && request.resource.data.studentUserId == resource.data.studentUserId
+        && request.resource.data.submittedAt == resource.data.submittedAt;
+
+      allow delete: if false;
+    }
+
+    match /teachingClasses/{classId}/homePosts/{postId}/reviews/{reviewId} {
+      allow get: if teachingClassFormalAssignmentVisible(classId, postId)
+        && (
+          reviewId == request.auth.uid
+          || canManageTeachingClass(teachingClassDocument(classId).data)
+        );
+
+      allow list: if teachingClassFormalAssignmentVisible(classId, postId)
+        && canManageTeachingClass(teachingClassDocument(classId).data);
+
+      allow create, update: if teachingClassFormalAssignmentVisible(classId, postId)
+        && canManageTeachingClass(teachingClassDocument(classId).data)
+        && validTeachingClassActivityReviewPayload(request.resource.data, reviewId);
+
+      allow delete: if teachingClassFormalAssignmentVisible(classId, postId)
+        && canManageTeachingClass(teachingClassDocument(classId).data);
     }
 
     match /teachingClassAssetFiles/{documentId} {
