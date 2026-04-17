@@ -36,7 +36,7 @@ const navItems = [
   { label: 'Configurações', icon: Settings, id: 'settings' },
 ];
 
-export default function DashboardLayout({
+export default function ChatLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -46,7 +46,6 @@ export default function DashboardLayout({
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [activeNav, setActiveNav] = useState('overview');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -118,17 +117,17 @@ export default function DashboardLayout({
           <div className="space-y-2">
             {navItems.map((item) => {
               const Icon = item.icon;
+              const isActive = item.id === 'chats';
               return (
                 <button
                   key={item.id}
                   onClick={() => {
-                    setActiveNav(item.id);
                     if (item.id === 'overview') router.push('/dashboard');
                     else if (item.id === 'chats') router.push('/chat');
                     else if (item.id === 'settings') router.push('/settings');
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                    activeNav === item.id
+                    isActive
                       ? 'bg-blue-100 text-blue-700 font-semibold'
                       : 'text-slate-700 hover:bg-slate-100'
                   }`}
@@ -198,17 +197,7 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <main className={`transition-all duration-300 ${sidebarOpen ? 'ml-72' : 'ml-24'}`}>
-        {/* Top Bar */}
-        <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
-          <h1 className="text-2xl font-bold text-slate-900">
-            {navItems.find((item) => item.id === activeNav)?.label || 'Dashboard'}
-          </h1>
-        </div>
-
-        {/* Content Area */}
-        <div className="p-8">
-          {children}
-        </div>
+        {children}
       </main>
     </div>
   );
