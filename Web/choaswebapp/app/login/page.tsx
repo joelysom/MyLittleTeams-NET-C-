@@ -11,7 +11,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
-import { Home, Mail, Lock, ArrowRight, User, Eye, EyeOff } from 'lucide-react';
+import { Home, Mail, Lock, ArrowRight, User, Eye, EyeOff, Phone, GraduationCap, Hash } from 'lucide-react';
 
 const mapFirebaseErrorMessage = (code: string) => {
   switch (code) {
@@ -38,9 +38,20 @@ export default function LoginPage() {
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [phone, setPhone] = useState('');
+  const [role, setRole] = useState('student');
+  const [course, setCourse] = useState('');
+  const [registration, setRegistration] = useState('');
+  const [department, setDepartment] = useState('');
+  const [focus, setFocus] = useState('');
+  const [officeHours, setOfficeHours] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+  const [agreeTerms, setAgreeTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
 
@@ -53,9 +64,23 @@ export default function LoginPage() {
       return;
     }
 
-    if (!isLogin && !username.trim()) {
-      setFeedback({ type: 'error', message: 'Informe um nome de usuário para criar sua conta.' });
-      return;
+    if (!isLogin) {
+      if (!username.trim() || !phone.trim() || !course.trim() || !registration.trim()) {
+        setFeedback({ type: 'error', message: 'Preencha todos os campos necessários.' });
+        return;
+      }
+      if (role === 'professor' && (!department.trim() || !focus.trim() || !officeHours.trim())) {
+        setFeedback({ type: 'error', message: 'Preencha todos os campos necessários para professores.' });
+        return;
+      }
+      if (password !== confirmPassword) {
+        setFeedback({ type: 'error', message: 'As senhas não coincidem.' });
+        return;
+      }
+      if (!agreeTerms) {
+        setFeedback({ type: 'error', message: 'Você deve concordar com os Termos de Serviço.' });
+        return;
+      }
     }
 
     setLoading(true);
@@ -68,6 +93,8 @@ export default function LoginPage() {
         if (userCredential.user && username.trim()) {
           await updateProfile(userCredential.user, { displayName: username.trim() });
         }
+        // Here you would typically save additional user data to Firestore
+        // For now, just create the account
       }
       router.push('/');
     } catch (error) {
@@ -119,12 +146,12 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-black/50 backdrop-blur-md" />
 
       {/* Form Container */}
-      <div className="relative w-full max-w-4xl h-auto md:h-[600px] flex overflow-hidden rounded-3xl border-2 border-white/30 backdrop-blur-2xl bg-white/20 shadow-2xl">
+      <div className="relative w-full max-w-4xl h-auto md:h-[700px] flex overflow-hidden rounded-3xl border-2 border-white/30 backdrop-blur-2xl bg-white/20 shadow-2xl">
         
         {/* Left Column - Image Layer */}
-        <div className="hidden md:flex w-1/2 flex-col items-center justify-center bg-gradient-to-br from-white/30 to-transparent backdrop-blur-3xl rounded-l-3xl p-8 relative overflow-hidden">
+        <div className="hidden md:flex w-1/2 flex-col items-center justify-start bg-gradient-to-br from-white/30 to-transparent backdrop-blur-3xl rounded-l-3xl p-8 relative overflow-hidden pt-20">
           {/* Animated Background Elements */}
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute top-20 inset-x-0 flex items-center justify-center">
             {/* Main Icon - Choas */}
             <div className="relative w-80 h-80 flex items-center justify-center">
               {/* Animated Circle */}
@@ -132,7 +159,7 @@ export default function LoginPage() {
               <div className="absolute inset-12 rounded-full border border-white/20 animate-spin" style={{ animationDuration: '6s' }} />
               
               {/* Icon */}
-              <div className="relative z-10 text-white">
+              <div className="relative z-20 text-white">
                 <img src="/img/LoginICO.png" alt="Choas" className="w-48 h-48 animate-bounce drop-shadow-2xl" />
               </div>
 
@@ -144,7 +171,7 @@ export default function LoginPage() {
           </div>
 
           {/* Text */}
-          <div className="relative z-10 text-center mt-20">
+          <div className="relative z-0 text-center mt-auto mb-8 flex-shrink-0">
             <div className="inline-block px-6 py-4 rounded-2xl bg-black/40 backdrop-blur-md border border-white/20 shadow-2xl">
               <p className="text-white text-xl font-bold text-center max-w-xs leading-relaxed drop-shadow-lg">
                 Você está a poucos minutos de potencializar sua experiência com{' '}
@@ -190,79 +217,261 @@ export default function LoginPage() {
           </div>
 
           {/* Form Container */}
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm max-h-[520px] overflow-y-auto px-4">
             {/* Title */}
-            <h1 className="text-3xl font-bold text-white mb-8 text-center">
+            <h1 className="text-3xl font-bold text-white mb-6 text-center">
               {isLogin ? 'Entrar' : 'Criar Conta'}
             </h1>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email Field */}
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
-                  required
-                />
-              </div>
+              {isLogin ? (
+                // Login Form
+                <>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Email ou Telefone"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
 
-              {/* Username Field */}
-              {!isLogin && (
-                <div className="relative">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
-                  <input
-                    type="text"
-                    placeholder="Nome de usuário"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
-                    required={!isLogin}
-                  />
-                </div>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Senha"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full h-14 pl-12 pr-12 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white opacity-70 hover:opacity-100 transition"
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center text-white">
+                    <input
+                      type="checkbox"
+                      id="keepLoggedIn"
+                      checked={keepLoggedIn}
+                      onChange={(e) => setKeepLoggedIn(e.target.checked)}
+                      className="mr-2"
+                    />
+                    <label htmlFor="keepLoggedIn" className="text-sm">
+                      Manter conectado
+                    </label>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition mt-6 shadow-lg hover:shadow-xl hover:gap-4"
+                    disabled={loading}
+                  >
+                    <span>{loading ? 'Entrando...' : 'Entrar'}</span>
+                    <ArrowRight size={20} />
+                  </button>
+
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-white text-sm hover:underline hover:text-cyan-300 transition"
+                    >
+                      Esqueceu a senha?
+                    </button>
+                  </div>
+                </>
+              ) : (
+                // Signup Form
+                <>
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Nome Completo"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="email"
+                      placeholder="Email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="tel"
+                      placeholder="Telefone"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      className="w-full h-14 pl-12 pr-12 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur appearance-none"
+                    >
+                      <option value="student" className="text-black">Aluno</option>
+                      <option value="professor" className="text-black">Professor orientador</option>
+                    </select>
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-white opacity-70">▼</div>
+                  </div>
+
+                  <div className="relative">
+                    <GraduationCap className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Curso"
+                      value={course}
+                      onChange={(e) => setCourse(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Matrícula"
+                      value={registration}
+                      onChange={(e) => setRegistration(e.target.value)}
+                      className="w-full h-14 pl-12 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                  </div>
+
+                  {role === 'professor' && (
+                    <>
+                      <div className="p-4 bg-white/20 border border-white/30 rounded-xl text-white text-sm">
+                        O cadastro docente libera dashboard multi-equipes, exportação acadêmica e permissões avançadas de orientação.
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Departamento ou área"
+                        value={department}
+                        onChange={(e) => setDepartment(e.target.value)}
+                        className="w-full h-14 pl-4 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                        required
+                      />
+
+                      <input
+                        type="text"
+                        placeholder="Foco acadêmico"
+                        value={focus}
+                        onChange={(e) => setFocus(e.target.value)}
+                        className="w-full h-14 pl-4 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                        required
+                      />
+
+                      <input
+                        type="text"
+                        placeholder="Janela de atendimento"
+                        value={officeHours}
+                        onChange={(e) => setOfficeHours(e.target.value)}
+                        className="w-full h-14 pl-4 pr-4 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                        required
+                      />
+                    </>
+                  )}
+
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Senha"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full h-14 pl-12 pr-12 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white opacity-70 hover:opacity-100 transition"
+                    >
+                      {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      placeholder="Confirmar Senha"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full h-14 pl-12 pr-12 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white opacity-70 hover:opacity-100 transition"
+                    >
+                      {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center text-white">
+                    <input
+                      type="checkbox"
+                      id="agreeTerms"
+                      checked={agreeTerms}
+                      onChange={(e) => setAgreeTerms(e.target.checked)}
+                      className="mr-2"
+                    />
+                    <label htmlFor="agreeTerms" className="text-sm">
+                      Concordo com os Termos de Serviço
+                    </label>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition mt-4 shadow-lg hover:shadow-xl hover:gap-4"
+                    disabled={loading}
+                  >
+                    <span>{loading ? 'Criando...' : 'Cadastrar'}</span>
+                    <ArrowRight size={20} />
+                  </button>
+                </>
               )}
-
-              {/* Password Field */}
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white opacity-70" size={20} />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Senha"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full h-14 pl-12 pr-12 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/70 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:bg-white/30 transition backdrop-blur"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white opacity-70 hover:opacity-100 transition"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-
-              {/* Forgot Password - Only for Login */}
-              {isLogin && (
-                <div className="text-right">
-                  <a href="#" className="text-white text-sm hover:underline hover:text-cyan-300 transition">
-                    Esqueceu a senha?
-                  </a>
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition mt-6 shadow-lg hover:shadow-xl hover:gap-4"
-              >
-                <span>{isLogin ? 'Entrar' : 'Cadastrar'}</span>
-                <ArrowRight size={20} />
-              </button>
             </form>
+
+            {/* Feedback */}
+            {feedback && (
+              <div className={`mt-4 p-3 rounded-xl ${
+                feedback.type === 'error' ? 'bg-red-500/20 border border-red-500/30 text-red-200' : 'bg-green-500/20 border border-green-500/30 text-green-200'
+              }`}>
+                {feedback.message}
+              </div>
+            )}
 
             {/* Divider */}
             <div className="flex items-center gap-4 my-6">
