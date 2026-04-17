@@ -1,4 +1,43 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+
 export default function Home() {
+  const router = useRouter();
+  const [showContent, setShowContent] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        router.push('/dashboard');
+      } else {
+        setShowContent(true);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="mb-4 inline-block">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+          <p className="text-slate-600">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!showContent) return null;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <section className="relative overflow-hidden pb-24">
