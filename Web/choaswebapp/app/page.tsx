@@ -3,6 +3,7 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <section className="relative overflow-hidden pb-24">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.18),_transparent_25%),radial-gradient(circle_at_bottom_right,_rgba(168,85,247,0.16),_transparent_20%)]" />
+        <div className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-30" style={{ backgroundImage: 'url(/img/Hero_0.png)' }} />
         <div className="relative mx-auto max-w-7xl px-4 pt-24 sm:px-6 lg:px-8">
           <div className="grid gap-12 xl:grid-cols-[1.2fr_0.8fr] xl:items-center">
             <div className="max-w-2xl">
@@ -24,7 +25,7 @@ export default function Home() {
                   Conheça o Choas
                 </a>
                 <a
-                  href="#contact"
+                  href="/login"
                   className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-semibold text-white transition hover:border-cyan-300 hover:bg-slate-800/80"
                 >
                   Entrar na plataforma
@@ -49,7 +50,9 @@ export default function Home() {
 
             <div className="rounded-[2rem] border border-white/10 bg-slate-900/70 p-8 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
               <div className="flex items-center gap-4 rounded-3xl bg-slate-800/80 px-5 py-4 ring-1 ring-white/10">
-                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500 text-slate-950 text-lg font-black">C</div>
+                <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-500">
+                  <img src="/img/tesseractICO.png" alt="Choas Logo" className="h-8 w-8" />
+                </div>
                 <div>
                   <p className="text-sm uppercase tracking-[0.22em] text-cyan-300">Choas</p>
                   <p className="text-base font-semibold text-white">Observatório de Projetos Integradores</p>
@@ -76,7 +79,9 @@ export default function Home() {
 
       <section id="features" className="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Recursos</p>
+          <div className="inline-flex rounded-full border border-white/15 bg-white/5 px-4 py-2 backdrop-blur">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Recursos</p>
+          </div>
           <h2 className="mt-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">
             Visual elegante, controle acadêmico real.
           </h2>
@@ -121,13 +126,37 @@ export default function Home() {
         <div className="rounded-[2rem] border border-white/10 bg-slate-900/80 p-10 shadow-2xl shadow-slate-950/30 backdrop-blur-xl">
           <div className="grid gap-10 xl:grid-cols-[1.1fr_0.9fr] xl:items-center">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Convite</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Entre em contato</p>
               <h2 className="mt-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                Leve a experiência Choas para a web.
+                Conecte-se com o Choas.
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-300">
-                Um landing page moderno e alinhado à identidade acadêmica do seu projeto. Mais do que uma página de apresentação, agora a web também transmite a sensação de um workspace confiável e focado em produtividade.
+                Tem dúvidas sobre o projeto? Quer colaborar ou precisa de suporte? Entre em contato conosco através dos canais abaixo.
               </p>
+              <div className="mt-8 space-y-4">
+                <a
+                  href="mailto:Joelyson.silva5008712@edu.pe.senac.br"
+                  className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10 hover:border-cyan-300"
+                >
+                  <span className="text-2xl">✉️</span>
+                  <div>
+                    <p className="text-xs text-slate-400">Email</p>
+                    <p className="font-semibold text-white">Joelyson.silva5008712@edu.pe.senac.br</p>
+                  </div>
+                </a>
+                <a
+                  href="https://wa.me/5581988872515"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/10 hover:border-green-400"
+                >
+                  <span className="text-2xl">💬</span>
+                  <div>
+                    <p className="text-xs text-slate-400">WhatsApp</p>
+                    <p className="font-semibold text-white">(81) 9 8887-2515</p>
+                  </div>
+                </a>
+              </div>
             </div>
             <div className="space-y-4">
               <div className="rounded-3xl bg-white/5 p-6 ring-1 ring-white/10">
@@ -135,12 +164,12 @@ export default function Home() {
                 <p className="mt-2 font-semibold text-white">Choas | Observatório de Projetos Integradores</p>
               </div>
               <div className="rounded-3xl bg-white/5 p-6 ring-1 ring-white/10">
-                <p className="text-sm text-slate-400">Design</p>
-                <p className="mt-2 font-semibold text-white">Glassmorphism suave com gradientes e layouts estruturados.</p>
+                <p className="text-sm text-slate-400">Suporte</p>
+                <p className="mt-2 font-semibold text-white">Disponível via email e WhatsApp para dúvidas rápidas.</p>
               </div>
               <div className="rounded-3xl bg-white/5 p-6 ring-1 ring-white/10">
-                <p className="text-sm text-slate-400">Foco</p>
-                <p className="mt-2 font-semibold text-white">Equipe, entrega e contexto acadêmico em primeiro lugar.</p>
+                <p className="text-sm text-slate-400">Comunidade</p>
+                <p className="mt-2 font-semibold text-white">Faça parte de um workspace focado em entrega e produtividade.</p>
               </div>
             </div>
           </div>
