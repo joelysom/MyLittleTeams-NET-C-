@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../lib/useAuth';
 import { ChatServiceTS, ChatMessage, Conversation } from '../../lib/chatService';
+import { getUserProfileService } from '../../lib/userProfileService';
+import { AvatarComponents } from '../../lib/avatarService';
+import AvatarDisplay from '../../components/AvatarDisplay';
 import {
   MessageCircle,
   Phone,
@@ -226,9 +229,22 @@ export default function ChatPage() {
                   >
                     <div className="flex items-start gap-3">
                       <div className="relative flex-shrink-0">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm">
-                          {initial}
-                        </div>
+                        {conversation.userAAvatar || conversation.userBAvatar ? (
+                          <div className="w-12 h-12 rounded-full overflow-hidden">
+                            <AvatarDisplay
+                              avatar={
+                                conversation.userAId === user?.uid
+                                  ? conversation.userBAvatar || conversation.userBAvatar
+                                  : conversation.userAAvatar || conversation.userAAvatar
+                              }
+                              size="sm"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm">
+                            {initial}
+                          </div>
+                        )}
                         <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-green-500" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -250,9 +266,22 @@ export default function ChatPage() {
             <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm">
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-semibold">
-                    {getContactName(selectedConversation).charAt(0).toUpperCase()}
-                  </div>
+                  {selectedConversation.userAAvatar || selectedConversation.userBAvatar ? (
+                    <div className="w-12 h-12 rounded-full overflow-hidden">
+                      <AvatarDisplay
+                        avatar={
+                          selectedConversation.userAId === user?.uid
+                            ? selectedConversation.userBAvatar || selectedConversation.userBAvatar
+                            : selectedConversation.userAAvatar || selectedConversation.userAAvatar
+                        }
+                        size="sm"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-semibold">
+                      {getContactName(selectedConversation).charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-green-500" />
                 </div>
                 <div>
@@ -289,7 +318,12 @@ export default function ChatPage() {
                 </div>
               ) : (
                 messages.map((msg) => (
-                  <div key={msg.documentId} className={`flex ${msg.isOwn ? 'justify-end' : 'justify-start'}`}>
+                  <div key={msg.documentId} className={`flex ${msg.isOwn ? 'justify-end' : 'justify-start'} gap-3`}>
+                    {!msg.isOwn && msg.senderAvatar && (
+                      <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                        <AvatarDisplay avatar={msg.senderAvatar} size="sm" fallback={msg.senderName.charAt(0)} />
+                      </div>
+                    )}
                     <div
                       className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
                         msg.isOwn

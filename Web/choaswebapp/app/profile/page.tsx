@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../lib/useAuth';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
-import { Edit3, Upload, MapPin, Mail, Phone, Calendar, Briefcase, GraduationCap } from 'lucide-react';
+import { getUserProfileService } from '../../lib/userProfileService';
+import { AvatarComponents, DEFAULT_AVATAR } from '../../lib/avatarService';
+import AvatarDisplay from '../../components/AvatarDisplay';
+import AvatarSelector from '../../components/AvatarSelector';
+import { Edit3, Mail, Phone, GraduationCap, Briefcase } from 'lucide-react';
 
 interface UserProfile {
   uid: string;
   displayName: string;
   email: string;
+  avatar: AvatarComponents;
   photoURL?: string;
   headline?: string;
   course?: string;
@@ -25,28 +29,30 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
+  const [isEditingAvatar, setIsEditingAvatar] = useState(false);
+  const [tempAvatar, setTempAvatar] = useState<AvatarComponents>(DEFAULT_AVATAR);
 
   useEffect(() => {
     const loadProfile = async () => {
       if (!user) return;
 
       try {
-        const db = getFirestore();
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
+        const userProfileService = getUserProfileService();
+        const firebaseProfile = await userProfileService.getUserProfile(user.uid);
 
-        if (userDoc.exists()) {
+        if (firebaseProfile) {
           setProfile({
             uid: user.uid,
-            displayName: user.displayName || '',
-            email: user.email || '',
-            ...userDoc.data(),
+            displayName: firebaseProfile.displayName,
+            email: firebaseProfile.email,
+            avatar: firebaseProfile.avatar,
           } as UserProfile);
         } else {
           setProfile({
             uid: user.uid,
             displayName: user.displayName || '',
             email: user.email || '',
+            avatar: DEFAULT_AVATAR,
           });
         }
       } catch (error) {
@@ -58,6 +64,19 @@ export default function ProfilePage() {
 
     loadProfile();
   }, [user]);
+
+  const handleSaveAvatar = async () => {
+    if (!profile) return;
+
+    try {
+      const userProfileService = getUserProfileService();
+      await userProfileService.updateUserAvatar(profile.uid, tempAvatar);
+      setProfile({ ...profile, avatar: tempAvatar });
+      setIsEditingAvatar(false);
+    } catch (error) {
+      console.error('Erro ao salvar avatar:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -90,14 +109,28 @@ export default function ProfilePage() {
           <div className="flex items-start gap-8">
             {/* Avatar */}
             <div className="relative">
-              <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-5xl font-bold">
-                {profile.displayName?.charAt(0).toUpperCase() || 'U'}
-              </div>
-              {isEditing && (
-                <button className="absolute bottom-2 right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-                  <Upload size={18} />
-                </button>
+              {isEditingAvatar ? (
+                <div className="w-32 h-32 rounded-2xl overflow-hidden">
+                  <AvatarDisplay avatar={tempAvatar} size="lg" />
+                </div>
+              ) : (
+                <div className="w-32 h-32 rounded-2xl overflow-hidden">
+                  <AvatarDisplay avatar={profile.avatar} size="lg" fallback={profile.displayName?.charAt(0)} />
+                </div>
               )}
+              <button
+                onClick={() => {
+                  if (isEditingAvatar) {
+                    setIsEditingAvatar(false);
+                  } else {
+                    setTempAvatar(profile.avatar);
+                    setIsEditingAvatar(true);
+                  }
+                }}
+                className="absolute bottom-2 right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+              >
+                <Edit3 size={18} />
+              </button>
             </div>
 
             {/* Profile Info */}
@@ -140,8 +173,34 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Avatar Editor Modal */}
+        {isEditingAvatar && (
+          <div className="bg-white rounded-2xl border border-slate-200 p-0 mb-6 shadow-lg overflow-hidden">
+            <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-blue-700 p-6">
+              <h3 className="text-2xl font-bold text-white">✨ Personalize seu Avatar</h3>
+              <button
+                onClick={() => setIsEditingAvatar(false)}
+                className="p-2 hover:bg-blue-500 rounded-lg transition text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="h-96 overflow-hidden">
+              <AvatarSelector
+                value={tempAvatar}
+                onChange={setTempAvatar}
+                onClose={() => {
+                  handleSaveAvatar();
+                }}
+                showSuggestions={true}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Professional Summary */}
-        {profile.professionalSummary && (
+        {profile.professionalSummary && !isEditingAvatar && (
           <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-sm">
             <h3 className="text-xl font-bold text-slate-900 mb-4">Resumo profissional</h3>
             <p className="text-slate-600 leading-relaxed">{profile.professionalSummary}</p>
@@ -149,54 +208,56 @@ export default function ProfilePage() {
         )}
 
         {/* Two Column Section */}
-        <div className="grid grid-cols-2 gap-6 mb-6">
-          {/* Contact Info */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-900 mb-6">Contato</h3>
-            <div className="space-y-6">
-              <div>
-                <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                  <Mail size={16} /> Email
-                </p>
-                <p className="text-slate-900">{profile.email}</p>
+        {!isEditingAvatar && (
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            {/* Contact Info */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-xl font-bold text-slate-900 mb-6">Contato</h3>
+              <div className="space-y-6">
+                <div>
+                  <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
+                    <Mail size={16} /> Email
+                  </p>
+                  <p className="text-slate-900">{profile.email}</p>
+                </div>
+                {profile.phoneNumber && (
+                  <div>
+                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
+                      <Phone size={16} /> Telefone
+                    </p>
+                    <p className="text-slate-900">{profile.phoneNumber}</p>
+                  </div>
+                )}
               </div>
-              {profile.phoneNumber && (
-                <div>
-                  <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                    <Phone size={16} /> Telefone
-                  </p>
-                  <p className="text-slate-900">{profile.phoneNumber}</p>
-                </div>
-              )}
             </div>
-          </div>
 
-          {/* Academic Info */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-900 mb-6">Acadêmico</h3>
-            <div className="space-y-6">
-              {profile.course && (
-                <div>
-                  <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                    <GraduationCap size={16} /> Curso
-                  </p>
-                  <p className="text-slate-900">{profile.course}</p>
-                </div>
-              )}
-              {profile.registration && (
-                <div>
-                  <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                    <Briefcase size={16} /> Matrícula
-                  </p>
-                  <p className="text-slate-900">{profile.registration}</p>
-                </div>
-              )}
+            {/* Academic Info */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-xl font-bold text-slate-900 mb-6">Acadêmico</h3>
+              <div className="space-y-6">
+                {profile.course && (
+                  <div>
+                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
+                      <GraduationCap size={16} /> Curso
+                    </p>
+                    <p className="text-slate-900">{profile.course}</p>
+                  </div>
+                )}
+                {profile.registration && (
+                  <div>
+                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
+                      <Briefcase size={16} /> Matrícula
+                    </p>
+                    <p className="text-slate-900">{profile.registration}</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Additional Info for Professors */}
-        {profile.department && (
+        {profile.department && !isEditingAvatar && (
           <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
             <h3 className="text-xl font-bold text-slate-900 mb-6">Informações de Docência</h3>
             <div className="grid grid-cols-2 gap-6">

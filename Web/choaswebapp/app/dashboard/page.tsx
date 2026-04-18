@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../../lib/useAuth';
 import { auth } from '../../lib/firebase';
+import AvatarDisplay from '../../components/AvatarDisplay';
+import { AvatarComponents } from '../../lib/avatarService';
 import {
   Users,
   Calendar,
@@ -26,7 +28,7 @@ interface TeamWorkspace {
   projectProgress: number;
   projectStatus: string;
   projectDeadline?: string;
-  members: Array<{ userId: string; name: string; email: string }>;
+  members: Array<{ userId: string; name: string; email: string; avatar?: AvatarComponents }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -275,12 +277,16 @@ export default function DashboardPage() {
                     {team.members.length > 0 && (
                       <div className="flex -space-x-2">
                         {team.members.slice(0, 3).map((member, idx) => (
-                          <div
-                            key={idx}
-                            className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-white"
-                            title={member.name}
-                          >
-                            {member.name.charAt(0).toUpperCase()}
+                          <div key={idx} title={member.name}>
+                            {member.avatar ? (
+                              <div className="w-8 h-8 rounded-full overflow-hidden border border-white">
+                                <AvatarDisplay avatar={member.avatar} size="sm" fallback={member.name.charAt(0)} />
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-white">
+                                {member.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
                           </div>
                         ))}
                         {team.members.length > 3 && (
