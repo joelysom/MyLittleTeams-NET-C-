@@ -208,22 +208,22 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="space-y-8 pb-10">
-      <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-        <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-blue-950 px-6 py-8 text-white sm:px-8">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+    <div className="space-y-6 pb-10 sm:space-y-8">
+      <section className="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
+        <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-blue-950 px-4 py-6 text-white sm:px-6 sm:py-8 lg:px-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-3xl">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-blue-100">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-100 sm:mb-4 sm:text-xs">
                 <Sparkles size={14} />
                 Calendário acadêmico
               </div>
-              <h2 className="text-3xl font-black tracking-tight md:text-4xl">Agenda estruturada em mês, filtros e itens do perfil</h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100/90">
+              <h2 className="text-2xl font-black tracking-tight sm:text-3xl md:text-4xl">Agenda estruturada em mês, filtros e itens do perfil</h2>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100/90 sm:text-[15px]">
                 A visão combina prazos das equipes com compromissos do perfil docente, igual ao fluxo do desktop: mês navegável, filtros por tipo e status, e detalhes do dia selecionado.
               </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
               <SummaryCard icon={CalendarDays} label="Itens" value={stats.totalItems} />
               <SummaryCard icon={Clock3} label="Futuros" value={stats.upcomingItems} />
               <SummaryCard icon={AlertTriangle} label="Em risco" value={stats.overdueItems} />
@@ -233,10 +233,10 @@ export default function CalendarPage() {
         </div>
       </section>
 
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-2xl font-bold text-slate-900">Filtros do calendário</h3>
+            <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">Filtros do calendário</h3>
             <p className="mt-1 text-sm text-slate-500">A visão do desktop cruza equipe, tipo e status.</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -281,14 +281,14 @@ export default function CalendarPage() {
         </div>
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_380px]">
-          <div className="space-y-6">
-            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="space-y-4 sm:space-y-6">
+            <section className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-2xl font-bold text-slate-900">{getCalendarMonthTitle(selectedMonth)}</h3>
+                  <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">{getCalendarMonthTitle(selectedMonth)}</h3>
                   <p className="mt-1 text-sm text-slate-500">Navegação mensal com a mesma lógica de leitura do desktop.</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 self-start sm:self-auto">
                   <button
                     type="button"
                     onClick={() => setSelectedMonth((value) => new Date(value.getFullYear(), value.getMonth() - 1, 1))}
@@ -315,47 +315,51 @@ export default function CalendarPage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+              <div className="mt-5 overflow-x-auto pb-1">
+                <div className="min-w-[640px]">
+                  <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
                 {WEEKDAY_LABELS.map((label) => (
                   <div key={label} className="py-2">
                     {label}
                   </div>
                 ))}
-              </div>
+                  </div>
 
-              <div className="mt-2 grid grid-cols-7 gap-2">
+                  <div className="mt-2 grid grid-cols-7 gap-2">
                 {monthCells.map((cell) => (
                   <button
                     key={cell.key}
                     type="button"
                     onClick={() => setSelectedDateKey(cell.key)}
-                    className={`min-h-28 rounded-3xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md ${
+                    className={`min-h-24 rounded-2xl border p-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-md sm:min-h-28 sm:rounded-3xl sm:p-3 ${
                       cell.isCurrentMonth ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-slate-50/70 text-slate-400'
                     } ${cell.isSelected ? 'ring-2 ring-blue-200 border-blue-500' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className={`text-sm font-bold ${cell.isToday ? 'text-blue-700' : 'text-slate-900'}`}>{cell.date.getDate()}</span>
+                      <span className={`text-xs font-bold sm:text-sm ${cell.isToday ? 'text-blue-700' : 'text-slate-900'}`}>{cell.date.getDate()}</span>
                       {cell.items.length > 0 ? (
                         <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">{cell.items.length}</span>
                       ) : null}
                     </div>
                     <div className="mt-3 space-y-1">
-                      <p className="text-xs font-semibold text-slate-700">{getCalendarDaySummaryText(cell.items)}</p>
+                      <p className="text-[11px] font-semibold text-slate-700 sm:text-xs">{getCalendarDaySummaryText(cell.items)}</p>
                       {cell.items[0] ? (
-                        <p className="text-[11px] text-slate-500">{cell.items[0].kindLabel} • {cell.items[0].statusLabel}</p>
+                        <p className="text-[10px] text-slate-500 sm:text-[11px]">{cell.items[0].kindLabel} • {cell.items[0].statusLabel}</p>
                       ) : (
-                        <p className="text-[11px] text-slate-400">Sem itens</p>
+                        <p className="text-[10px] text-slate-400 sm:text-[11px]">Sem itens</p>
                       )}
                     </div>
                   </button>
                 ))}
+                  </div>
+                </div>
               </div>
             </section>
 
-            <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <section className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-2xl font-bold text-slate-900">Agenda do mês</h3>
+                  <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">Agenda do mês</h3>
                   <p className="mt-1 text-sm text-slate-500">Eventos agrupados por data, como na lista de resumo do aplicativo desktop.</p>
                 </div>
                 <ListTodo className="text-slate-400" size={20} />
@@ -372,10 +376,10 @@ export default function CalendarPage() {
                       {items.map((item) => (
                         <article
                           key={item.id}
-                          className="flex gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-4 transition hover:bg-white"
+                          className="flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:bg-white sm:gap-4 sm:rounded-3xl"
                         >
                           <div
-                            className="flex h-14 w-14 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-sm"
+                            className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-sm sm:h-14 sm:w-14"
                             style={{ backgroundColor: item.accentColor }}
                           >
                             {item.teamLogoSource ? (
@@ -389,7 +393,7 @@ export default function CalendarPage() {
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{item.teamName}</p>
-                                <h4 className="mt-1 text-lg font-bold text-slate-900">{item.title}</h4>
+                                <h4 className="mt-1 text-base font-bold text-slate-900 sm:text-lg">{item.title}</h4>
                               </div>
                               <StatusBadge label={item.statusLabel} overdue={item.isOverdue} />
                             </div>
@@ -415,16 +419,16 @@ export default function CalendarPage() {
             </section>
           </div>
 
-          <aside className="space-y-4 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <aside className="space-y-4 rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
             <div className="border-b border-slate-100 pb-4">
-              <h3 className="text-2xl font-bold text-slate-900">Dia selecionado</h3>
+              <h3 className="text-xl font-bold text-slate-900 sm:text-2xl">Dia selecionado</h3>
               <p className="mt-1 text-sm text-slate-500">{selectedDayLabel || 'Selecione uma data no mês'}</p>
             </div>
 
             {selectedDayItems.length > 0 ? (
               <div className="space-y-3">
                 {selectedDayItems.map((item) => (
-                  <div key={item.id} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:rounded-3xl">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{item.teamName}</p>
@@ -449,7 +453,7 @@ export default function CalendarPage() {
               </div>
             )}
 
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:rounded-3xl">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-slate-700">Resumo do dia</h4>
                 <Target size={16} className="text-slate-400" />
@@ -461,7 +465,7 @@ export default function CalendarPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:rounded-3xl">
               <h4 className="text-sm font-semibold text-slate-700">Equipes na agenda</h4>
               <div className="mt-3 space-y-2">
                 {teamOptions.slice(0, 6).map((team) => {
@@ -482,7 +486,7 @@ export default function CalendarPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:rounded-3xl">
               <h4 className="text-sm font-semibold text-slate-700">Avisos da coordenação</h4>
               <div className="mt-3 space-y-2">
                 {profile?.calendarEntries && profile.calendarEntries.length > 0 ? (

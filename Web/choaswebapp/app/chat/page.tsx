@@ -7,6 +7,7 @@ import AvatarDisplay from '../../components/AvatarDisplay';
 import { DEFAULT_AVATAR } from '../../lib/avatarService';
 import { STICKER_ASSETS, resolveStickerAssetSource } from '../../lib/chatMedia';
 import {
+  ArrowLeft,
   MessageCircle,
   Phone,
   Video,
@@ -82,6 +83,7 @@ export default function ChatPage() {
   const [chatService, setChatService] = useState<ChatServiceTS | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [showStickerPicker, setShowStickerPicker] = useState(false);
+  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
 
   const selectedConversationContactName = useMemo(() => {
     if (!selectedConversation || !user) {
@@ -150,6 +152,7 @@ export default function ChatPage() {
 
   const handleSelectConversation = async (conversation: Conversation) => {
     setSelectedConversation(conversation);
+    setMobileView('chat');
     setMessages([]);
     await loadConversationMessages(conversation);
   };
@@ -339,6 +342,7 @@ export default function ChatPage() {
   };
 
   const pendingCaption = pendingAttachments.length > 0 ? `${pendingAttachments.length} arquivo(s) prontos` : 'Sem anexos';
+  const isMobileChatView = mobileView === 'chat';
 
   if (loadingConversations && conversations.length === 0) {
     return (
@@ -356,21 +360,11 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-[1.75rem] bg-slate-950 text-slate-100 shadow-sm lg:min-h-[calc(100dvh-7rem)]">
-      <div className="border-b border-white/10 bg-slate-900/90 px-4 py-4 shadow-sm backdrop-blur sm:px-6 lg:px-8">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-lg font-bold text-white shadow-lg shadow-blue-950/30">
-            💬
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white sm:text-3xl">Conversas</h1>
-            <p className="text-sm text-slate-300">Chat direto, imagens do perfil e anexos do Firebase Storage</p>
-          </div>
-        </div>
-      </div>
-
+    <div className="flex h-full w-full flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.10),_transparent_24%)] lg:flex-row">
-        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-white/10 bg-slate-950/70 backdrop-blur-xl lg:w-[390px] lg:border-b-0 lg:border-r xl:w-[420px]">
+        <aside
+          className={`${isMobileChatView ? 'hidden lg:flex' : 'flex'} min-h-0 w-full shrink-0 flex-col border-b border-white/10 bg-slate-950/70 backdrop-blur-xl lg:w-[390px] lg:border-b-0 lg:border-r xl:w-[420px]`}
+        >
           <div className="border-b border-white/10 p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white">Conversas</h2>
@@ -452,11 +446,21 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-1 flex-col bg-slate-950/50 backdrop-blur-xl">
+        <section
+          className={`${isMobileChatView ? 'flex' : 'hidden lg:flex'} min-h-0 flex-1 flex-col overflow-hidden bg-slate-950/50 backdrop-blur-xl`}
+        >
           {selectedConversation ? (
             <>
               <div className="flex flex-col gap-4 border-b border-white/10 bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
                 <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setMobileView('list')}
+                    className="rounded-xl p-2 text-slate-300 transition hover:bg-white/10 hover:text-white lg:hidden"
+                    aria-label="Voltar para conversas"
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
                   <div className="relative">
                     <AvatarDisplay
                       avatar={getConversationContactAvatar(selectedConversation, user.uid) || DEFAULT_AVATAR}
@@ -488,7 +492,7 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 lg:px-8">
                 {loadingMessages ? (
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center">
@@ -557,7 +561,7 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <div className="border-t border-white/10 bg-slate-950/80 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8 lg:py-5">
+              <div className="shrink-0 border-t border-white/10 bg-slate-950/80 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8 lg:py-5">
                 {pendingAttachments.length > 0 && (
                   <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
                     <div className="mb-3 flex items-center justify-between">
@@ -663,23 +667,25 @@ export default function ChatPage() {
                     className="hidden"
                   />
 
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
-                    title="Anexar arquivo"
-                  >
-                    <Paperclip size={18} />
-                  </button>
+                  <div className="flex items-center gap-2 sm:shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="shrink-0 rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
+                      title="Anexar arquivo"
+                    >
+                      <Paperclip size={18} />
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowStickerPicker((previous) => !previous)}
-                    className="rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
-                    title="Figurinhas"
-                  >
-                    <Smile size={18} />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowStickerPicker((previous) => !previous)}
+                      className="shrink-0 rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
+                      title="Figurinhas"
+                    >
+                      <Smile size={18} />
+                    </button>
+                  </div>
 
                   <div className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
                     <input

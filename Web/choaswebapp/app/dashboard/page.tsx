@@ -199,7 +199,7 @@ export default function DashboardPage() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 xl:gap-5">
             {teams.map((team) => {
               const deadline = team.projectDeadline
                 ? new Date(team.projectDeadline).toLocaleDateString('pt-BR')
@@ -211,19 +211,19 @@ export default function DashboardPage() {
                 <Link
                   key={team.teamId}
                   href={`/dashboard/teams/${team.teamId}`}
-                  className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg transition cursor-pointer group block"
+                  className="bg-white rounded-lg border border-slate-200 overflow-hidden hover:shadow-lg transition cursor-pointer group block"
                 >
                   {/* Header */}
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200 p-6">
-                    <div className="flex items-start justify-between mb-3">
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200 p-4 lg:p-5">
+                    <div className="flex items-start justify-between mb-2">
                       <div>
-                        <h4 className="text-lg font-bold text-slate-900 group-hover:text-blue-600 transition">
+                        <h4 className="text-base lg:text-lg font-bold text-slate-900 group-hover:text-blue-600 transition">
                           {team.teamName}
                         </h4>
-                        <p className="text-sm text-slate-600">{team.course}</p>
-                        <p className="text-xs text-slate-500 mt-1">{buildTeamBalanceLabel(team)}</p>
+                        <p className="text-xs lg:text-sm text-slate-600">{team.course}</p>
+                        <p className="text-[11px] lg:text-xs text-slate-500 mt-1">{buildTeamBalanceLabel(team)}</p>
                       </div>
-                      <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      <div className={`px-2.5 py-1 rounded-full text-[11px] lg:text-xs font-semibold ${
                         team.projectStatus === 'Concluído'
                           ? 'bg-green-100 text-green-700'
                           : team.projectStatus === 'Em Andamento'
@@ -236,26 +236,26 @@ export default function DashboardPage() {
                   </div>
 
                   {/* Content */}
-                  <div className="p-6 space-y-4">
-                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                      <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+                  <div className="p-4 lg:p-5 space-y-3 lg:space-y-4">
+                    <div className="flex flex-wrap gap-2 text-[11px] lg:text-xs font-semibold">
+                      <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">
                         {studentMembers.length} aluno(s)
                       </span>
-                      <span className="rounded-full bg-violet-50 px-3 py-1 text-violet-700">
+                      <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-700">
                         {facultyMembers.length} docente(s)
                       </span>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
                         {buildTeamProfessorFocusLabel(team)}
                       </span>
                     </div>
 
                     {/* Progress */}
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-semibold text-slate-700">Progresso</span>
-                        <span className="text-sm font-bold text-slate-900">{team.projectProgress}%</span>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs lg:text-sm font-semibold text-slate-700">Progresso</span>
+                        <span className="text-xs lg:text-sm font-bold text-slate-900">{team.projectProgress}%</span>
                       </div>
-                      <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
                           style={{ width: `${team.projectProgress}%` }}
@@ -264,20 +264,20 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Members */}
-                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <div className="flex items-center gap-2 text-xs lg:text-sm text-slate-600">
                       <Users size={16} className="text-slate-400" />
                       <span>{studentMembers.length} {studentMembers.length === 1 ? 'aluno' : 'alunos'}</span>
                     </div>
 
                     {facultyMembers.length > 0 && (
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <div className="flex items-center gap-2 text-xs lg:text-sm text-slate-600">
                         <Briefcase size={16} className="text-slate-400" />
                         <span>{facultyMembers.length} {facultyMembers.length === 1 ? 'docente' : 'docentes'} em orientação</span>
                       </div>
                     )}
 
                     {/* Deadline */}
-                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                    <div className="flex items-center gap-2 text-xs lg:text-sm text-slate-600">
                       <Calendar size={16} className="text-slate-400" />
                       <span>Prazo: {deadline}</span>
                     </div>
@@ -315,8 +315,8 @@ export default function DashboardPage() {
                   </div>
 
                   {/* Footer Action */}
-                  <div className="border-t border-slate-200 p-4 bg-slate-50">
-                    <span className="w-full flex items-center justify-center gap-2 text-blue-600 font-semibold hover:text-blue-700 transition py-2">
+                  <div className="border-t border-slate-200 p-3 lg:p-4 bg-slate-50">
+                    <span className="w-full flex items-center justify-center gap-2 text-sm lg:text-base text-blue-600 font-semibold hover:text-blue-700 transition py-1.5">
                       Abrir Projeto
                       <ArrowRight size={16} />
                     </span>

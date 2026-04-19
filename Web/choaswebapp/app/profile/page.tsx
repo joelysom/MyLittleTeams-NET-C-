@@ -243,19 +243,19 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
+      <div className="sticky top-0 z-20 flex h-auto items-start border-b border-slate-200 bg-white/95 px-4 py-4 shadow-sm backdrop-blur sm:items-center sm:px-6 lg:px-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Perfil acadêmico</h1>
-          <p className="text-sm text-slate-500">Dados pessoais, foto, avatar, curso e campos de docência</p>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Perfil acadêmico</h1>
+          <p className="mt-1 text-sm text-slate-500">Dados pessoais, foto, avatar, curso e campos de docência</p>
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-          <aside className="space-y-6">
-            <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-8 text-white">
-                <div className="flex items-center gap-4">
+      <div className="mx-auto w-full max-w-7xl px-3 py-4 sm:px-4 sm:py-6 lg:px-8 lg:py-8">
+        <div className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]">
+          <aside className="space-y-4 lg:sticky lg:top-8">
+            <div className="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm sm:rounded-[2rem]">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-5 text-white sm:px-6 sm:py-8">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                   <div className="relative">
                     <AvatarDisplay
                       avatar={profile.avatar}
@@ -281,15 +281,15 @@ export default function ProfilePage() {
                   </div>
 
                   <div className="min-w-0">
-                    <p className="truncate text-2xl font-bold">{profile.displayName || 'Usuário'}</p>
+                    <p className="truncate text-xl font-bold sm:text-2xl">{profile.displayName || 'Usuário'}</p>
                     <p className="mt-1 text-sm text-blue-100">{profile.headline || 'Perfil acadêmico e profissional'}</p>
-                    <p className="mt-3 text-sm text-blue-50/90">{profile.email}</p>
+                    <p className="mt-2 text-sm text-blue-50/90 sm:mt-3">{profile.email}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4 p-6">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="space-y-4 p-4 sm:p-6">
+                <div className="grid grid-cols-2 gap-2 text-sm sm:gap-3">
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Curso</p>
                     <p className="mt-1 font-semibold text-slate-900">{profile.course || 'Não informado'}</p>
@@ -330,21 +330,21 @@ export default function ProfilePage() {
                   </p>
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <button
                     type="button"
                     onClick={() => {
                       setTempAvatar(profile.avatar);
                       setIsEditingAvatar(true);
                     }}
-                    className="flex-1 rounded-xl bg-slate-950 px-4 py-3 font-semibold text-white transition hover:bg-slate-800"
+                    className="w-full rounded-xl bg-slate-950 px-4 py-3 font-semibold text-white transition hover:bg-slate-800 sm:flex-1"
                   >
                     Editar avatar
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsEditing((previous) => !previous)}
-                    className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 sm:flex-1"
                   >
                     {isEditing ? 'Fechar edição' : 'Editar perfil'}
                   </button>
@@ -352,7 +352,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
               <div className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
                 <Star size={18} className="text-amber-500" />
                 Resumo profissional
@@ -363,25 +363,25 @@ export default function ProfilePage() {
             </div>
           </aside>
 
-          <main className="space-y-6">
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-6 flex items-center justify-between gap-4">
+          <main className="space-y-4 lg:space-y-6">
+            <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
+              <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900">Informações completas</h2>
+                  <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">Informações completas</h2>
                   <p className="text-sm text-slate-500">Campos sincronizados com a lógica do aplicativo desktop</p>
                 </div>
                 <button
                   onClick={handleSaveProfile}
                   disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   <Save size={16} />
                   {saving ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-2">
-                <section className="space-y-4 rounded-3xl bg-slate-50 p-5">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <section className="space-y-4 rounded-2xl bg-slate-50 p-4 sm:rounded-3xl sm:p-5">
                   <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
                     <UserCircle2 size={18} />
                     Conta e contato
@@ -429,7 +429,7 @@ export default function ProfilePage() {
                   </label>
                 </section>
 
-                <section className="space-y-4 rounded-3xl bg-slate-50 p-5">
+                <section className="space-y-4 rounded-2xl bg-slate-50 p-4 sm:rounded-3xl sm:p-5">
                   <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
                     <GraduationCap size={18} />
                     Dados acadêmicos
@@ -487,7 +487,7 @@ export default function ProfilePage() {
                   </label>
                 </section>
 
-                <section className="space-y-4 rounded-3xl bg-slate-50 p-5 lg:col-span-2">
+                <section className="space-y-4 rounded-2xl bg-slate-50 p-4 sm:rounded-3xl sm:p-5 lg:col-span-2">
                   <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
                     <FileText size={18} />
                     Biografia e resumo
@@ -520,22 +520,22 @@ export default function ProfilePage() {
 
             {isEditingAvatar && (
               <div
-                className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/80 px-3 py-3 backdrop-blur-md sm:px-4 sm:py-4"
+                className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/80 px-2 py-2 backdrop-blur-md sm:px-4 sm:py-4"
                 onClick={() => setIsEditingAvatar(false)}
               >
                 <div
-                  className="flex h-full w-full max-w-[1440px] flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-white shadow-2xl"
+                  className="flex h-full w-full max-w-[1440px] flex-col overflow-hidden rounded-[1.5rem] border border-white/10 bg-white shadow-2xl sm:rounded-[2rem]"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 px-6 py-4 text-white">
+                  <div className="flex flex-col gap-4 border-b border-slate-200 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 px-4 py-4 text-white sm:flex-row sm:items-start sm:justify-between sm:px-6">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-100/80">Editor visual</p>
-                      <h3 className="text-2xl font-black">Personalize seu avatar</h3>
+                      <h3 className="text-xl font-black sm:text-2xl">Personalize seu avatar</h3>
                       <p className="mt-1 text-sm text-blue-100/90">Tela expandida com o mesmo fluxo do desktop: escolha, preview e confirme.</p>
                     </div>
                     <button
                       onClick={() => setIsEditingAvatar(false)}
-                      className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+                      className="w-full rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20 sm:w-auto"
                     >
                       Fechar
                     </button>
@@ -553,8 +553,8 @@ export default function ProfilePage() {
               </div>
             )}
 
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
                 <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
                   <Briefcase size={18} />
                   Informações salvas no perfil
@@ -567,7 +567,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6">
                 <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
                   <Brain size={18} />
                   Docência / Acadêmico
@@ -579,7 +579,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+              <div className="rounded-[1.5rem] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[2rem] sm:p-6 lg:col-span-2">
                 <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
                   <Calendar size={18} />
                   Avisos da coordenação

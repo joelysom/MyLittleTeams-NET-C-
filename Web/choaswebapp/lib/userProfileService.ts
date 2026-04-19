@@ -6,7 +6,12 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { AvatarComponents, DEFAULT_AVATAR, normalizeAvatar } from './avatarService';
-import { resolveFirebaseStorageMediaSource } from './chatMedia';
+import {
+  isDataUrl,
+  resolveFirebaseStorageMediaSource,
+  sanitizeStorageSegment,
+  uploadBytesToFirebaseStorage,
+} from './chatMedia';
 
 export interface UserProfile {
   userId: string;
@@ -39,6 +44,44 @@ export interface UserCalendarEntry {
   title: string;
   notes: string;
   createdAt: string;
+}
+
+function dataUrlToBlob(dataUrl: string): { blob: Blob; contentType: string } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+
+  if (!match) {
+    throw new Error('Formato inválido de imagem de perfil.');
+  }
+
+  const contentType = match[1] || 'image/jpeg';
+  const base64Data = match[2] || '';
+  const binaryString = atob(base64Data);
+  const bytes = new Uint8Array(binaryString.length);
+
+  for (let index = 0; index < binaryString.length; index += 1) {
+    bytes[index] = binaryString.charCodeAt(index);
+  }
+
+  return {
+    blob: new Blob([bytes], { type: contentType }),
+    contentType,
+  };
+}
+
+function getProfilePhotoStoragePath(userId: string, contentType: string): string {
+  const extensionByMimeType: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/avif': 'avif',
+  };
+
+  const normalizedMimeType = contentType.toLowerCase();
+  const extension = extensionByMimeType[normalizedMimeType] || 'png';
+
+  return `profile-photos/${sanitizeStorageSegment(userId)}/profile-photo.${extension}`;
 }
 
 export class UserProfileService {
@@ -201,8 +244,51 @@ export class UserProfileService {
     try {
       const db = getFirestore();
       const userRef = doc(db, 'users', userId);
+
+      const sanitizedUpdates: Record<string, unknown> = { ...updates };
+      const photoCandidate =
+        typeof updates.profilePhotoDataUri === 'string' && updates.profilePhotoDataUri.trim()
+          ? updates.profilePhotoDataUri.trim()
+          : typeof updates.profilePhoto === 'string' && updates.profilePhoto.trim()
+            ? updates.profilePhoto.trim()
+            : typeof updates.profilePhotoSource === 'string' && updates.profilePhotoSource.trim()
+              ? updates.profilePhotoSource.trim()
+              : '';
+
+      if (photoCandidate && isDataUrl(photoCandidate)) {
+        try {
+          const { blob, contentType } = dataUrlToBlob(photoCandidate);
+          const storagePath = getProfilePhotoStoragePath(userId, contentType);
+          const downloadUrl = await uploadBytesToFirebaseStorage(storagePath, blob, contentType);
+
+          if (!downloadUrl) {
+            throw new Error('Não foi possível enviar a foto de perfil para o Firebase Storage.');
+          }
+
+          sanitizedUpdates.profilePhotoStoragePath = storagePath;
+          sanitizedUpdates.profilePhotoSource = downloadUrl;
+          sanitizedUpdates.profilePhotoUrl = downloadUrl;
+          sanitizedUpdates.profilePhoto = downloadUrl;
+          sanitizedUpdates.profilePhotoDataUri = '';
+        } catch (photoError) {
+          console.warn('[userProfileService] Falha ao enviar foto de perfil. Salvando perfil sem a nova imagem.', photoError);
+          delete sanitizedUpdates.profilePhotoDataUri;
+          delete sanitizedUpdates.profilePhoto;
+          delete sanitizedUpdates.profilePhotoSource;
+          delete sanitizedUpdates.profilePhotoUrl;
+        }
+      } else if (photoCandidate) {
+        sanitizedUpdates.profilePhotoSource = photoCandidate;
+        sanitizedUpdates.profilePhotoUrl = photoCandidate;
+        sanitizedUpdates.profilePhoto = photoCandidate;
+      }
+
+      const payload = Object.fromEntries(
+        Object.entries(sanitizedUpdates).filter(([, value]) => value !== undefined),
+      );
+
       await updateDoc(userRef, {
-        ...updates,
+        ...payload,
         updatedAt: new Date(),
       });
 

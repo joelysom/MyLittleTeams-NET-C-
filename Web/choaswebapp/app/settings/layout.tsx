@@ -5,6 +5,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
 import AppShell from '../../components/AppShell';
+import { DEFAULT_AVATAR, type AvatarComponents } from '../../lib/avatarService';
+import { getUserProfileService } from '../../lib/userProfileService';
 import { appNavItems, getAppNavIdFromPath, type AppNavId } from '../../lib/appNavigation';
 
 const routeByNavId: Record<string, string> = {
@@ -34,6 +36,8 @@ interface User {
   uid: string;
   email?: string;
   displayName?: string;
+  avatar: AvatarComponents;
+  profilePhotoSource?: string;
 }
 
 export default function SettingsLayout({
@@ -53,9 +57,30 @@ export default function SettingsLayout({
         setUser({
           uid: currentUser.uid,
           email: currentUser.email || '',
-          displayName: currentUser.displayName || 'Usuário',
+          displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+          avatar: DEFAULT_AVATAR,
+          profilePhotoSource: '',
         });
         setLoading(false);
+
+        void (async () => {
+          try {
+            const profile = await getUserProfileService().getUserProfile(currentUser.uid);
+            if (!profile) {
+              return;
+            }
+
+            setUser({
+              uid: currentUser.uid,
+              email: profile.email || currentUser.email || '',
+              displayName: profile.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+              avatar: profile.avatar || DEFAULT_AVATAR,
+              profilePhotoSource: profile.profilePhotoSource || profile.profilePhoto || '',
+            });
+          } catch (error) {
+            console.error('Erro ao carregar perfil do usuário:', error);
+          }
+        })();
       } else {
         router.push('/login');
       }
@@ -98,8 +123,11 @@ export default function SettingsLayout({
       user={user ? {
         displayName: user.displayName,
         email: user.email,
+        avatar: user.avatar,
+        profilePhotoSource: user.profilePhotoSource,
       } : null}
       onLogout={handleLogout}
+      contentClassName="w-full min-h-screen px-0 pb-0 pt-16 sm:px-0 sm:pt-16 lg:px-0 lg:pb-0 lg:pt-8"
     >
       {children}
     </AppShell>

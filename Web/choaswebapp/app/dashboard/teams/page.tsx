@@ -287,17 +287,17 @@ export default function TeamsPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:gap-5">
           {filteredTeams.map((team) => (
             <Link
               key={team.teamId}
               href={`/dashboard/teams/${team.teamId}`}
-              className="group block overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
+              className="group block overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
             >
               <div className="flex h-full flex-col">
-                <div className="flex items-start gap-4 border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 p-6">
+                <div className="flex items-start gap-3 border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 p-4 lg:p-5">
                   <div className="relative flex-shrink-0">
-                    <div className="flex h-18 w-18 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white shadow-lg">
+                    <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white shadow-lg lg:h-16 lg:w-16">
                       {getTeamLogoSource(team) ? (
                         <img
                           src={getTeamLogoSource(team)}
@@ -319,12 +319,12 @@ export default function TeamsPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Workspace da equipe</p>
-                        <h4 className="mt-1 truncate text-xl font-bold text-slate-900 transition group-hover:text-blue-700">
+                        <h4 className="mt-1 truncate text-lg font-bold text-slate-900 transition group-hover:text-blue-700 lg:text-xl">
                           {team.teamName}
                         </h4>
                       </div>
                       <div
-                        className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
+                        className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold lg:px-3 lg:text-xs ${
                           team.projectStatus === 'Concluído'
                             ? 'bg-emerald-100 text-emerald-700'
                             : team.projectStatus === 'Em Andamento'
@@ -336,30 +336,30 @@ export default function TeamsPage() {
                       </div>
                     </div>
 
-                    <p className="mt-2 text-sm text-slate-600">{team.course || 'Curso não informado'}</p>
-                    {team.className && <p className="mt-1 text-xs text-slate-500">{team.className}</p>}
-                    <p className="mt-2 text-xs text-slate-500">{buildTeamBalanceLabel(team)}</p>
+                    <p className="mt-2 text-xs text-slate-600 lg:text-sm">{team.course || 'Curso não informado'}</p>
+                    {team.className && <p className="mt-1 text-[11px] text-slate-500 lg:text-xs">{team.className}</p>}
+                    <p className="mt-2 text-[11px] text-slate-500 lg:text-xs">{buildTeamBalanceLabel(team)}</p>
                   </div>
                 </div>
-                <div className="flex flex-1 flex-col gap-4 p-6">
-                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+                <div className="flex flex-1 flex-col gap-3 p-4 lg:p-5">
+                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold lg:text-xs">
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">
                       {getStudentTeamMembers(team).length} aluno(s)
                     </span>
-                    <span className="rounded-full bg-violet-50 px-3 py-1 text-violet-700">
+                    <span className="rounded-full bg-violet-50 px-2.5 py-1 text-violet-700">
                       {getFacultyTeamMembers(team).length} docente(s)
                     </span>
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
                       {buildTeamProfessorFocusLabel(team)}
                     </span>
                   </div>
 
                   <div>
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-semibold text-slate-700">Progresso</span>
-                      <span className="text-sm font-bold text-slate-900">{team.projectProgress}%</span>
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 lg:text-sm">Progresso</span>
+                      <span className="text-xs font-bold text-slate-900 lg:text-sm">{team.projectProgress}%</span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
                         style={{ width: `${team.projectProgress}%` }}
@@ -367,12 +367,12 @@ export default function TeamsPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-slate-600">
+                  <div className="grid gap-2 text-xs sm:grid-cols-2 lg:text-sm">
+                    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-slate-600">
                       <Users size={16} className="text-slate-400" />
                       <span>{getStudentTeamMembers(team).length} alunos</span>
                     </div>
-                    <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-slate-600">
+                    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-slate-600">
                       <Calendar size={16} className="text-slate-400" />
                       <span>{team.projectDeadline ? new Date(team.projectDeadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</span>
                     </div>
@@ -408,15 +408,15 @@ export default function TeamsPage() {
                   {getFacultyTeamMembers(team).length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {getFacultyTeamMembers(team).slice(0, 2).map((member) => (
-                        <span key={member.userId || member.name} className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                        <span key={member.userId || member.name} className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 lg:px-3 lg:text-xs">
                           {member.name}
                         </span>
                       ))}
                     </div>
                   )}
 
-                  <div className="mt-auto border-t border-slate-100 pt-4">
-                    <span className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition group-hover:bg-blue-700">
+                  <div className="mt-auto border-t border-slate-100 pt-3 lg:pt-4">
+                    <span className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition group-hover:bg-blue-700">
                       Abrir workspace
                       <ArrowRight size={16} />
                     </span>
