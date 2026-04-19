@@ -149,23 +149,16 @@ export default function SettingsPage() {
 
   return (
     <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 ${accessibility.highContrastEnabled ? 'contrast-125' : ''}`}>
-      <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Configurações</h1>
-          <p className="text-sm text-slate-500">Preferências de conta, notificação, privacidade e acessibilidade</p>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
-          <aside className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
+        <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-8">
             <div className="mb-4 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 p-5 text-white shadow-lg">
               <p className="text-sm uppercase tracking-[0.2em] text-blue-100">Conta</p>
               <p className="mt-2 text-xl font-bold">{user?.displayName || 'Usuário'}</p>
               <p className="mt-1 text-sm text-blue-50/90">{user?.email}</p>
             </div>
 
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2 lg:flex lg:flex-col">
               {settingsTabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -173,12 +166,12 @@ export default function SettingsPage() {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
+                    className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
                       isActive ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
                     }`}
                   >
                     <Icon size={18} />
-                    <span className="font-semibold">{tab.label}</span>
+                    <span className="min-w-0 truncate font-semibold">{tab.label}</span>
                     {isActive && <ChevronRight size={16} className="ml-auto" />}
                   </button>
                 );
@@ -222,7 +215,7 @@ export default function SettingsPage() {
                   </label>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-3">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   <ToggleCard
                     title="Autenticação de dois fatores"
                     description="Aumente a segurança da conta com verificação extra"
@@ -266,7 +259,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-slate-500">Mesma lógica de preferências do app desktop, persistida localmente</p>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <ToggleCard
                     title="Notificações por email"
                     description="Receba alertas importantes por email"
@@ -310,7 +303,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-slate-500">Controle o que as pessoas veem no seu perfil e na sua presença</p>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <ToggleCard
                     title="Mostrar status online"
                     description="Indica quando você está online para contatos e equipes"
@@ -342,7 +335,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-slate-500">Controles equivalentes aos ajustes salvos pelo desktop</p>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2">
                   <ToggleCard
                     title="Alto contraste"
                     description="Aumenta a distinção visual entre superfícies e texto"

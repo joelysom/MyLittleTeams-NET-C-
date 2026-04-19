@@ -7,12 +7,12 @@ export default function FilesPage() {
   const router = useRouter();
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
-      <div className="relative isolate flex min-h-[calc(100vh-4rem)] flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef6ff_100%)]">
+    <div className="min-h-[calc(100dvh-4rem)] overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm lg:rounded-[2rem]">
+      <div className="relative isolate flex min-h-[calc(100dvh-4rem)] flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef6ff_100%)]">
         <div className="absolute inset-0 bg-[url('/img/WIP.png')] bg-cover bg-center opacity-[0.06]" />
-        <div className="relative z-10 flex flex-1 items-center justify-center px-6 py-10">
+        <div className="relative z-10 flex flex-1 items-center justify-center px-4 py-6 sm:px-6 sm:py-10">
           <div className="grid w-full max-w-6xl gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-            <section className="rounded-[2.25rem] border border-white/70 bg-white/80 p-8 shadow-2xl shadow-slate-200/60 backdrop-blur-xl sm:p-10">
+            <section className="rounded-[2.25rem] border border-white/70 bg-white/80 p-6 shadow-2xl shadow-slate-200/60 backdrop-blur-xl sm:p-8 lg:p-10">
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700">
                 <Sparkles size={14} />
                 W.I.P
@@ -58,7 +58,7 @@ export default function FilesPage() {
               </div>
             </section>
 
-            <aside className="flex items-center justify-center rounded-[2.25rem] border border-white/70 bg-slate-950 p-6 shadow-2xl shadow-slate-200/50">
+            <aside className="flex items-center justify-center rounded-[2.25rem] border border-white/70 bg-slate-950 p-4 shadow-2xl shadow-slate-200/50 sm:p-6">
               <div className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-black">
                 <img
                   src="/img/WIP.png"

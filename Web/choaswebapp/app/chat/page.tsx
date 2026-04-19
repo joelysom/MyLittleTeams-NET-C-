@@ -342,7 +342,7 @@ export default function ChatPage() {
 
   if (loadingConversations && conversations.length === 0) {
     return (
-      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-100">
+      <div className="flex min-h-[calc(100dvh-4rem)] items-center justify-center bg-slate-950 text-slate-100">
         <div className="text-center">
           <Loader className="mx-auto mb-4 animate-spin text-blue-400" size={48} />
           <p className="text-slate-300">Carregando conversas...</p>
@@ -356,22 +356,22 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
-      <div className="bg-slate-900/90 border-b border-white/10 px-8 py-4 shadow-sm backdrop-blur">
+    <div className="flex min-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-[1.75rem] bg-slate-950 text-slate-100 shadow-sm lg:min-h-[calc(100dvh-7rem)]">
+      <div className="border-b border-white/10 bg-slate-900/90 px-4 py-4 shadow-sm backdrop-blur sm:px-6 lg:px-8">
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-lg font-bold text-white shadow-lg shadow-blue-950/30">
             💬
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white">Conversas</h1>
+            <h1 className="text-2xl font-bold text-white sm:text-3xl">Conversas</h1>
             <p className="text-sm text-slate-300">Chat direto, imagens do perfil e anexos do Firebase Storage</p>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.10),_transparent_24%)]">
-        <aside className="flex w-[390px] shrink-0 flex-col border-r border-white/10 bg-slate-950/70 backdrop-blur-xl xl:w-[420px]">
-          <div className="border-b border-white/10 p-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.10),_transparent_24%)] lg:flex-row">
+        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-white/10 bg-slate-950/70 backdrop-blur-xl lg:w-[390px] lg:border-b-0 lg:border-r xl:w-[420px]">
+          <div className="border-b border-white/10 p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-white">Conversas</h2>
               <div className="flex gap-2">
@@ -396,13 +396,13 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-xs font-semibold text-slate-300">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-xs font-semibold text-slate-300 sm:px-5">
             <span className="rounded-full bg-blue-500/20 px-3 py-1 text-blue-200">Favoritos</span>
             <span className="rounded-full bg-white/5 px-3 py-1">Chats</span>
-            <span className="ml-auto text-slate-400">Atualizado em tempo real</span>
+            <span className="ml-auto hidden text-slate-400 sm:inline">Atualizado em tempo real</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="max-h-[40vh] flex-1 overflow-y-auto lg:max-h-none">
             {filteredConversations.length === 0 ? (
               <div className="p-6 text-center text-slate-400">
                 <MessageCircle size={36} className="mx-auto mb-2 opacity-50" />
@@ -452,10 +452,10 @@ export default function ChatPage() {
           </div>
         </aside>
 
-        <section className="flex flex-1 flex-col bg-slate-950/50 backdrop-blur-xl">
+        <section className="flex min-h-0 flex-1 flex-col bg-slate-950/50 backdrop-blur-xl">
           {selectedConversation ? (
             <>
-              <div className="flex items-center justify-between border-b border-white/10 bg-slate-950/70 px-8 py-4">
+              <div className="flex flex-col gap-4 border-b border-white/10 bg-slate-950/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
                 <div className="flex items-center gap-4">
                   <div className="relative">
                     <AvatarDisplay
@@ -472,7 +472,7 @@ export default function ChatPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-blue-200">
+                <div className="flex items-center gap-2 self-end text-blue-200 sm:self-auto">
                   <button className="rounded-xl p-2 transition hover:bg-white/10 hover:text-white">
                     <Phone size={18} />
                   </button>
@@ -488,7 +488,7 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
                 {loadingMessages ? (
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center">
@@ -522,7 +522,7 @@ export default function ChatPage() {
                           )}
 
                           <div
-                            className={`max-w-[min(34rem,80%)] rounded-3xl px-4 py-3 shadow-lg ${
+                            className={`max-w-[min(34rem,86%)] rounded-3xl px-4 py-3 shadow-lg sm:max-w-[min(34rem,80%)] ${
                               isOwn
                                 ? 'rounded-br-md bg-gradient-to-br from-blue-600 to-indigo-600 text-white'
                                 : 'rounded-bl-md border border-white/10 bg-white/5 text-white backdrop-blur'
@@ -557,7 +557,7 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <div className="border-t border-white/10 bg-slate-950/80 px-8 py-5 backdrop-blur-xl">
+              <div className="border-t border-white/10 bg-slate-950/80 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-8 lg:py-5">
                 {pendingAttachments.length > 0 && (
                   <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
                     <div className="mb-3 flex items-center justify-between">
@@ -565,7 +565,7 @@ export default function ChatPage() {
                       <p className="text-xs text-slate-400">{pendingCaption}</p>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {pendingAttachments.map((attachment, index) => (
                         <div key={`${attachment.file.name}-${index}`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 p-3">
                           <button
@@ -653,7 +653,7 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 shadow-inner shadow-black/10">
+                <div className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 shadow-inner shadow-black/10 sm:flex-row sm:items-center">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -696,7 +696,7 @@ export default function ChatPage() {
                   <button
                     onClick={handleSendMessage}
                     disabled={sending || (!messageInput.trim() && pendingAttachments.length === 0)}
-                    className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 px-5 py-3 font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 px-5 py-3 font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {sending ? <Loader size={18} className="animate-spin" /> : <Send size={18} />}
                     <span>Enviar</span>
