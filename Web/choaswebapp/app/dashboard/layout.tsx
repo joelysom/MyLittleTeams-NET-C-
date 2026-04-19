@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { onAuthStateChanged } from 'firebase/auth';
+import { usePathname, useRouter } from 'next/navigation';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
+import AvatarDisplay from '../../components/AvatarDisplay';
+import { DEFAULT_AVATAR, type AvatarComponents } from '../../lib/avatarService';
+import { getUserProfileService } from '../../lib/userProfileService';
 import {
   MessageCircle,
   Users,
@@ -23,6 +26,8 @@ interface User {
   uid: string;
   email?: string;
   displayName?: string;
+  avatar: AvatarComponents;
+  profilePhotoSource?: string;
 }
 
 const navItems = [
@@ -36,17 +41,42 @@ const navItems = [
   { label: 'Configurações', icon: Settings, id: 'settings' },
 ];
 
+const routeByNavId: Record<string, string> = {
+  overview: '/dashboard',
+  chats: '/chat',
+  connections: '/dashboard/connections',
+  teams: '/dashboard/teams',
+  teaching: '/dashboard/teaching',
+  calendar: '/dashboard/calendar',
+  files: '/dashboard/files',
+  profile: '/profile',
+  settings: '/settings',
+};
+
+function getNavIdFromPath(pathname: string): string {
+  if (pathname.startsWith('/chat')) return 'chats';
+  if (pathname.startsWith('/dashboard/teams')) return 'teams';
+  if (pathname.startsWith('/dashboard/teaching')) return 'teaching';
+  if (pathname.startsWith('/dashboard/calendar')) return 'calendar';
+  if (pathname.startsWith('/dashboard/files')) return 'files';
+  if (pathname.startsWith('/dashboard/profile') || pathname === '/profile') return 'profile';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/dashboard')) return 'overview';
+  return 'overview';
+}
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [activeNav, setActiveNav] = useState('overview');
+  const [activeNav, setActiveNav] = useState(getNavIdFromPath(pathname));
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -54,9 +84,30 @@ export default function DashboardLayout({
         setUser({
           uid: currentUser.uid,
           email: currentUser.email || '',
-          displayName: currentUser.displayName || 'Usuário',
+          displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+          avatar: DEFAULT_AVATAR,
+          profilePhotoSource: '',
         });
         setLoading(false);
+
+        void (async () => {
+          try {
+            const profile = await getUserProfileService().getUserProfile(currentUser.uid);
+            if (!profile) {
+              return;
+            }
+
+            setUser({
+              uid: currentUser.uid,
+              email: profile.email || currentUser.email || '',
+              displayName: profile.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+              avatar: profile.avatar || DEFAULT_AVATAR,
+              profilePhotoSource: profile.profilePhotoSource || profile.profilePhoto || '',
+            });
+          } catch (error) {
+            console.error('Erro ao carregar perfil do usuário:', error);
+          }
+        })();
       } else {
         router.push('/login');
       }
@@ -67,12 +118,16 @@ export default function DashboardLayout({
 
   const handleLogout = async () => {
     try {
-      await auth.signOut();
+      await signOut(auth);
       router.push('/login');
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     }
   };
+
+  useEffect(() => {
+    setActiveNav(getNavIdFromPath(pathname));
+  }, [pathname]);
 
   if (loading) {
     return (
@@ -123,9 +178,10 @@ export default function DashboardLayout({
                   key={item.id}
                   onClick={() => {
                     setActiveNav(item.id);
-                    if (item.id === 'overview') router.push('/dashboard');
-                    else if (item.id === 'chats') router.push('/chat');
-                    else if (item.id === 'settings') router.push('/settings');
+                    const target = routeByNavId[item.id];
+                    if (target) {
+                      router.push(target);
+                    }
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                     activeNav === item.id
@@ -148,9 +204,12 @@ export default function DashboardLayout({
               onClick={() => setUserMenuOpen(!userMenuOpen)}
               className="w-full flex items-center gap-3 p-3 hover:bg-slate-100 rounded-lg transition"
             >
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-white font-semibold flex-shrink-0">
-                {user?.displayName?.charAt(0).toUpperCase() || 'U'}
-              </div>
+              <AvatarDisplay
+                avatar={user?.avatar || DEFAULT_AVATAR}
+                imageSrc={user?.profilePhotoSource || ''}
+                size="sm"
+                fallback={user?.displayName?.charAt(0).toUpperCase() || 'U'}
+              />
               {sidebarOpen && (
                 <div className="flex-1 text-left min-w-0">
                   <p className="text-sm font-semibold text-slate-900 truncate">

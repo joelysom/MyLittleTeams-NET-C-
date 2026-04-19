@@ -1,21 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '../../../lib/useAuth';
-import { getFirestore, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { Plus, Search, Users, Calendar, TrendingUp } from 'lucide-react';
-
-interface TeamWorkspace {
-  teamId: string;
-  teamName: string;
-  course: string;
-  className: string;
-  projectProgress: number;
-  projectStatus: string;
-  projectDeadline?: string;
-  members: Array<{ userId: string; name: string; email: string }>;
-  createdAt: string;
-}
+import { getFirestore, collection, addDoc } from 'firebase/firestore';
+import AvatarDisplay from '../../../components/AvatarDisplay';
+import {
+  buildTeamBalanceLabel,
+  buildTeamProfessorFocusLabel,
+  createDefaultBoardColumns,
+  getFacultyTeamMembers,
+  getStudentTeamMembers,
+  getTeamLogoSource,
+  loadUserTeamWorkspaces,
+  type TeamWorkspace,
+} from '../../../lib/teamWorkspaceService';
+import { ArrowRight, Calendar, FolderKanban, Plus, Search, Sparkles, Users } from 'lucide-react';
 
 export default function TeamsPage() {
   const user = useAuth();
@@ -35,36 +35,7 @@ export default function TeamsPage() {
 
     const loadTeams = async () => {
       try {
-        const db = getFirestore();
-        const userTeamsRef = collection(db, 'userTeams');
-        const q = query(userTeamsRef, where('userId', '==', user.uid));
-        const snapshot = await getDocs(q);
-
-        const loadedTeams: TeamWorkspace[] = [];
-        
-        for (const doc of snapshot.docs) {
-          const data = doc.data();
-          const teamRef = collection(db, 'teams');
-          const teamQuery = query(teamRef, where('teamId', '==', data.teamId));
-          const teamSnapshot = await getDocs(teamQuery);
-          
-          if (!teamSnapshot.empty) {
-            const teamData = teamSnapshot.docs[0].data();
-            loadedTeams.push({
-              teamId: teamData.teamId || '',
-              teamName: teamData.teamName || 'Sem Nome',
-              course: teamData.course || '',
-              className: teamData.className || '',
-              projectProgress: teamData.projectProgress || 0,
-              projectStatus: teamData.projectStatus || 'Planejamento',
-              projectDeadline: teamData.projectDeadline,
-              members: teamData.members || [],
-              createdAt: teamData.createdAt || new Date().toISOString(),
-            });
-          }
-        }
-
-        setTeams(loadedTeams);
+        setTeams(await loadUserTeamWorkspaces(user.uid));
       } catch (error) {
         console.error('Erro ao carregar equipes:', error);
       } finally {
@@ -82,6 +53,7 @@ export default function TeamsPage() {
     try {
       const db = getFirestore();
       const teamId = `${user.uid}_${Date.now()}`;
+      const now = new Date().toISOString();
       
       // Criar documento da equipe
       await addDoc(collection(db, 'teams'), {
@@ -89,11 +61,29 @@ export default function TeamsPage() {
         teamName: newTeamData.teamName,
         course: newTeamData.course,
         className: newTeamData.className,
+        classId: '',
+        academicTerm: '',
+        templateId: '',
+        templateName: '',
         projectProgress: 0,
         projectStatus: 'Planejamento',
-        members: [{ userId: user.uid, name: user.displayName || 'Usuário', email: user.email || '' }],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        projectDeadline: '',
+        teacherNotes: '',
+        focalProfessorUserId: '',
+        focalProfessorName: '',
+        professorSupervisorUserIds: [],
+        professorSupervisorNames: [],
+        defaultFilePermissionScope: 'team',
+        members: [{ userId: user.uid, name: user.displayName || 'Usuário', email: user.email || '', role: 'student' }],
+        ucs: [],
+        semesterTimeline: [],
+        milestones: [],
+        assets: [],
+        taskColumns: createDefaultBoardColumns(),
+        notifications: [],
+        csdBoard: { certainties: [], assumptions: [], doubts: [] },
+        createdAt: now,
+        updatedAt: now,
         createdBy: user.uid,
       });
 
@@ -110,33 +100,7 @@ export default function TeamsPage() {
       setIsCreatingTeam(false);
 
       // Reload teams
-      const userTeamsRef = collection(db, 'userTeams');
-      const q = query(userTeamsRef, where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-
-      const loadedTeams: TeamWorkspace[] = [];
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-        const teamRef = collection(db, 'teams');
-        const teamQuery = query(teamRef, where('teamId', '==', data.teamId));
-        const teamSnapshot = await getDocs(teamQuery);
-        
-        if (!teamSnapshot.empty) {
-          const teamData = teamSnapshot.docs[0].data();
-          loadedTeams.push({
-            teamId: teamData.teamId || '',
-            teamName: teamData.teamName || '',
-            course: teamData.course || '',
-            className: teamData.className || '',
-            projectProgress: teamData.projectProgress || 0,
-            projectStatus: teamData.projectStatus || 'Planejamento',
-            projectDeadline: teamData.projectDeadline,
-            members: teamData.members || [],
-            createdAt: teamData.createdAt || new Date().toISOString(),
-          });
-        }
-      }
-      setTeams(loadedTeams);
+      setTeams(await loadUserTeamWorkspaces(user.uid));
     } catch (error) {
       console.error('Erro ao criar equipe:', error);
     }
@@ -149,6 +113,9 @@ export default function TeamsPage() {
     const matchesStatus = filterStatus === 'all' || team.projectStatus === filterStatus;
     return matchesSearch && matchesStatus;
   });
+
+  const totalStudents = teams.reduce((sum, team) => sum + getStudentTeamMembers(team).length, 0);
+  const totalFaculty = teams.reduce((sum, team) => sum + getFacultyTeamMembers(team).length, 0);
 
   if (loading) {
     return (
@@ -165,20 +132,45 @@ export default function TeamsPage() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900">Gerenciar Equipes</h2>
-          <p className="text-slate-600 mt-1">Visualize, crie e gerencie suas equipes de projeto</p>
+      <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+        <div className="bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 px-6 py-8 text-white sm:px-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-blue-100">
+                <Sparkles size={14} />
+                Workspace de equipes
+              </div>
+              <h2 className="text-3xl font-black tracking-tight md:text-4xl">Equipes em cards, como no Teams do desktop</h2>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100/90">
+                Cada card mostra o ícone da equipe, status, progresso, professores e discentes para abrir o workspace rapidamente.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setIsCreatingTeam(true)}
+              className="inline-flex items-center gap-2 rounded-2xl bg-white px-5 py-3 font-semibold text-slate-900 shadow-lg transition hover:bg-blue-50"
+            >
+              <Plus size={20} />
+              Nova Equipe
+            </button>
+          </div>
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-100/80">Equipes</p>
+              <p className="mt-2 text-3xl font-black">{teams.length}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-100/80">Discentes</p>
+              <p className="mt-2 text-3xl font-black">{totalStudents}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-100/80">Docentes</p>
+              <p className="mt-2 text-3xl font-black">{totalFaculty}</p>
+            </div>
+          </div>
         </div>
-        <button
-          onClick={() => setIsCreatingTeam(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition"
-        >
-          <Plus size={20} />
-          Nova Equipe
-        </button>
-      </div>
+      </section>
 
       {/* Create Team Modal */}
       {isCreatingTeam && (
@@ -279,100 +271,159 @@ export default function TeamsPage() {
         </div>
       </div>
 
-      {/* Teams Grid */}
       {filteredTeams.length === 0 ? (
-        <div className="bg-white rounded-xl border-2 border-dashed border-slate-300 p-12 text-center">
-          <Users size={48} className="mx-auto text-slate-400 mb-4" />
+        <div className="rounded-[2rem] border-2 border-dashed border-slate-300 bg-white p-12 text-center shadow-sm">
+          <Users size={48} className="mx-auto mb-4 text-slate-400" />
           <h4 className="text-lg font-semibold text-slate-900 mb-2">Nenhuma equipe encontrada</h4>
           <p className="text-slate-600">
             {searchQuery ? 'Tente refinar sua busca' : 'Crie sua primeira equipe para começar'}
           </p>
+          <button
+            onClick={() => setIsCreatingTeam(true)}
+            className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700"
+          >
+            <Plus size={18} />
+            Criar equipe
+          </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           {filteredTeams.map((team) => (
-            <div
+            <Link
               key={team.teamId}
-              className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg transition cursor-pointer group"
+              href={`/dashboard/teams/${team.teamId}`}
+              className="group block overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
             >
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200 p-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <h4 className="text-lg font-bold text-slate-900 group-hover:text-blue-600 transition">
-                      {team.teamName}
-                    </h4>
-                    <p className="text-sm text-slate-600 mt-1">{team.course}</p>
-                    {team.className && (
-                      <p className="text-xs text-slate-500 mt-1">{team.className}</p>
-                    )}
+              <div className="flex h-full flex-col">
+                <div className="flex items-start gap-4 border-b border-slate-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 p-6">
+                  <div className="relative flex-shrink-0">
+                    <div className="flex h-18 w-18 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-white shadow-lg">
+                      {getTeamLogoSource(team) ? (
+                        <img
+                          src={getTeamLogoSource(team)}
+                          alt={team.teamName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-lg font-black tracking-wider">
+                          {team.teamName.slice(0, 2).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="absolute -right-2 -bottom-2 rounded-full border-2 border-white bg-blue-600 p-1.5 text-white shadow-md">
+                      <FolderKanban size={12} />
+                    </div>
                   </div>
-                  <div
-                    className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ml-4 ${
-                      team.projectStatus === 'Concluído'
-                        ? 'bg-green-100 text-green-700'
-                        : team.projectStatus === 'Em Andamento'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    {team.projectStatus}
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">Workspace da equipe</p>
+                        <h4 className="mt-1 truncate text-xl font-bold text-slate-900 transition group-hover:text-blue-700">
+                          {team.teamName}
+                        </h4>
+                      </div>
+                      <div
+                        className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${
+                          team.projectStatus === 'Concluído'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : team.projectStatus === 'Em Andamento'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-amber-100 text-amber-700'
+                        }`}
+                      >
+                        {team.projectStatus}
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-sm text-slate-600">{team.course || 'Curso não informado'}</p>
+                    {team.className && <p className="mt-1 text-xs text-slate-500">{team.className}</p>}
+                    <p className="mt-2 text-xs text-slate-500">{buildTeamBalanceLabel(team)}</p>
                   </div>
                 </div>
-              </div>
+                <div className="flex flex-1 flex-col gap-4 p-6">
+                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+                      {getStudentTeamMembers(team).length} aluno(s)
+                    </span>
+                    <span className="rounded-full bg-violet-50 px-3 py-1 text-violet-700">
+                      {getFacultyTeamMembers(team).length} docente(s)
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+                      {buildTeamProfessorFocusLabel(team)}
+                    </span>
+                  </div>
 
-              <div className="p-6 space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-semibold text-slate-700">Progresso</span>
-                    <span className="text-sm font-bold text-slate-900">{team.projectProgress}%</span>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-semibold text-slate-700">Progresso</span>
+                      <span className="text-sm font-bold text-slate-900">{team.projectProgress}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
+                        style={{ width: `${team.projectProgress}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-600"
-                      style={{ width: `${team.projectProgress}%` }}
-                    />
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex items-center gap-2 text-slate-600">
-                    <Users size={16} className="text-slate-400" />
-                    <span>{team.members.length} membros</span>
-                  </div>
-                  {team.projectDeadline && (
-                    <div className="flex items-center gap-2 text-slate-600">
+                  <div className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-slate-600">
+                      <Users size={16} className="text-slate-400" />
+                      <span>{getStudentTeamMembers(team).length} alunos</span>
+                    </div>
+                    <div className="flex items-center gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-slate-600">
                       <Calendar size={16} className="text-slate-400" />
-                      <span>{new Date(team.projectDeadline).toLocaleDateString('pt-BR')}</span>
+                      <span>{team.projectDeadline ? new Date(team.projectDeadline).toLocaleDateString('pt-BR') : 'Sem prazo'}</span>
+                    </div>
+                  </div>
+
+                  {getStudentTeamMembers(team).length > 0 && (
+                    <div className="flex items-center gap-3 pt-1">
+                      <div className="flex -space-x-2">
+                        {getStudentTeamMembers(team).slice(0, 3).map((member, idx) => (
+                          <div key={idx} title={member.name}>
+                            <AvatarDisplay
+                              avatar={member.avatar}
+                              imageSrc={member.profilePhotoSource || ''}
+                              size="sm"
+                              fallback={member.name.charAt(0).toUpperCase()}
+                            />
+                          </div>
+                        ))}
+                        {getStudentTeamMembers(team).length > 3 && (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white bg-slate-300 text-xs font-bold text-slate-700">
+                            +{getStudentTeamMembers(team).length - 3}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Equipe ativa</p>
+                        <p className="truncate text-sm font-semibold text-slate-900">{team.teamName}</p>
+                      </div>
                     </div>
                   )}
-                </div>
 
-                {team.members.length > 0 && (
-                  <div className="flex -space-x-2 pt-2">
-                    {team.members.slice(0, 3).map((member, idx) => (
-                      <div
-                        key={idx}
-                        className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-white"
-                        title={member.name}
-                      >
-                        {member.name.charAt(0).toUpperCase()}
-                      </div>
-                    ))}
-                    {team.members.length > 3 && (
-                      <div className="w-8 h-8 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-bold border border-white">
-                        +{team.members.length - 3}
-                      </div>
-                    )}
+                  {getFacultyTeamMembers(team).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {getFacultyTeamMembers(team).slice(0, 2).map((member) => (
+                        <span key={member.userId || member.name} className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                          {member.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-auto border-t border-slate-100 pt-4">
+                    <span className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition group-hover:bg-blue-700">
+                      Abrir workspace
+                      <ArrowRight size={16} />
+                    </span>
                   </div>
-                )}
+                </div>
               </div>
-
-              <div className="border-t border-slate-200 p-4 bg-slate-50">
-                <button className="w-full text-blue-600 font-semibold hover:text-blue-700 transition py-2">
-                  Visualizar Detalhes
-                </button>
-              </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

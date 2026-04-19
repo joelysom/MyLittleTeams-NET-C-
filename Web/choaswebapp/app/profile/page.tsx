@@ -1,60 +1,130 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../lib/useAuth';
-import { getUserProfileService } from '../../lib/userProfileService';
+import { getUserProfileService, type UserCalendarEntry } from '../../lib/userProfileService';
 import { AvatarComponents, DEFAULT_AVATAR } from '../../lib/avatarService';
 import AvatarDisplay from '../../components/AvatarDisplay';
 import AvatarSelector from '../../components/AvatarSelector';
-import { Edit3, Mail, Phone, GraduationCap, Briefcase } from 'lucide-react';
+import { auth } from '../../lib/firebase';
+import { updateProfile } from 'firebase/auth';
+import {
+  Edit3,
+  Mail,
+  Phone,
+  Calendar,
+  GraduationCap,
+  Briefcase,
+  UserCircle2,
+  Camera,
+  Save,
+  BadgeInfo,
+  Code2,
+  Building2,
+  Brain,
+  FileText,
+  Star,
+} from 'lucide-react';
 
-interface UserProfile {
+interface ProfileFormState {
   uid: string;
   displayName: string;
   email: string;
+  headline: string;
+  course: string;
+  registration: string;
+  phoneNumber: string;
+  academicDepartment: string;
+  academicFocus: string;
+  programmingLanguages: string;
+  bio: string;
+  professionalSummary: string;
+  profilePhotoDataUri: string;
   avatar: AvatarComponents;
-  photoURL?: string;
-  headline?: string;
-  course?: string;
-  registration?: string;
-  languages?: string;
-  professionalSummary?: string;
-  phoneNumber?: string;
-  department?: string;
-  academicFocus?: string;
+  calendarEntries: UserCalendarEntry[];
 }
+
+const emptyProfile: ProfileFormState = {
+  uid: '',
+  displayName: '',
+  email: '',
+  headline: '',
+  course: '',
+  registration: '',
+  phoneNumber: '',
+  academicDepartment: '',
+  academicFocus: '',
+  programmingLanguages: '',
+  bio: '',
+  professionalSummary: '',
+  profilePhotoDataUri: '',
+  avatar: DEFAULT_AVATAR,
+  calendarEntries: [],
+};
+
+const fileToDataUri = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+};
 
 export default function ProfilePage() {
   const user = useAuth();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [profile, setProfile] = useState<ProfileFormState>(emptyProfile);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isEditingAvatar, setIsEditingAvatar] = useState(false);
   const [tempAvatar, setTempAvatar] = useState<AvatarComponents>(DEFAULT_AVATAR);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isEditingAvatar) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isEditingAvatar]);
 
   useEffect(() => {
     const loadProfile = async () => {
-      if (!user) return;
+      if (!user) {
+        setLoading(false);
+        return;
+      }
 
       try {
         const userProfileService = getUserProfileService();
         const firebaseProfile = await userProfileService.getUserProfile(user.uid);
 
-        if (firebaseProfile) {
-          setProfile({
-            uid: user.uid,
-            displayName: firebaseProfile.displayName,
-            email: firebaseProfile.email,
-            avatar: firebaseProfile.avatar,
-          } as UserProfile);
-        } else {
-          setProfile({
-            uid: user.uid,
-            displayName: user.displayName || '',
-            email: user.email || '',
-            avatar: DEFAULT_AVATAR,
-          });
-        }
+        const loadedProfile: ProfileFormState = {
+          uid: user.uid,
+          displayName: firebaseProfile?.displayName || user.displayName || '',
+          email: firebaseProfile?.email || user.email || '',
+          headline: firebaseProfile?.headline || '',
+          course: firebaseProfile?.course || '',
+          registration: firebaseProfile?.registration || '',
+          phoneNumber: firebaseProfile?.phoneNumber || '',
+          academicDepartment: firebaseProfile?.academicDepartment || '',
+          academicFocus: firebaseProfile?.academicFocus || '',
+          programmingLanguages: firebaseProfile?.programmingLanguages || '',
+          bio: firebaseProfile?.bio || '',
+          professionalSummary: firebaseProfile?.professionalSummary || firebaseProfile?.bio || '',
+          profilePhotoDataUri: firebaseProfile?.profilePhotoDataUri || firebaseProfile?.profilePhotoSource || '',
+          avatar: firebaseProfile?.avatar || DEFAULT_AVATAR,
+          calendarEntries: firebaseProfile?.calendarEntries || [],
+        };
+
+        setProfile(loadedProfile);
+        setTempAvatar(loadedProfile.avatar);
       } catch (error) {
         console.error('Erro ao carregar perfil:', error);
       } finally {
@@ -65,25 +135,99 @@ export default function ProfilePage() {
     loadProfile();
   }, [user]);
 
-  const handleSaveAvatar = async () => {
-    if (!profile) return;
+  const handleProfileChange = (field: keyof ProfileFormState, value: string) => {
+    setProfile((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const handleProfilePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
 
     try {
+      const dataUri = await fileToDataUri(file);
+      setProfile((previous) => ({
+        ...previous,
+        profilePhotoDataUri: dataUri,
+      }));
+    } catch (error) {
+      console.error('Erro ao carregar foto de perfil:', error);
+    } finally {
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!profile.uid) {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const userProfileService = getUserProfileService();
+
+      await userProfileService.updateUserProfile(profile.uid, {
+        displayName: profile.displayName,
+        email: profile.email,
+        headline: profile.headline,
+        course: profile.course,
+        registration: profile.registration,
+        phoneNumber: profile.phoneNumber,
+        academicDepartment: profile.academicDepartment,
+        academicFocus: profile.academicFocus,
+        programmingLanguages: profile.programmingLanguages,
+        bio: profile.bio,
+        professionalSummary: profile.professionalSummary,
+        profilePhotoDataUri: profile.profilePhotoDataUri,
+        profilePhotoSource: profile.profilePhotoDataUri,
+        profilePhoto: profile.profilePhotoDataUri,
+      });
+
+      if (auth.currentUser && profile.displayName) {
+        await updateProfile(auth.currentUser, { displayName: profile.displayName });
+      }
+
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Erro ao salvar perfil:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!profile.uid) {
+      return;
+    }
+
+    try {
+      setSaving(true);
       const userProfileService = getUserProfileService();
       await userProfileService.updateUserAvatar(profile.uid, tempAvatar);
-      setProfile({ ...profile, avatar: tempAvatar });
+      setProfile((previous) => ({
+        ...previous,
+        avatar: tempAvatar,
+      }));
       setIsEditingAvatar(false);
     } catch (error) {
       console.error('Erro ao salvar avatar:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
         <div className="text-center">
           <div className="mb-4 inline-block">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-600"></div>
           </div>
           <p className="text-slate-600">Carregando perfil...</p>
         </div>
@@ -91,189 +235,380 @@ export default function ProfilePage() {
     );
   }
 
-  if (!profile) {
-    return <div className="text-center text-slate-500 py-12">Perfil não encontrado</div>;
+  if (!profile.uid) {
+    return <div className="py-12 text-center text-slate-500">Perfil não encontrado</div>;
   }
 
+  const profileImageSource = profile.profilePhotoDataUri || '';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Top Bar */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">Perfil acadêmico</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Perfil acadêmico</h1>
+          <p className="text-sm text-slate-500">Dados pessoais, foto, avatar, curso e campos de docência</p>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="max-w-6xl mx-auto px-8 py-8">
-        {/* Profile Header Card */}
-        <div className="bg-white rounded-3xl border border-slate-200 p-8 mb-6 shadow-sm">
-          <div className="flex items-start gap-8">
-            {/* Avatar */}
-            <div className="relative">
-              {isEditingAvatar ? (
-                <div className="w-32 h-32 rounded-2xl overflow-hidden">
-                  <AvatarDisplay avatar={tempAvatar} size="lg" />
-                </div>
-              ) : (
-                <div className="w-32 h-32 rounded-2xl overflow-hidden">
-                  <AvatarDisplay avatar={profile.avatar} size="lg" fallback={profile.displayName?.charAt(0)} />
-                </div>
-              )}
-              <button
-                onClick={() => {
-                  if (isEditingAvatar) {
-                    setIsEditingAvatar(false);
-                  } else {
-                    setTempAvatar(profile.avatar);
-                    setIsEditingAvatar(true);
-                  }
-                }}
-                className="absolute bottom-2 right-2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-              >
-                <Edit3 size={18} />
-              </button>
-            </div>
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <aside className="space-y-6">
+            <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-8 text-white">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <AvatarDisplay
+                      avatar={profile.avatar}
+                      imageSrc={profileImageSource}
+                      size="lg"
+                      fallback={profile.displayName?.charAt(0).toUpperCase() || 'U'}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => photoInputRef.current?.click()}
+                      className="absolute bottom-2 right-2 rounded-full bg-slate-950/90 p-2 text-white shadow-lg transition hover:bg-slate-900"
+                      title="Trocar foto de perfil"
+                    >
+                      <Camera size={16} />
+                    </button>
+                    <input
+                      ref={photoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleProfilePhotoUpload}
+                    />
+                  </div>
 
-            {/* Profile Info */}
-            <div className="flex-1">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h2 className="text-3xl font-bold text-slate-900">{profile.displayName}</h2>
-                  {profile.headline && (
-                    <p className="text-lg text-slate-600 mt-2">{profile.headline}</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-2xl font-bold">{profile.displayName || 'Usuário'}</p>
+                    <p className="mt-1 text-sm text-blue-100">{profile.headline || 'Perfil acadêmico e profissional'}</p>
+                    <p className="mt-3 text-sm text-blue-50/90">{profile.email}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 p-6">
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Curso</p>
+                    <p className="mt-1 font-semibold text-slate-900">{profile.course || 'Não informado'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Matrícula</p>
+                    <p className="mt-1 font-semibold text-slate-900">{profile.registration || 'Não informada'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Departamento</p>
+                    <p className="mt-1 font-semibold text-slate-900">{profile.academicDepartment || 'Não informado'}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Foco</p>
+                    <p className="mt-1 font-semibold text-slate-900">{profile.academicFocus || 'Não informado'}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {profile.programmingLanguages ? (
+                    profile.programmingLanguages.split(',').map((item) => (
+                      <span key={item.trim()} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                        {item.trim()}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">Sem linguagens</span>
                   )}
                 </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <BadgeInfo size={16} />
+                    Foto / Avatar
+                  </div>
+                  <p className="text-sm leading-6 text-slate-600">
+                    O perfil usa foto real quando ela existe. Se não houver foto, o avatar por camadas entra como fallback, igual ao desktop.
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTempAvatar(profile.avatar);
+                      setIsEditingAvatar(true);
+                    }}
+                    className="flex-1 rounded-xl bg-slate-950 px-4 py-3 font-semibold text-white transition hover:bg-slate-800"
+                  >
+                    Editar avatar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing((previous) => !previous)}
+                    className="flex-1 rounded-xl border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    {isEditing ? 'Fechar edição' : 'Editar perfil'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
+                <Star size={18} className="text-amber-500" />
+                Resumo profissional
+              </div>
+              <p className="text-sm leading-7 text-slate-600">
+                {profile.professionalSummary || profile.bio || 'Adicione um resumo profissional para refletir sua atuação acadêmica.'}
+              </p>
+            </div>
+          </aside>
+
+          <main className="space-y-6">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Informações completas</h2>
+                  <p className="text-sm text-slate-500">Campos sincronizados com a lógica do aplicativo desktop</p>
+                </div>
                 <button
-                  onClick={() => setIsEditing(!isEditing)}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  onClick={handleSaveProfile}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Edit3 size={18} />
-                  {isEditing ? 'Salvar' : 'Editar'}
+                  <Save size={16} />
+                  {saving ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
 
-              {/* Badges */}
-              <div className="flex flex-wrap gap-3 mt-4">
-                {profile.course && (
-                  <div className="px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-                    {profile.course}
-                  </div>
-                )}
-                {profile.registration && (
-                  <div className="px-4 py-2 bg-slate-100 text-slate-700 rounded-full text-sm font-semibold">
-                    {profile.registration}
-                  </div>
-                )}
-                {profile.languages && (
-                  <div className="px-4 py-2 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
-                    {profile.languages}
-                  </div>
-                )}
+              <div className="grid gap-6 lg:grid-cols-2">
+                <section className="space-y-4 rounded-3xl bg-slate-50 p-5">
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                    <UserCircle2 size={18} />
+                    Conta e contato
+                  </h3>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Nome completo</span>
+                    <input
+                      type="text"
+                      value={profile.displayName}
+                      onChange={(event) => handleProfileChange('displayName', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Email</span>
+                    <input
+                      type="email"
+                      value={profile.email}
+                      disabled
+                      className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Telefone</span>
+                    <input
+                      type="text"
+                      value={profile.phoneNumber}
+                      onChange={(event) => handleProfileChange('phoneNumber', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Título / headline</span>
+                    <input
+                      type="text"
+                      value={profile.headline}
+                      onChange={(event) => handleProfileChange('headline', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                      placeholder="Ex: Analista de Sistemas"
+                    />
+                  </label>
+                </section>
+
+                <section className="space-y-4 rounded-3xl bg-slate-50 p-5">
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                    <GraduationCap size={18} />
+                    Dados acadêmicos
+                  </h3>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Curso</span>
+                    <input
+                      type="text"
+                      value={profile.course}
+                      onChange={(event) => handleProfileChange('course', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Matrícula</span>
+                    <input
+                      type="text"
+                      value={profile.registration}
+                      onChange={(event) => handleProfileChange('registration', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Departamento acadêmico</span>
+                    <input
+                      type="text"
+                      value={profile.academicDepartment}
+                      onChange={(event) => handleProfileChange('academicDepartment', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Foco acadêmico</span>
+                    <input
+                      type="text"
+                      value={profile.academicFocus}
+                      onChange={(event) => handleProfileChange('academicFocus', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Linguagens / habilidades</span>
+                    <input
+                      type="text"
+                      value={profile.programmingLanguages}
+                      onChange={(event) => handleProfileChange('programmingLanguages', event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                      placeholder="Ex: C#, TypeScript, SQL"
+                    />
+                  </label>
+                </section>
+
+                <section className="space-y-4 rounded-3xl bg-slate-50 p-5 lg:col-span-2">
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-slate-900">
+                    <FileText size={18} />
+                    Biografia e resumo
+                  </h3>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Resumo profissional</span>
+                    <textarea
+                      value={profile.professionalSummary}
+                      onChange={(event) => handleProfileChange('professionalSummary', event.target.value)}
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                      placeholder="Conte sua experiência, interesses e atuação acadêmica"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Bio</span>
+                    <textarea
+                      value={profile.bio}
+                      onChange={(event) => handleProfileChange('bio', event.target.value)}
+                      rows={4}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+                      placeholder="Bio pública exibida no perfil"
+                    />
+                  </label>
+                </section>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Avatar Editor Modal */}
-        {isEditingAvatar && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-0 mb-6 shadow-lg overflow-hidden">
-            <div className="flex items-center justify-between bg-gradient-to-r from-blue-600 to-blue-700 p-6">
-              <h3 className="text-2xl font-bold text-white">✨ Personalize seu Avatar</h3>
-              <button
+            {isEditingAvatar && (
+              <div
+                className="fixed inset-0 z-50 flex items-stretch justify-center bg-slate-950/80 px-3 py-3 backdrop-blur-md sm:px-4 sm:py-4"
                 onClick={() => setIsEditingAvatar(false)}
-                className="p-2 hover:bg-blue-500 rounded-lg transition text-white"
               >
-                ✕
-              </button>
-            </div>
+                <div
+                  className="flex h-full w-full max-w-[1440px] flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-white shadow-2xl"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-950 via-blue-950 to-indigo-950 px-6 py-4 text-white">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-100/80">Editor visual</p>
+                      <h3 className="text-2xl font-black">Personalize seu avatar</h3>
+                      <p className="mt-1 text-sm text-blue-100/90">Tela expandida com o mesmo fluxo do desktop: escolha, preview e confirme.</p>
+                    </div>
+                    <button
+                      onClick={() => setIsEditingAvatar(false)}
+                      className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+                    >
+                      Fechar
+                    </button>
+                  </div>
 
-            <div className="h-96 overflow-hidden">
-              <AvatarSelector
-                value={tempAvatar}
-                onChange={setTempAvatar}
-                onClose={() => {
-                  handleSaveAvatar();
-                }}
-                showSuggestions={true}
-              />
-            </div>
-          </div>
-        )}
+                  <div className="min-h-0 flex-1 overflow-hidden bg-slate-100">
+                    <AvatarSelector
+                      value={tempAvatar}
+                      onChange={setTempAvatar}
+                      onClose={handleSaveAvatar}
+                      showSuggestions={true}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
-        {/* Professional Summary */}
-        {profile.professionalSummary && !isEditingAvatar && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">Resumo profissional</h3>
-            <p className="text-slate-600 leading-relaxed">{profile.professionalSummary}</p>
-          </div>
-        )}
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
+                  <Briefcase size={18} />
+                  Informações salvas no perfil
+                </h3>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <p><span className="font-semibold text-slate-900">Email:</span> {profile.email}</p>
+                  <p><span className="font-semibold text-slate-900">Telefone:</span> {profile.phoneNumber || 'Não informado'}</p>
+                  <p><span className="font-semibold text-slate-900">Curso:</span> {profile.course || 'Não informado'}</p>
+                  <p><span className="font-semibold text-slate-900">Matrícula:</span> {profile.registration || 'Não informada'}</p>
+                </div>
+              </div>
 
-        {/* Two Column Section */}
-        {!isEditingAvatar && (
-          <div className="grid grid-cols-2 gap-6 mb-6">
-            {/* Contact Info */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-              <h3 className="text-xl font-bold text-slate-900 mb-6">Contato</h3>
-              <div className="space-y-6">
-                <div>
-                  <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                    <Mail size={16} /> Email
+              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
+                  <Brain size={18} />
+                  Docência / Acadêmico
+                </h3>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <p><span className="font-semibold text-slate-900">Departamento:</span> {profile.academicDepartment || 'Não informado'}</p>
+                  <p><span className="font-semibold text-slate-900">Foco:</span> {profile.academicFocus || 'Não informado'}</p>
+                  <p><span className="font-semibold text-slate-900">Linguagens:</span> {profile.programmingLanguages || 'Não informadas'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+                <h3 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
+                  <Calendar size={18} />
+                  Avisos da coordenação
+                </h3>
+                {profile.calendarEntries && profile.calendarEntries.length > 0 ? (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {profile.calendarEntries.slice(0, 6).map((entry) => (
+                      <div key={entry.entryId} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">{entry.contextLabel || 'Coordenação'}</p>
+                            <h4 className="mt-1 text-sm font-bold text-slate-900">{entry.title}</h4>
+                          </div>
+                          <span className="rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-slate-600">{entry.entryType || 'Aviso'}</span>
+                        </div>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">{entry.notes || 'Sem observações adicionais.'}</p>
+                        <p className="mt-3 text-xs text-slate-500">{new Date(entry.date).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    Nenhum aviso de coordenação foi encontrado neste perfil.
                   </p>
-                  <p className="text-slate-900">{profile.email}</p>
-                </div>
-                {profile.phoneNumber && (
-                  <div>
-                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                      <Phone size={16} /> Telefone
-                    </p>
-                    <p className="text-slate-900">{profile.phoneNumber}</p>
-                  </div>
                 )}
               </div>
             </div>
-
-            {/* Academic Info */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-              <h3 className="text-xl font-bold text-slate-900 mb-6">Acadêmico</h3>
-              <div className="space-y-6">
-                {profile.course && (
-                  <div>
-                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                      <GraduationCap size={16} /> Curso
-                    </p>
-                    <p className="text-slate-900">{profile.course}</p>
-                  </div>
-                )}
-                {profile.registration && (
-                  <div>
-                    <p className="text-sm text-slate-500 font-semibold mb-2 flex items-center gap-2">
-                      <Briefcase size={16} /> Matrícula
-                    </p>
-                    <p className="text-slate-900">{profile.registration}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Additional Info for Professors */}
-        {profile.department && !isEditingAvatar && (
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-900 mb-6">Informações de Docência</h3>
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <p className="text-sm text-slate-500 font-semibold mb-2">Departamento</p>
-                <p className="text-slate-900">{profile.department}</p>
-              </div>
-              {profile.academicFocus && (
-                <div>
-                  <p className="text-sm text-slate-500 font-semibold mb-2">Foco Acadêmico</p>
-                  <p className="text-slate-900">{profile.academicFocus}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          </main>
+        </div>
       </div>
     </div>
   );

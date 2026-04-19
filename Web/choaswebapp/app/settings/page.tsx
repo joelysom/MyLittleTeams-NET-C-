@@ -1,306 +1,454 @@
 'use client';
 
-import { useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../lib/useAuth';
 import { useRouter } from 'next/navigation';
+import { signOut } from 'firebase/auth';
 import { auth } from '../../lib/firebase';
-import { Bell, Lock, Eye, Accessibility, LogOut, ChevronRight, Moon, Smartphone } from 'lucide-react';
+import {
+  Bell,
+  Lock,
+  Accessibility,
+  LogOut,
+  ChevronRight,
+  Moon,
+  Smartphone,
+  SunMedium,
+  Monitor,
+  Gauge,
+  ShieldCheck,
+  BellRing,
+  UserRoundCog,
+  PanelTopOpen,
+} from 'lucide-react';
+
+const ACCESSIBILITY_STORAGE_KEY = 'choas.accessibilityPreferences';
+const SETTINGS_STORAGE_KEY = 'choas.settingsPreferences';
+
+type AccessibilityPreferences = {
+  highContrastEnabled: boolean;
+  darkModeEnabled: boolean;
+  textScalePercent: number;
+  reduceAnimations: boolean;
+};
+
+type SettingsState = {
+  emailNotifications: boolean;
+  pushNotifications: boolean;
+  privateProfile: boolean;
+  twoFactorAuth: boolean;
+  activityDigest: boolean;
+  readReceipts: boolean;
+  showOnlineStatus: boolean;
+};
+
+const defaultAccessibility: AccessibilityPreferences = {
+  highContrastEnabled: false,
+  darkModeEnabled: false,
+  textScalePercent: 100,
+  reduceAnimations: false,
+};
+
+const defaultSettings: SettingsState = {
+  emailNotifications: true,
+  pushNotifications: false,
+  privateProfile: false,
+  twoFactorAuth: false,
+  activityDigest: true,
+  readReceipts: true,
+  showOnlineStatus: true,
+};
+
+const settingsTabs = [
+  { id: 'account', label: 'Conta', icon: UserRoundCog },
+  { id: 'notifications', label: 'Notificações', icon: BellRing },
+  { id: 'privacy', label: 'Privacidade', icon: ShieldCheck },
+  { id: 'accessibility', label: 'Acessibilidade', icon: Accessibility },
+];
 
 export default function SettingsPage() {
   const user = useAuth();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('account');
-  const [settings, setSettings] = useState({
-    emailNotifications: true,
-    pushNotifications: false,
-    privateProfile: false,
-    twoFactorAuth: false,
-    darkMode: false,
-    reducedMotion: false,
-  });
+  const [activeTab, setActiveTab] = useState<'account' | 'notifications' | 'privacy' | 'accessibility'>('account');
+  const [accessibility, setAccessibility] = useState<AccessibilityPreferences>(defaultAccessibility);
+  const [settings, setSettings] = useState<SettingsState>(defaultSettings);
+  const [savedAt, setSavedAt] = useState<string>('');
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const rawAccessibility = localStorage.getItem(ACCESSIBILITY_STORAGE_KEY);
+      if (rawAccessibility) {
+        const parsed = JSON.parse(rawAccessibility) as Partial<AccessibilityPreferences>;
+        setAccessibility({
+          highContrastEnabled: parsed.highContrastEnabled ?? defaultAccessibility.highContrastEnabled,
+          darkModeEnabled: parsed.darkModeEnabled ?? defaultAccessibility.darkModeEnabled,
+          textScalePercent: parsed.textScalePercent ?? defaultAccessibility.textScalePercent,
+          reduceAnimations: parsed.reduceAnimations ?? defaultAccessibility.reduceAnimations,
+        });
+      }
+
+      const rawSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (rawSettings) {
+        const parsed = JSON.parse(rawSettings) as Partial<SettingsState>;
+        setSettings({
+          emailNotifications: parsed.emailNotifications ?? defaultSettings.emailNotifications,
+          pushNotifications: parsed.pushNotifications ?? defaultSettings.pushNotifications,
+          privateProfile: parsed.privateProfile ?? defaultSettings.privateProfile,
+          twoFactorAuth: parsed.twoFactorAuth ?? defaultSettings.twoFactorAuth,
+          activityDigest: parsed.activityDigest ?? defaultSettings.activityDigest,
+          readReceipts: parsed.readReceipts ?? defaultSettings.readReceipts,
+          showOnlineStatus: parsed.showOnlineStatus ?? defaultSettings.showOnlineStatus,
+        });
+      }
+    } catch {
+      setAccessibility(defaultAccessibility);
+      setSettings(defaultSettings);
+    }
+
+    setPreferencesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded) {
+      return;
+    }
+
+    localStorage.setItem(ACCESSIBILITY_STORAGE_KEY, JSON.stringify(accessibility));
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    setSavedAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+  }, [accessibility, preferencesLoaded, settings]);
 
   const handleLogout = async () => {
     try {
-      await auth.signOut();
+      await signOut(auth);
       router.push('/login');
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
     }
   };
 
-  const handleSettingChange = (key: string, value: boolean) => {
-    setSettings({
-      ...settings,
+  const updateAccessibility = (key: keyof AccessibilityPreferences, value: boolean | number) => {
+    setAccessibility((previous) => ({
+      ...previous,
       [key]: value,
-    });
+    }));
   };
 
-  const settingsTabs = [
-    { id: 'account', label: 'Conta', icon: '👤' },
-    { id: 'notifications', label: 'Notificações', icon: '🔔' },
-    { id: 'privacy', label: 'Privacidade', icon: '🔒' },
-    { id: 'accessibility', label: 'Acessibilidade', icon: '♿' },
-  ];
+  const updateSettings = (key: keyof SettingsState, value: boolean) => {
+    setSettings((previous) => ({
+      ...previous,
+      [key]: value,
+    }));
+  };
+
+  const accessibilityPreviewStyle = useMemo(() => ({
+    transform: `scale(${accessibility.textScalePercent / 100})`,
+    transformOrigin: 'top left',
+  }), [accessibility.textScalePercent]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Top Bar */}
+    <div className={`min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 ${accessibility.highContrastEnabled ? 'contrast-125' : ''}`}>
       <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-900">Configurações</h1>
-      </div>
-
-      {/* Settings Container */}
-      <div className="max-w-5xl mx-auto px-8 py-8">
-        <div className="flex gap-6">
-          {/* Sidebar Navigation */}
-          <div className="w-56">
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-              {settingsTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`w-full text-left px-6 py-4 flex items-center gap-3 border-b border-slate-100 last:border-b-0 transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-blue-50 text-blue-700 font-semibold'
-                      : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="text-xl">{tab.icon}</span>
-                  {tab.label}
-                  {activeTab === tab.id && <ChevronRight size={18} className="ml-auto" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Content Area */}
-          <div className="flex-1">
-            {/* Account Settings */}
-            {activeTab === 'account' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900 mb-6">Informações da Conta</h2>
-
-                  <div className="space-y-6">
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Email</label>
-                      <input
-                        type="email"
-                        value={user?.email || ''}
-                        disabled
-                        className="w-full px-4 py-2 bg-slate-100 text-slate-700 rounded-lg border border-slate-200 cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-700 mb-2">Nome Completo</label>
-                      <input
-                        type="text"
-                        value={user?.displayName || ''}
-                        className="w-full px-4 py-2 text-slate-900 rounded-lg border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none transition"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={settings.twoFactorAuth}
-                          onChange={(e) => handleSettingChange('twoFactorAuth', e.target.checked)}
-                          className="w-4 h-4 text-blue-600 rounded"
-                        />
-                        <span className="text-slate-700 font-semibold">Autenticação de dois fatores</span>
-                      </label>
-                      <p className="text-xs text-slate-500 ml-7 mt-1">Adicione uma camada extra de segurança à sua conta</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900 mb-4">Opções Gerais</h2>
-
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-4 py-3 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200 font-semibold"
-                  >
-                    <LogOut size={18} />
-                    Sair de Todas as Contas
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Notification Settings */}
-            {activeTab === 'notifications' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-3">
-                    <Bell size={24} className="text-blue-600" />
-                    Preferências de Notificação
-                  </h2>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900">Notificações por Email</p>
-                        <p className="text-sm text-slate-500">Receba atualizações importantes por email</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={settings.emailNotifications}
-                        onChange={(e) => handleSettingChange('emailNotifications', e.target.checked)}
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900">Notificações Push</p>
-                        <p className="text-sm text-slate-500">Receba notificações em tempo real no navegador</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={settings.pushNotifications}
-                        onChange={(e) => handleSettingChange('pushNotifications', e.target.checked)}
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-lg font-bold text-slate-900 mb-4">Notificações de Atividade</h2>
-                  <div className="space-y-3 text-sm text-slate-600">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" defaultChecked className="w-4 h-4 text-blue-600 rounded" />
-                      Novas mensagens
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" defaultChecked className="w-4 h-4 text-blue-600 rounded" />
-                      Convites de equipe
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" defaultChecked className="w-4 h-4 text-blue-600 rounded" />
-                      Atualizações de projeto
-                    </label>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Privacy Settings */}
-            {activeTab === 'privacy' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-3">
-                    <Lock size={24} className="text-blue-600" />
-                    Controle de Privacidade
-                  </h2>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900">Perfil Privado</p>
-                        <p className="text-sm text-slate-500">Apenas pessoas que você aprova podem ver seu perfil</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={settings.privateProfile}
-                        onChange={(e) => handleSettingChange('privateProfile', e.target.checked)}
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900">Status Online Visível</p>
-                        <p className="text-sm text-slate-500">Mostre quando você está online para outros usuários</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        defaultChecked
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-lg font-bold text-slate-900 mb-4">Dados e Armazenamento</h2>
-                  <button className="px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition font-semibold">
-                    Baixar Meus Dados
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Accessibility Settings */}
-            {activeTab === 'accessibility' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-3">
-                    <Accessibility size={24} className="text-blue-600" />
-                    Acessibilidade e Tema
-                  </h2>
-
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900 flex items-center gap-2">
-                          <Moon size={18} /> Modo Escuro
-                        </p>
-                        <p className="text-sm text-slate-500">Use uma paleta mais escura para reduzir a fadiga ocular</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={settings.darkMode}
-                        onChange={(e) => handleSettingChange('darkMode', e.target.checked)}
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900">Aumentar Contraste</p>
-                        <p className="text-sm text-slate-500">Reforça o contraste para melhor legibilidade</p>
-                      </div>
-                      <input type="checkbox" className="w-5 h-5 text-blue-600 rounded cursor-pointer" />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
-                      <div>
-                        <p className="font-semibold text-slate-900 flex items-center gap-2">
-                          <Smartphone size={18} /> Reduzir Animações
-                        </p>
-                        <p className="text-sm text-slate-500">Diminua movimentos rápidos e distrações</p>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={settings.reducedMotion}
-                        onChange={(e) => handleSettingChange('reducedMotion', e.target.checked)}
-                        className="w-5 h-5 text-blue-600 rounded cursor-pointer"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h2 className="text-lg font-bold text-slate-900 mb-4">Tamanho do Texto</h2>
-                  <div className="flex items-center gap-4">
-                    <button className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-100">
-                      -
-                    </button>
-                    <span className="text-slate-700 font-semibold">100%</span>
-                    <button className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-slate-100">
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Configurações</h1>
+          <p className="text-sm text-slate-500">Preferências de conta, notificação, privacidade e acessibilidade</p>
         </div>
       </div>
+
+      <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
+        <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 p-5 text-white shadow-lg">
+              <p className="text-sm uppercase tracking-[0.2em] text-blue-100">Conta</p>
+              <p className="mt-2 text-xl font-bold">{user?.displayName || 'Usuário'}</p>
+              <p className="mt-1 text-sm text-blue-50/90">{user?.email}</p>
+            </div>
+
+            <div className="space-y-2">
+              {settingsTabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition ${
+                      isActive ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    <span className="font-semibold">{tab.label}</span>
+                    {isActive && <ChevronRight size={16} className="ml-auto" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-xs text-slate-500">
+              Último salvamento local: {savedAt || 'agora'}
+            </div>
+          </aside>
+
+          <main className="space-y-6">
+            {activeTab === 'account' && (
+              <section className="space-y-6 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900">Informações da conta</h2>
+                    <p className="text-sm text-slate-500">Dados base carregados do Firebase Auth e do perfil</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Email</span>
+                    <input
+                      type="email"
+                      value={user?.email || ''}
+                      disabled
+                      className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">Nome completo</span>
+                    <input
+                      type="text"
+                      value={user?.displayName || ''}
+                      disabled
+                      className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <ToggleCard
+                    title="Autenticação de dois fatores"
+                    description="Aumente a segurança da conta com verificação extra"
+                    checked={settings.twoFactorAuth}
+                    onChange={(value) => updateSettings('twoFactorAuth', value)}
+                    icon={<Lock size={18} />}
+                  />
+                  <ToggleCard
+                    title="Perfil privado"
+                    description="Seu perfil fica visível somente para conexões aprovadas"
+                    checked={settings.privateProfile}
+                    onChange={(value) => updateSettings('privateProfile', value)}
+                    icon={<ShieldCheck size={18} />}
+                  />
+                  <ToggleCard
+                    title="Status online visível"
+                    description="Permite que outros vejam quando você está online"
+                    checked={settings.showOnlineStatus}
+                    onChange={(value) => updateSettings('showOnlineStatus', value)}
+                    icon={<PanelTopOpen size={18} />}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+                  <p className="text-sm font-semibold text-red-700">Sessão</p>
+                  <button
+                    onClick={handleLogout}
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-3 font-semibold text-red-700 transition hover:bg-red-100"
+                  >
+                    <LogOut size={16} />
+                    Sair de todas as contas
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {activeTab === 'notifications' && (
+              <section className="space-y-6 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Notificações</h2>
+                  <p className="text-sm text-slate-500">Mesma lógica de preferências do app desktop, persistida localmente</p>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <ToggleCard
+                    title="Notificações por email"
+                    description="Receba alertas importantes por email"
+                    checked={settings.emailNotifications}
+                    onChange={(value) => updateSettings('emailNotifications', value)}
+                    icon={<Bell size={18} />}
+                  />
+                  <ToggleCard
+                    title="Notificações push"
+                    description="Receba notificações em tempo real no navegador"
+                    checked={settings.pushNotifications}
+                    onChange={(value) => updateSettings('pushNotifications', value)}
+                    icon={<BellRing size={18} />}
+                  />
+                  <ToggleCard
+                    title="Resumo diário"
+                    description="Um resumo consolidado das novidades do dia"
+                    checked={settings.activityDigest}
+                    onChange={(value) => updateSettings('activityDigest', value)}
+                    icon={<Gauge size={18} />}
+                  />
+                  <ToggleCard
+                    title="Confirmação de leitura"
+                    description="Mostre quando mensagens foram lidas"
+                    checked={settings.readReceipts}
+                    onChange={(value) => updateSettings('readReceipts', value)}
+                    icon={<PanelTopOpen size={18} />}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+                  Estas preferências equivalem aos controles do desktop e ficam salvas no navegador.
+                </div>
+              </section>
+            )}
+
+            {activeTab === 'privacy' && (
+              <section className="space-y-6 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Privacidade</h2>
+                  <p className="text-sm text-slate-500">Controle o que as pessoas veem no seu perfil e na sua presença</p>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <ToggleCard
+                    title="Mostrar status online"
+                    description="Indica quando você está online para contatos e equipes"
+                    checked={settings.showOnlineStatus}
+                    onChange={(value) => updateSettings('showOnlineStatus', value)}
+                    icon={<Monitor size={18} />}
+                  />
+                  <ToggleCard
+                    title="Perfil privado"
+                    description="Restringe a visibilidade do perfil para conexões aprovadas"
+                    checked={settings.privateProfile}
+                    onChange={(value) => updateSettings('privateProfile', value)}
+                    icon={<Lock size={18} />}
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <InfoCard title="Dados de perfil" description="Nome, foto, curso e matrícula são os principais campos sincronizados." />
+                  <InfoCard title="Mídia" description="Fotos de perfil podem ser armazenadas em data URI ou via Firebase Storage." />
+                  <InfoCard title="Mensagens" description="Fotos e figurinhas do chat respeitam o mesmo modelo do app desktop." />
+                </div>
+              </section>
+            )}
+
+            {activeTab === 'accessibility' && (
+              <section className="space-y-6 rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">Acessibilidade</h2>
+                  <p className="text-sm text-slate-500">Controles equivalentes aos ajustes salvos pelo desktop</p>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <ToggleCard
+                    title="Alto contraste"
+                    description="Aumenta a distinção visual entre superfícies e texto"
+                    checked={accessibility.highContrastEnabled}
+                    onChange={(value) => updateAccessibility('highContrastEnabled', value)}
+                    icon={<Accessibility size={18} />}
+                  />
+                  <ToggleCard
+                    title="Modo escuro"
+                    description="Usa uma paleta mais escura na interface"
+                    checked={accessibility.darkModeEnabled}
+                    onChange={(value) => updateAccessibility('darkModeEnabled', value)}
+                    icon={<Moon size={18} />}
+                  />
+                  <ToggleCard
+                    title="Reduzir animações"
+                    description="Diminui movimentos e transições fortes"
+                    checked={accessibility.reduceAnimations}
+                    onChange={(value) => updateAccessibility('reduceAnimations', value)}
+                    icon={<Smartphone size={18} />}
+                  />
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="mb-3 flex items-center gap-2 text-lg font-bold text-slate-900">
+                      <SunMedium size={18} />
+                      Escala de texto
+                    </div>
+                    <p className="mb-4 text-sm text-slate-500">Mesmo comportamento do desktop: de 90% a 140%</p>
+                    <input
+                      type="range"
+                      min={90}
+                      max={140}
+                      step={10}
+                      value={accessibility.textScalePercent}
+                      onChange={(event) => updateAccessibility('textScalePercent', Number(event.target.value))}
+                      className="w-full accent-blue-600"
+                    />
+                    <div className="mt-3 flex items-center justify-between text-sm text-slate-600">
+                      <span>90%</span>
+                      <span className="font-semibold text-slate-900">{accessibility.textScalePercent}%</span>
+                      <span>140%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <h3 className="mb-3 text-lg font-bold text-slate-900">Pré-visualização</h3>
+                  <div style={accessibilityPreviewStyle} className="space-y-3 origin-top-left">
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-slate-900">Choas</p>
+                      <p className="text-sm text-slate-600">Ajustes aplicados localmente para seguir sua preferência.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToggleCard({
+  title,
+  description,
+  checked,
+  onChange,
+  icon,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-lg font-bold text-slate-900">
+            {icon}
+            {title}
+          </div>
+          <p className="text-sm leading-6 text-slate-600">{description}</p>
+        </div>
+        <label className="inline-flex cursor-pointer items-center">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => onChange(event.target.checked)}
+            className="sr-only"
+          />
+          <span className={`relative h-7 w-12 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-slate-300'}`}>
+            <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${checked ? 'left-6' : 'left-1'}`} />
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+      <p className="text-sm font-bold text-slate-900">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
     </div>
   );
 }

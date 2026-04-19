@@ -1,37 +1,31 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getFirestore, collection, query, where, getDocs } from 'firebase/firestore';
+import Link from 'next/link';
 import { useAuth } from '../../lib/useAuth';
-import { auth } from '../../lib/firebase';
 import AvatarDisplay from '../../components/AvatarDisplay';
-import { AvatarComponents } from '../../lib/avatarService';
+import { DEFAULT_AVATAR } from '../../lib/avatarService';
+import { getUserProfileService, type UserProfile } from '../../lib/userProfileService';
+import {
+  buildTeamBalanceLabel,
+  buildTeamLeadershipLabel,
+  buildTeamProfessorFocusLabel,
+  getFacultyTeamMembers,
+  getStudentTeamMembers,
+  loadUserTeamWorkspaces,
+  type TeamWorkspace,
+} from '../../lib/teamWorkspaceService';
 import {
   Users,
   Calendar,
   TrendingUp,
   Clock,
-  CheckCircle2,
-  AlertCircle,
   Plus,
   ArrowRight,
   BookOpen,
   Trophy,
   Briefcase,
 } from 'lucide-react';
-
-interface TeamWorkspace {
-  teamId: string;
-  teamName: string;
-  course: string;
-  className: string;
-  projectProgress: number;
-  projectStatus: string;
-  projectDeadline?: string;
-  members: Array<{ userId: string; name: string; email: string; avatar?: AvatarComponents }>;
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface Stats {
   totalTeams: number;
@@ -44,6 +38,7 @@ export default function DashboardPage() {
   const user = useAuth();
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<Stats>({
     totalTeams: 0,
     activeProjects: 0,
@@ -56,39 +51,13 @@ export default function DashboardPage() {
 
     const loadTeams = async () => {
       try {
-        const db = getFirestore();
-        const userTeamsRef = collection(db, 'userTeams');
-        
-        // Query all teams for this user
-        const q = query(userTeamsRef, where('userId', '==', user.uid));
-        const snapshot = await getDocs(q);
+        const profileService = getUserProfileService();
+        const [profile, loadedTeams] = await Promise.all([
+          profileService.getUserProfile(user.uid),
+          loadUserTeamWorkspaces(user.uid),
+        ]);
 
-        const loadedTeams: TeamWorkspace[] = [];
-        
-        for (const doc of snapshot.docs) {
-          const data = doc.data();
-          // Load the full team data from the teams collection
-          const teamRef = collection(db, 'teams');
-          const teamQuery = query(teamRef, where('teamId', '==', data.teamId));
-          const teamSnapshot = await getDocs(teamQuery);
-          
-          if (!teamSnapshot.empty) {
-            const teamData = teamSnapshot.docs[0].data();
-            loadedTeams.push({
-              teamId: teamData.teamId || '',
-              teamName: teamData.teamName || 'Sem Nome',
-              course: teamData.course || 'Não informado',
-              className: teamData.className || '',
-              projectProgress: teamData.projectProgress || 0,
-              projectStatus: teamData.projectStatus || 'Planejamento',
-              projectDeadline: teamData.projectDeadline,
-              members: teamData.members || [],
-              createdAt: teamData.createdAt || new Date().toISOString(),
-              updatedAt: teamData.updatedAt || new Date().toISOString(),
-            });
-          }
-        }
-
+        setCurrentProfile(profile);
         setTeams(loadedTeams);
 
         // Calculate stats
@@ -133,16 +102,33 @@ export default function DashboardPage() {
     <div className="space-y-8">
       {/* Welcome Section */}
       <div className="bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 rounded-2xl p-8 text-white shadow-lg">
-        <h2 className="text-3xl font-bold mb-2">
-          Bem-vindo, {user?.displayName || 'Colega'}! 👋
-        </h2>
-        <p className="text-blue-100 mb-6">
-          Você está acompanhando {stats.totalTeams} {stats.totalTeams === 1 ? 'equipe' : 'equipes'} de projeto.
-        </p>
-        <button className="flex items-center gap-2 bg-white text-blue-600 font-semibold px-6 py-3 rounded-lg hover:bg-blue-50 transition">
-          <Plus size={20} />
-          Criar Nova Equipe
-        </button>
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-4">
+            <AvatarDisplay
+              avatar={currentProfile?.avatar || DEFAULT_AVATAR}
+              imageSrc={currentProfile?.profilePhotoSource || ''}
+              size="lg"
+              fallback={currentProfile?.displayName?.charAt(0).toUpperCase() || 'U'}
+              className="border border-white/20 shadow-lg"
+            />
+            <div>
+              <h2 className="text-3xl font-bold mb-2">
+                Bem-vindo, {currentProfile?.displayName || user?.displayName || 'Colega'}! 👋
+              </h2>
+              <p className="text-blue-100 mb-1">
+                {currentProfile?.headline || 'Seu painel acadêmico e de equipes está pronto para uso.'}
+              </p>
+              <p className="text-blue-100/90">
+                Você está acompanhando {stats.totalTeams} {stats.totalTeams === 1 ? 'equipe' : 'equipes'} de projeto.
+              </p>
+            </div>
+          </div>
+
+          <button className="flex items-center gap-2 bg-white text-blue-600 font-semibold px-6 py-3 rounded-lg hover:bg-blue-50 transition self-start">
+            <Plus size={20} />
+            Criar Nova Equipe
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -218,11 +204,14 @@ export default function DashboardPage() {
               const deadline = team.projectDeadline
                 ? new Date(team.projectDeadline).toLocaleDateString('pt-BR')
                 : 'Sem prazo';
+              const studentMembers = getStudentTeamMembers(team);
+              const facultyMembers = getFacultyTeamMembers(team);
 
               return (
-                <div
+                <Link
                   key={team.teamId}
-                  className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg transition cursor-pointer group"
+                  href={`/dashboard/teams/${team.teamId}`}
+                  className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-lg transition cursor-pointer group block"
                 >
                   {/* Header */}
                   <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-200 p-6">
@@ -232,6 +221,7 @@ export default function DashboardPage() {
                           {team.teamName}
                         </h4>
                         <p className="text-sm text-slate-600">{team.course}</p>
+                        <p className="text-xs text-slate-500 mt-1">{buildTeamBalanceLabel(team)}</p>
                       </div>
                       <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
                         team.projectStatus === 'Concluído'
@@ -247,6 +237,18 @@ export default function DashboardPage() {
 
                   {/* Content */}
                   <div className="p-6 space-y-4">
+                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">
+                        {studentMembers.length} aluno(s)
+                      </span>
+                      <span className="rounded-full bg-violet-50 px-3 py-1 text-violet-700">
+                        {facultyMembers.length} docente(s)
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
+                        {buildTeamProfessorFocusLabel(team)}
+                      </span>
+                    </div>
+
                     {/* Progress */}
                     <div>
                       <div className="flex items-center justify-between mb-2">
@@ -264,8 +266,15 @@ export default function DashboardPage() {
                     {/* Members */}
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <Users size={16} className="text-slate-400" />
-                      <span>{team.members.length} {team.members.length === 1 ? 'membro' : 'membros'}</span>
+                      <span>{studentMembers.length} {studentMembers.length === 1 ? 'aluno' : 'alunos'}</span>
                     </div>
+
+                    {facultyMembers.length > 0 && (
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <Briefcase size={16} className="text-slate-400" />
+                        <span>{facultyMembers.length} {facultyMembers.length === 1 ? 'docente' : 'docentes'} em orientação</span>
+                      </div>
+                    )}
 
                     {/* Deadline */}
                     <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -274,38 +283,45 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Members Avatars Preview */}
-                    {team.members.length > 0 && (
+                    {studentMembers.length > 0 && (
                       <div className="flex -space-x-2">
-                        {team.members.slice(0, 3).map((member, idx) => (
+                        {studentMembers.slice(0, 3).map((member, idx) => (
                           <div key={idx} title={member.name}>
-                            {member.avatar ? (
-                              <div className="w-8 h-8 rounded-full overflow-hidden border border-white">
-                                <AvatarDisplay avatar={member.avatar} size="sm" fallback={member.name.charAt(0)} />
-                              </div>
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xs font-bold border border-white">
-                                {member.name.charAt(0).toUpperCase()}
-                              </div>
-                            )}
+                            <AvatarDisplay
+                              avatar={member.avatar}
+                              imageSrc={member.profilePhotoSource || ''}
+                              size="sm"
+                              fallback={member.name.charAt(0).toUpperCase()}
+                            />
                           </div>
                         ))}
-                        {team.members.length > 3 && (
+                        {studentMembers.length > 3 && (
                           <div className="w-8 h-8 rounded-full bg-slate-300 flex items-center justify-center text-slate-700 text-xs font-bold border border-white">
-                            +{team.members.length - 3}
+                            +{studentMembers.length - 3}
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {facultyMembers.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {facultyMembers.slice(0, 2).map((member) => (
+                          <span key={member.userId || member.name} className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                            {member.name}
+                          </span>
+                        ))}
                       </div>
                     )}
                   </div>
 
                   {/* Footer Action */}
                   <div className="border-t border-slate-200 p-4 bg-slate-50">
-                    <button className="w-full flex items-center justify-center gap-2 text-blue-600 font-semibold hover:text-blue-700 transition py-2">
+                    <span className="w-full flex items-center justify-center gap-2 text-blue-600 font-semibold hover:text-blue-700 transition py-2">
                       Abrir Projeto
                       <ArrowRight size={16} />
-                    </button>
+                    </span>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -328,6 +344,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-slate-600">
                   Atualizado: {new Date(team.updatedAt).toLocaleDateString('pt-BR')}
                 </p>
+                <p className="text-xs text-slate-500 mt-1">{buildTeamLeadershipLabel(team)}</p>
               </div>
               <div className="text-right">
                 <div className="text-sm font-semibold text-slate-900">{team.projectProgress}%</div>

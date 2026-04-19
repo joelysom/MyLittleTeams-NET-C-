@@ -1,15 +1,12 @@
 import {
   getFirestore,
-  collection,
-  query,
-  where,
-  getDocs,
   doc,
   setDoc,
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
 import { AvatarComponents, DEFAULT_AVATAR, normalizeAvatar } from './avatarService';
+import { resolveFirebaseStorageMediaSource } from './chatMedia';
 
 export interface UserProfile {
   userId: string;
@@ -17,13 +14,48 @@ export interface UserProfile {
   displayName: string;
   avatar: AvatarComponents;
   profilePhoto?: string;
+  profilePhotoDataUri?: string;
+  profilePhotoStoragePath?: string;
+  profilePhotoSource?: string;
+  headline?: string;
+  course?: string;
+  registration?: string;
+  academicDepartment?: string;
+  academicFocus?: string;
   bio?: string;
+  professionalSummary?: string;
+  programmingLanguages?: string;
+  phoneNumber?: string;
+  calendarEntries?: UserCalendarEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
 
+export interface UserCalendarEntry {
+  entryId: string;
+  date: string;
+  entryType: string;
+  contextLabel: string;
+  title: string;
+  notes: string;
+  createdAt: string;
+}
+
 export class UserProfileService {
+  private profileCache = new Map<string, Promise<UserProfile | null>>();
+
   async getUserProfile(userId: string): Promise<UserProfile | null> {
+    if (this.profileCache.has(userId)) {
+      return this.profileCache.get(userId) ?? null;
+    }
+
+    const profilePromise = this.loadUserProfile(userId);
+    this.profileCache.set(userId, profilePromise);
+
+    return profilePromise;
+  }
+
+  private async loadUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       const db = getFirestore();
       const userRef = doc(db, 'users', userId);
@@ -44,13 +76,46 @@ export class UserProfileService {
         clothing: data.avatarClothing || data.clothing,
       };
 
+      const profilePhotoDataUri = data.profilePhotoDataUri || data.profilePhoto || '';
+      const profilePhotoStoragePath = data.profilePhotoStoragePath || data.profilePhotoStorage || '';
+      const profilePhotoUrl = data.profilePhotoUrl || data.profilePhotoSource || '';
+      const profilePhotoSource =
+        (typeof profilePhotoDataUri === 'string' && profilePhotoDataUri.trim()) ||
+        (typeof profilePhotoUrl === 'string' && profilePhotoUrl.trim()) ||
+        (await resolveFirebaseStorageMediaSource(profilePhotoStoragePath)) ||
+        '';
+
+      const calendarEntries = Array.isArray(data.calendarEntries)
+        ? data.calendarEntries.map((entry: any, index: number) => ({
+            entryId: typeof entry?.entryId === 'string' && entry.entryId.trim() ? entry.entryId : `calendar-${index}`,
+            date: typeof entry?.date === 'string' && entry.date.trim() ? entry.date : new Date().toISOString(),
+            entryType: typeof entry?.entryType === 'string' ? entry.entryType : 'Aviso',
+            contextLabel: typeof entry?.contextLabel === 'string' ? entry.contextLabel : 'Professor',
+            title: typeof entry?.title === 'string' ? entry.title : '',
+            notes: typeof entry?.notes === 'string' ? entry.notes : '',
+            createdAt: typeof entry?.createdAt === 'string' && entry.createdAt.trim() ? entry.createdAt : new Date().toISOString(),
+          }))
+        : [];
+
       return {
         userId,
         email: data.email || '',
         displayName: data.displayName || '',
         avatar: normalizeAvatar(avatarData),
-        profilePhoto: data.profilePhoto,
-        bio: data.bio,
+        profilePhoto: profilePhotoSource,
+        profilePhotoDataUri: profilePhotoDataUri || '',
+        profilePhotoStoragePath: profilePhotoStoragePath || '',
+        profilePhotoSource: profilePhotoSource || '',
+        headline: data.headline || '',
+        course: data.course || '',
+        registration: data.registration || '',
+        academicDepartment: data.academicDepartment || '',
+        academicFocus: data.academicFocus || '',
+        bio: data.bio || '',
+        professionalSummary: data.professionalSummary || data.bio || '',
+        programmingLanguages: data.programmingLanguages || '',
+        phoneNumber: data.phoneNumber || data.phone || '',
+        calendarEntries,
         createdAt: data.createdAt?.toDate() || new Date(),
         updatedAt: data.updatedAt?.toDate() || new Date(),
       };
@@ -124,6 +189,8 @@ export class UserProfileService {
         clothing: avatar.clothing,
         updatedAt: new Date(),
       });
+
+      this.profileCache.delete(userId);
     } catch (error) {
       console.error('Erro ao atualizar avatar:', error);
       throw error;
@@ -138,6 +205,8 @@ export class UserProfileService {
         ...updates,
         updatedAt: new Date(),
       });
+
+      this.profileCache.delete(userId);
     } catch (error) {
       console.error('Erro ao atualizar perfil:', error);
       throw error;
@@ -146,15 +215,16 @@ export class UserProfileService {
 
   async getUsersByIds(userIds: string[]): Promise<Map<string, UserProfile>> {
     try {
-      const db = getFirestore();
       const profiles = new Map<string, UserProfile>();
 
-      for (const userId of userIds) {
-        const profile = await this.getUserProfile(userId);
+      const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+      const results = await Promise.all(uniqueUserIds.map((userId) => this.getUserProfile(userId)));
+
+      results.forEach((profile, index) => {
         if (profile) {
-          profiles.set(userId, profile);
+          profiles.set(uniqueUserIds[index], profile);
         }
-      }
+      });
 
       return profiles;
     } catch (error) {

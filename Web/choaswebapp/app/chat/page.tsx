@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../lib/useAuth';
 import { ChatServiceTS, ChatMessage, Conversation } from '../../lib/chatService';
-import { getUserProfileService } from '../../lib/userProfileService';
-import { AvatarComponents } from '../../lib/avatarService';
 import AvatarDisplay from '../../components/AvatarDisplay';
+import { DEFAULT_AVATAR } from '../../lib/avatarService';
+import { STICKER_ASSETS, resolveStickerAssetSource } from '../../lib/chatMedia';
 import {
   MessageCircle,
   Phone,
@@ -18,102 +18,244 @@ import {
   Plus,
   Filter,
   Loader,
+  X,
+  FileText,
+  Smile,
 } from 'lucide-react';
+
+type PendingAttachment = {
+  file: File;
+  previewSource: string;
+};
+
+const fileToDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+};
+
+const formatTimestamp = (date: Date): string => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getConversationContactId = (conversation: Conversation, currentUserId?: string): string => {
+  return conversation.userAId === currentUserId ? conversation.userBId : conversation.userAId;
+};
+
+const getConversationContactName = (conversation: Conversation, currentUserId?: string): string => {
+  return conversation.userAId === currentUserId ? conversation.userBName : conversation.userAName;
+};
+
+const getConversationContactAvatar = (conversation: Conversation, currentUserId?: string) => {
+  return conversation.userAId === currentUserId ? conversation.userBAvatar : conversation.userAAvatar;
+};
+
+const getConversationContactPhotoSource = (conversation: Conversation, currentUserId?: string): string => {
+  return conversation.userAId === currentUserId
+    ? conversation.userBProfilePhotoSource || conversation.userBProfilePhotoDataUri || ''
+    : conversation.userAProfilePhotoSource || conversation.userAProfilePhotoDataUri || '';
+};
 
 export default function ChatPage() {
   const user = useAuth();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messageInput, setMessageInput] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loadingConversations, setLoadingConversations] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [chatService, setChatService] = useState<ChatServiceTS | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [showStickerPicker, setShowStickerPicker] = useState(false);
 
-  // Load conversations and messages
+  const selectedConversationContactName = useMemo(() => {
+    if (!selectedConversation || !user) {
+      return '';
+    }
+
+    return getConversationContactName(selectedConversation, user.uid);
+  }, [selectedConversation, user]);
+
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      return;
+    }
 
     const loadData = async () => {
       try {
-        setLoading(true);
+        setLoadingConversations(true);
         const service = new ChatServiceTS(user.uid, user.uid);
         setChatService(service);
 
         const loadedConversations = await service.loadConversationsAsync();
         setConversations(loadedConversations);
+        setLoadingConversations(false);
 
         if (loadedConversations.length > 0) {
-          setSelectedConversation(loadedConversations[0]);
-          const contactId =
-            loadedConversations[0].userAId === user.uid
-              ? loadedConversations[0].userBId
-              : loadedConversations[0].userAId;
-          const msgs = await service.loadMessagesAsync(contactId);
-          setMessages(msgs);
+          const initialConversation = loadedConversations[0];
+          setSelectedConversation(initialConversation);
+          void loadConversationMessages(initialConversation, service);
         }
       } catch (error) {
         console.error('Erro ao carregar chat:', error);
       } finally {
-        setLoading(false);
+        setLoadingConversations(false);
       }
     };
 
     loadData();
   }, [user]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages]);
+
+  const loadConversationMessages = async (conversation: Conversation, serviceOverride?: ChatServiceTS) => {
+    if (!user) {
+      return;
+    }
+
+    const service = serviceOverride || chatService;
+    if (!service) {
+      return;
+    }
+
+    try {
+      setLoadingMessages(true);
+      const contactId = getConversationContactId(conversation, user.uid);
+      const loadedMessages = await service.loadMessagesAsync(contactId, 80);
+      setMessages(loadedMessages);
+    } catch (error) {
+      console.error('Erro ao carregar mensagens:', error);
+      setMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   const handleSelectConversation = async (conversation: Conversation) => {
     setSelectedConversation(conversation);
-    if (chatService && user) {
-      const contactId = conversation.userAId === user.uid ? conversation.userBId : conversation.userAId;
-      const msgs = await chatService.loadMessagesAsync(contactId);
-      setMessages(msgs);
+    setMessages([]);
+    await loadConversationMessages(conversation);
+  };
+
+  const handleAttachmentSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) {
+      return;
+    }
+
+    const attachments = await Promise.all(
+      files.map(async (file) => {
+        const previewSource = file.type.startsWith('image/') ? await fileToDataUrl(file) : '';
+        return { file, previewSource };
+      }),
+    );
+
+    setPendingAttachments((previous) => [...previous, ...attachments]);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removePendingAttachment = (index: number) => {
+    setPendingAttachments((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const syncConversations = async (service: ChatServiceTS) => {
+    const refreshedConversations = await service.loadConversationsAsync();
+    setConversations(refreshedConversations);
+
+    if (selectedConversation) {
+      const refreshedSelected = refreshedConversations.find(
+        (conversation) => conversation.conversationId === selectedConversation.conversationId,
+      );
+
+      if (refreshedSelected) {
+        setSelectedConversation(refreshedSelected);
+      }
     }
   };
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversation || !chatService || !user) return;
+    if (!user || !chatService || !selectedConversation) {
+      return;
+    }
+
+    const trimmedMessage = messageInput.trim();
+    const hasAttachments = pendingAttachments.length > 0;
+
+    if (!trimmedMessage && !hasAttachments) {
+      return;
+    }
 
     try {
       setSending(true);
-      const contactId =
-        selectedConversation.userAId === user.uid
-          ? selectedConversation.userBId
-          : selectedConversation.userAId;
+      const contactId = getConversationContactId(selectedConversation, user.uid);
+      const contactName = getConversationContactName(selectedConversation, user.uid);
+      const senderName = user.displayName || 'Usuário';
 
-      const contactName =
-        selectedConversation.userAId === user.uid
-          ? selectedConversation.userBName
-          : selectedConversation.userAName;
+      if (hasAttachments) {
+        const caption = pendingAttachments.length === 1 ? trimmedMessage : '';
 
-      const result = await chatService.sendMessageAsync(
-        contactId,
-        contactName,
-        user.displayName || 'Usuário',
-        messageInput,
-        'text'
-      );
+        for (const [index, attachment] of pendingAttachments.entries()) {
+          const result = await chatService.sendAttachmentMessageAsync(
+            contactId,
+            contactName,
+            senderName,
+            attachment.file,
+            index === 0 ? caption : '',
+            attachment.previewSource,
+          );
 
-      if (result.success) {
+          if (!result.success) {
+            throw new Error(result.error || 'Falha ao enviar anexo');
+          }
+
+          if (result.message) {
+            setMessages((previous) => [...previous, result.message as ChatMessage]);
+          }
+        }
+      } else {
+        const result = await chatService.sendMessageAsync(contactId, contactName, senderName, trimmedMessage, 'text');
+
+        if (!result.success) {
+          throw new Error(result.error || 'Falha ao enviar mensagem');
+        }
+
         const newMessage: ChatMessage = {
           messageId: `msg_${Date.now()}`,
           documentId: `doc_${Date.now()}`,
           senderId: user.uid,
-          senderName: user.displayName || 'Usuário',
-          content: messageInput,
+          senderName,
+          content: trimmedMessage,
           messageType: 'text',
           timestamp: new Date(),
           isOwn: true,
         };
 
-        setMessages([...messages, newMessage]);
-        setMessageInput('');
-
-        // Reload conversations to update last message
-        const updatedConversations = await chatService.loadConversationsAsync();
-        setConversations(updatedConversations);
+        setMessages((previous) => [...previous, newMessage]);
       }
+
+      setMessageInput('');
+      setPendingAttachments([]);
+      await syncConversations(chatService);
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
     } finally {
@@ -121,135 +263,186 @@ export default function ChatPage() {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  const handleKeyPress = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
       handleSendMessage();
     }
   };
 
-  const getContactName = (conversation: Conversation): string => {
-    return conversation.userAId === user?.uid ? conversation.userBName : conversation.userAName;
+  const filteredConversations = useMemo(() => {
+    return conversations.filter((conversation) => {
+      const contactName = getConversationContactName(conversation, user?.uid);
+      return contactName.toLowerCase().includes(searchInput.toLowerCase());
+    });
+  }, [conversations, searchInput, user?.uid]);
+
+  const renderMessageAttachment = (message: ChatMessage) => {
+    const resolvedImageSource = message.attachmentPreviewSource || message.attachmentPreviewDataUri || '';
+    const attachmentName = message.attachmentFileName || 'anexo';
+
+    if (message.messageType === 'image' && resolvedImageSource) {
+      return (
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20">
+          <img
+            src={resolvedImageSource}
+            alt={attachmentName}
+            className="max-h-80 w-full object-cover"
+            loading="lazy"
+          />
+          {message.content && (
+            <div className="px-4 py-3 text-sm leading-relaxed">
+              {message.content}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (message.attachmentFileName) {
+      return (
+        <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/20 px-4 py-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-white">
+            <FileText size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">{attachmentName}</p>
+            <p className="text-xs text-slate-300">
+              {message.attachmentContentType || 'Arquivo'}
+              {message.attachmentSizeBytes ? ` • ${(message.attachmentSizeBytes / 1024).toFixed(1)} KB` : ''}
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
   };
 
-  const filteredConversations = conversations.filter((conv) => {
-    const name = getContactName(conv);
-    return name.toLowerCase().includes(searchInput.toLowerCase());
-  });
+  const renderMessageSticker = (message: ChatMessage) => {
+    const stickerSource = message.stickerSource || resolveStickerAssetSource(message.stickerAsset);
 
-  if (loading) {
+    if (!stickerSource) {
+      return null;
+    }
+
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="max-w-[14rem] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20 p-2">
+        <img
+          src={stickerSource}
+          alt={message.stickerAsset || 'Figurinha'}
+          className="h-36 w-36 object-contain"
+          loading="lazy"
+        />
+      </div>
+    );
+  };
+
+  const pendingCaption = pendingAttachments.length > 0 ? `${pendingAttachments.length} arquivo(s) prontos` : 'Sem anexos';
+
+  if (loadingConversations && conversations.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-100">
         <div className="text-center">
-          <Loader className="mx-auto animate-spin text-blue-600 mb-4" size={48} />
-          <p className="text-slate-600">Carregando mensagens...</p>
+          <Loader className="mx-auto mb-4 animate-spin text-blue-400" size={48} />
+          <p className="text-slate-300">Carregando conversas...</p>
         </div>
       </div>
     );
   }
 
+  if (!user) {
+    return null;
+  }
+
   return (
-    <div className="h-screen flex flex-col">
-      {/* Top Bar */}
-      <div className="bg-white border-b border-slate-200 h-20 flex items-center px-8 shadow-sm">
+    <div className="flex h-screen flex-col bg-slate-950 text-slate-100">
+      <div className="bg-slate-900/90 border-b border-white/10 px-8 py-4 shadow-sm backdrop-blur">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white text-lg font-bold">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-lg font-bold text-white shadow-lg shadow-blue-950/30">
             💬
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Conversas</h1>
-            <p className="text-sm text-slate-500">Chat direto, histórico e presença do workspace</p>
+            <h1 className="text-2xl font-bold text-white">Conversas</h1>
+            <p className="text-sm text-slate-300">Chat direto, imagens do perfil e anexos do Firebase Storage</p>
           </div>
         </div>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar - Conversations List */}
-        <div className="w-80 bg-white border-r border-slate-200 flex flex-col">
-          {/* Header with Add Button */}
-          <div className="border-b border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-slate-900">💬 Conversas</h2>
+      <div className="flex flex-1 overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_26%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.10),_transparent_24%)]">
+        <aside className="flex w-[390px] shrink-0 flex-col border-r border-white/10 bg-slate-950/70 backdrop-blur-xl xl:w-[420px]">
+          <div className="border-b border-white/10 p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Conversas</h2>
               <div className="flex gap-2">
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition text-blue-600">
+                <button className="rounded-xl p-2 text-blue-300 transition hover:bg-white/10 hover:text-white">
                   <Plus size={18} />
                 </button>
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition">
+                <button className="rounded-xl p-2 text-slate-300 transition hover:bg-white/10 hover:text-white">
                   <Filter size={18} />
                 </button>
               </div>
             </div>
 
-            {/* Search Bar */}
             <div className="relative">
               <Search className="absolute left-3 top-3 text-slate-400" size={18} />
               <input
                 type="text"
-                placeholder="🔍 Pesquisar conversas..."
+                placeholder="Pesquisar conversas..."
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                onChange={(event) => setSearchInput(event.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 py-2 pl-10 pr-4 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-400/70"
               />
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="border-b border-slate-200 px-4 py-3 flex gap-2">
-            <button className="px-4 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-              Favoritos
-            </button>
-            <button className="px-4 py-1 bg-slate-100 text-slate-700 rounded-full text-sm font-semibold hover:bg-slate-200">
-              Chats
-            </button>
-            <span className="ml-auto text-xs text-slate-500 font-semibold">Personalizada</span>
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-xs font-semibold text-slate-300">
+            <span className="rounded-full bg-blue-500/20 px-3 py-1 text-blue-200">Favoritos</span>
+            <span className="rounded-full bg-white/5 px-3 py-1">Chats</span>
+            <span className="ml-auto text-slate-400">Atualizado em tempo real</span>
           </div>
 
-          {/* Conversations List */}
           <div className="flex-1 overflow-y-auto">
             {filteredConversations.length === 0 ? (
-              <div className="p-4 text-center text-slate-500">
-                <MessageCircle size={32} className="mx-auto mb-2 opacity-50" />
+              <div className="p-6 text-center text-slate-400">
+                <MessageCircle size={36} className="mx-auto mb-2 opacity-50" />
                 <p className="text-sm">Nenhuma conversa encontrada</p>
               </div>
             ) : (
               filteredConversations.map((conversation) => {
-                const contactName = getContactName(conversation);
-                const initial = contactName.charAt(0).toUpperCase();
+                const contactName = getConversationContactName(conversation, user.uid);
+                const contactAvatar = getConversationContactAvatar(conversation, user.uid) || DEFAULT_AVATAR;
+                const contactPhotoSource = getConversationContactPhotoSource(conversation, user.uid);
 
                 return (
                   <button
                     key={conversation.conversationId}
                     onClick={() => handleSelectConversation(conversation)}
-                    className={`w-full text-left px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition ${
-                      selectedConversation?.conversationId === conversation.conversationId
-                        ? 'bg-blue-50'
-                        : ''
+                    className={`w-full border-b border-white/5 px-4 py-4 text-left transition hover:bg-white/5 ${
+                      selectedConversation?.conversationId === conversation.conversationId ? 'bg-blue-500/10' : ''
                     }`}
                   >
                     <div className="flex items-start gap-3">
                       <div className="relative flex-shrink-0">
-                        {conversation.userAAvatar || conversation.userBAvatar ? (
-                          <div className="w-12 h-12 rounded-full overflow-hidden">
-                            <AvatarDisplay
-                              avatar={
-                                conversation.userAId === user?.uid
-                                  ? conversation.userBAvatar || conversation.userBAvatar
-                                  : conversation.userAAvatar || conversation.userAAvatar
-                              }
-                              size="sm"
-                            />
-                          </div>
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-semibold text-sm">
-                            {initial}
-                          </div>
-                        )}
-                        <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-green-500" />
+                        <AvatarDisplay
+                          avatar={contactAvatar}
+                          imageSrc={contactPhotoSource}
+                          size="sm"
+                          fallback={contactName.charAt(0).toUpperCase()}
+                        />
+                        <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-950 bg-emerald-500" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">{contactName}</p>
-                        <p className="text-xs text-slate-500 truncate">{conversation.lastMessage}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-white">{contactName}</p>
+                          <span className="shrink-0 text-xs text-slate-400">
+                            {conversation.lastMessageTime ? formatTimestamp(conversation.lastMessageTime) : ''}
+                          </span>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-300">{conversation.lastMessage}</p>
+                        <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-400">
+                          <span className="rounded-full bg-white/5 px-2 py-0.5">{conversation.lastMessageType || 'text'}</span>
+                        </div>
                       </div>
                     </div>
                   </button>
@@ -257,132 +450,269 @@ export default function ChatPage() {
               })
             )}
           </div>
-        </div>
+        </aside>
 
-        {/* Chat Area */}
-        {selectedConversation ? (
-          <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-blue-50">
-            {/* Top Bar - Contact Info */}
-            <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  {selectedConversation.userAAvatar || selectedConversation.userBAvatar ? (
-                    <div className="w-12 h-12 rounded-full overflow-hidden">
-                      <AvatarDisplay
-                        avatar={
-                          selectedConversation.userAId === user?.uid
-                            ? selectedConversation.userBAvatar || selectedConversation.userBAvatar
-                            : selectedConversation.userAAvatar || selectedConversation.userAAvatar
-                        }
-                        size="sm"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white font-semibold">
-                      {getContactName(selectedConversation).charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white bg-green-500" />
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{getContactName(selectedConversation)}</p>
-                  <p className="text-xs text-green-600 font-medium">Online</p>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2">
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition text-blue-600">
-                  <Phone size={18} />
-                </button>
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition text-blue-600">
-                  <Video size={18} />
-                </button>
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition text-blue-600">
-                  <Info size={18} />
-                </button>
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition">
-                  <MoreVertical size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
-              {messages.length === 0 ? (
-                <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <MessageCircle size={48} className="mx-auto text-slate-400 mb-4" />
-                    <p className="text-slate-600">Nenhuma mensagem ainda. Comece uma conversa!</p>
+        <section className="flex flex-1 flex-col bg-slate-950/50 backdrop-blur-xl">
+          {selectedConversation ? (
+            <>
+              <div className="flex items-center justify-between border-b border-white/10 bg-slate-950/70 px-8 py-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <AvatarDisplay
+                      avatar={getConversationContactAvatar(selectedConversation, user.uid) || DEFAULT_AVATAR}
+                      imageSrc={getConversationContactPhotoSource(selectedConversation, user.uid)}
+                      size="sm"
+                      fallback={selectedConversationContactName.charAt(0).toUpperCase()}
+                    />
+                    <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-slate-950 bg-emerald-500" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-white">{selectedConversationContactName}</p>
+                    <p className="text-xs text-emerald-400">Online</p>
                   </div>
                 </div>
-              ) : (
-                messages.map((msg) => (
-                  <div key={msg.documentId} className={`flex ${msg.isOwn ? 'justify-end' : 'justify-start'} gap-3`}>
-                    {!msg.isOwn && msg.senderAvatar && (
-                      <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
-                        <AvatarDisplay avatar={msg.senderAvatar} size="sm" fallback={msg.senderName.charAt(0)} />
+
+                <div className="flex items-center gap-2 text-blue-200">
+                  <button className="rounded-xl p-2 transition hover:bg-white/10 hover:text-white">
+                    <Phone size={18} />
+                  </button>
+                  <button className="rounded-xl p-2 transition hover:bg-white/10 hover:text-white">
+                    <Video size={18} />
+                  </button>
+                  <button className="rounded-xl p-2 transition hover:bg-white/10 hover:text-white">
+                    <Info size={18} />
+                  </button>
+                  <button className="rounded-xl p-2 transition hover:bg-white/10 hover:text-white">
+                    <MoreVertical size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-8 py-6">
+                {loadingMessages ? (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="text-center">
+                      <Loader className="mx-auto mb-4 animate-spin text-cyan-300" size={40} />
+                      <p className="text-slate-300">Carregando mensagens...</p>
+                    </div>
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="text-center">
+                      <MessageCircle size={56} className="mx-auto mb-4 text-slate-500" />
+                      <p className="text-lg text-slate-200">Nenhuma mensagem ainda. Comece a conversa.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {messages.map((message) => {
+                      const senderPhotoSource = message.senderProfilePhotoSource || message.senderProfilePhotoDataUri || '';
+                      const isOwn = message.isOwn;
+                      const messageAvatar = message.senderAvatar || DEFAULT_AVATAR;
+
+                      return (
+                        <div key={message.documentId} className={`flex ${isOwn ? 'justify-end' : 'justify-start'} gap-3`}>
+                          {!isOwn && (
+                            <AvatarDisplay
+                              avatar={messageAvatar}
+                              imageSrc={senderPhotoSource}
+                              size="sm"
+                              fallback={message.senderName?.charAt(0).toUpperCase() || '?'}
+                            />
+                          )}
+
+                          <div
+                            className={`max-w-[min(34rem,80%)] rounded-3xl px-4 py-3 shadow-lg ${
+                              isOwn
+                                ? 'rounded-br-md bg-gradient-to-br from-blue-600 to-indigo-600 text-white'
+                                : 'rounded-bl-md border border-white/10 bg-white/5 text-white backdrop-blur'
+                            }`}
+                          >
+                            {message.messageType === 'image' || message.attachmentFileName ? renderMessageAttachment(message) : null}
+
+                            {message.messageType === 'sticker' || message.stickerAsset ? renderMessageSticker(message) : null}
+
+                            {message.content && message.messageType !== 'image' && message.messageType !== 'sticker' && (
+                              <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                            )}
+
+                            <div className={`mt-2 text-xs ${isOwn ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {formatTimestamp(message.timestamp)}
+                            </div>
+                          </div>
+
+                          {isOwn && (
+                            <AvatarDisplay
+                              avatar={messageAvatar}
+                              imageSrc={senderPhotoSource}
+                              size="sm"
+                              fallback={message.senderName?.charAt(0).toUpperCase() || '?'}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div ref={messagesEndRef} />
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-white/10 bg-slate-950/80 px-8 py-5 backdrop-blur-xl">
+                {pendingAttachments.length > 0 && (
+                  <div className="mb-4 rounded-3xl border border-white/10 bg-white/5 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">Anexos prontos para envio</p>
+                      <p className="text-xs text-slate-400">{pendingCaption}</p>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {pendingAttachments.map((attachment, index) => (
+                        <div key={`${attachment.file.name}-${index}`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-slate-950/40 p-3">
+                          <button
+                            type="button"
+                            onClick={() => removePendingAttachment(index)}
+                            className="absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white transition hover:bg-black/70"
+                          >
+                            <X size={14} />
+                          </button>
+
+                          {attachment.previewSource ? (
+                            <img src={attachment.previewSource} alt={attachment.file.name} className="mb-3 h-28 w-full rounded-xl object-cover" />
+                          ) : (
+                            <div className="mb-3 flex h-28 items-center justify-center rounded-xl bg-white/5 text-slate-300">
+                              <FileText size={28} />
+                            </div>
+                          )}
+
+                          <p className="truncate text-sm font-semibold text-white">{attachment.file.name}</p>
+                          <p className="text-xs text-slate-400">{(attachment.file.size / 1024).toFixed(1)} KB</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {showStickerPicker && (
+                  <div className="mb-4 rounded-3xl border border-white/10 bg-slate-950/95 p-4 shadow-2xl shadow-black/30">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-white">Figurinhas</p>
+                        <p className="text-xs text-slate-400">Mesma lógica do desktop, usando a pasta public/img/emojiobsseract</p>
                       </div>
-                    )}
-                    <div
-                      className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
-                        msg.isOwn
-                          ? 'bg-blue-600 text-white rounded-br-none'
-                          : 'bg-white text-slate-900 border border-slate-200 rounded-bl-none'
-                      }`}
-                    >
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
-                      <p
-                        className={`text-xs mt-1 ${
-                          msg.isOwn ? 'text-blue-100' : 'text-slate-500'
-                        }`}
+                      <button
+                        type="button"
+                        onClick={() => setShowStickerPicker(false)}
+                        className="rounded-full p-2 text-slate-300 transition hover:bg-white/10 hover:text-white"
                       >
-                        {msg.timestamp.toLocaleTimeString('pt-BR', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="grid max-h-64 grid-cols-4 gap-3 overflow-y-auto pr-1 sm:grid-cols-5 lg:grid-cols-7">
+                      {STICKER_ASSETS.map((stickerAsset) => (
+                        <button
+                          key={stickerAsset}
+                          type="button"
+                          onClick={async () => {
+                            if (!user || !chatService || !selectedConversation) {
+                              return;
+                            }
+
+                            try {
+                              setSending(true);
+                              const contactId = getConversationContactId(selectedConversation, user.uid);
+                              const contactName = getConversationContactName(selectedConversation, user.uid);
+                              const senderName = user.displayName || 'Usuário';
+                              const result = await chatService.sendStickerMessageAsync(contactId, contactName, senderName, stickerAsset);
+
+                              if (result.success) {
+                                if (result.message) {
+                                  setMessages((previous) => [...previous, result.message as ChatMessage]);
+                                }
+
+                                await syncConversations(chatService);
+                                setShowStickerPicker(false);
+                              }
+                            } catch (error) {
+                              console.error('Erro ao enviar figurinha:', error);
+                            } finally {
+                              setSending(false);
+                            }
+                          }}
+                          className="group rounded-2xl border border-white/10 bg-white/5 p-2 transition hover:border-cyan-400/60 hover:bg-cyan-400/10"
+                        >
+                          <img
+                            src={resolveStickerAssetSource(stickerAsset)}
+                            alt={stickerAsset}
+                            className="h-20 w-full object-contain transition group-hover:scale-105"
+                            loading="lazy"
+                          />
+                        </button>
+                      ))}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                )}
 
-            {/* Input Area */}
-            <div className="bg-white border-t border-slate-200 px-8 py-4">
-              <div className="flex gap-3">
-                <div className="flex-1 flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-2xl px-4 py-2">
+                <div className="flex items-center gap-3 rounded-3xl border border-white/10 bg-white/5 px-4 py-3 shadow-inner shadow-black/10">
                   <input
-                    type="text"
-                    placeholder="Escreva uma mensagem..."
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    disabled={sending}
-                    className="flex-1 bg-transparent text-slate-900 placeholder-slate-500 focus:outline-none text-sm disabled:opacity-50"
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
+                    multiple
+                    onChange={handleAttachmentSelection}
+                    className="hidden"
                   />
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
+                    title="Anexar arquivo"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowStickerPicker((previous) => !previous)}
+                    className="rounded-2xl p-3 text-cyan-300 transition hover:bg-white/10 hover:text-white"
+                    title="Figurinhas"
+                  >
+                    <Smile size={18} />
+                  </button>
+
+                  <div className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3">
+                    <input
+                      type="text"
+                      placeholder="Escreva uma mensagem ou legenda..."
+                      value={messageInput}
+                      onChange={(event) => setMessageInput(event.target.value)}
+                      onKeyDown={handleKeyPress}
+                      disabled={sending}
+                      className="w-full bg-transparent text-sm text-white placeholder:text-slate-400 focus:outline-none disabled:opacity-50"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={sending || (!messageInput.trim() && pendingAttachments.length === 0)}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 px-5 py-3 font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {sending ? <Loader size={18} className="animate-spin" /> : <Send size={18} />}
+                    <span>Enviar</span>
+                  </button>
                 </div>
-                <button className="p-2 hover:bg-slate-100 rounded-lg transition text-blue-600">
-                  <Paperclip size={18} />
-                </button>
-                <button
-                  onClick={handleSendMessage}
-                  disabled={sending || !messageInput.trim()}
-                  className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
-                >
-                  {sending ? <Loader size={18} className="animate-spin" /> : <Send size={18} />}
-                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center">
+              <div className="text-center">
+                <MessageCircle size={64} className="mx-auto mb-4 text-slate-500" />
+                <p className="text-lg text-slate-200">Selecione uma conversa para começar</p>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-            <div className="text-center">
-              <MessageCircle size={64} className="mx-auto text-slate-300 mb-4" />
-              <p className="text-slate-500 text-lg">Selecione uma conversa para começar</p>
-            </div>
-          </div>
-        )}
+          )}
+        </section>
       </div>
     </div>
   );
