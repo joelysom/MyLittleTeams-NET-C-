@@ -211,7 +211,11 @@ function isFacultyRole(role: string): boolean {
     normalizedRole.includes('faculty') ||
     normalizedRole.includes('orientador') ||
     normalizedRole.includes('focal') ||
-    normalizedRole.includes('supervisor')
+    normalizedRole.includes('supervisor') ||
+    normalizedRole.includes('coordinator') ||
+    normalizedRole.includes('coordenador') ||
+    normalizedRole.includes('coordenação') ||
+    normalizedRole.includes('coordenacao')
   );
 }
 

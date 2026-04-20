@@ -17,6 +17,7 @@ export interface UserProfile {
   userId: string;
   email: string;
   displayName: string;
+  role?: string;
   avatar: AvatarComponents;
   profilePhoto?: string;
   profilePhotoDataUri?: string;
@@ -31,9 +32,40 @@ export interface UserProfile {
   professionalSummary?: string;
   programmingLanguages?: string;
   phoneNumber?: string;
+  companyName?: string;
+  companyLegalName?: string;
+  companyCnpj?: string;
+  companySegment?: string;
+  companyPhone?: string;
+  companyWebsite?: string;
+  companyContactName?: string;
+  companyContactRole?: string;
+  companyDescription?: string;
   calendarEntries?: UserCalendarEntry[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface UserProfileCreationOptions {
+  role?: string;
+  headline?: string;
+  course?: string;
+  registration?: string;
+  academicDepartment?: string;
+  academicFocus?: string;
+  bio?: string;
+  professionalSummary?: string;
+  programmingLanguages?: string;
+  phoneNumber?: string;
+  companyName?: string;
+  companyLegalName?: string;
+  companyCnpj?: string;
+  companySegment?: string;
+  companyPhone?: string;
+  companyWebsite?: string;
+  companyContactName?: string;
+  companyContactRole?: string;
+  companyDescription?: string;
 }
 
 export interface UserCalendarEntry {
@@ -47,7 +79,7 @@ export interface UserCalendarEntry {
 }
 
 function dataUrlToBlob(dataUrl: string): { blob: Blob; contentType: string } {
-  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+  const match = dataUrl.match(/^data:([^;]+);base64,([\s\S]+)$/);
 
   if (!match) {
     throw new Error('Formato inválido de imagem de perfil.');
@@ -143,7 +175,8 @@ export class UserProfileService {
       return {
         userId,
         email: data.email || '',
-        displayName: data.displayName || '',
+        displayName: data.displayName || data.companyName || data.companyLegalName || '',
+        role: data.role || 'student',
         avatar: normalizeAvatar(avatarData),
         profilePhoto: profilePhotoSource,
         profilePhotoDataUri: profilePhotoDataUri || '',
@@ -158,6 +191,15 @@ export class UserProfileService {
         professionalSummary: data.professionalSummary || data.bio || '',
         programmingLanguages: data.programmingLanguages || '',
         phoneNumber: data.phoneNumber || data.phone || '',
+        companyName: data.companyName || '',
+        companyLegalName: data.companyLegalName || '',
+        companyCnpj: data.companyCnpj || '',
+        companySegment: data.companySegment || '',
+        companyPhone: data.companyPhone || '',
+        companyWebsite: data.companyWebsite || '',
+        companyContactName: data.companyContactName || '',
+        companyContactRole: data.companyContactRole || '',
+        companyDescription: data.companyDescription || '',
         calendarEntries,
         createdAt: data.createdAt?.toDate() || new Date(),
         updatedAt: data.updatedAt?.toDate() || new Date(),
@@ -172,7 +214,8 @@ export class UserProfileService {
     userId: string,
     email: string,
     displayName: string,
-    avatar: AvatarComponents = DEFAULT_AVATAR
+    avatar: AvatarComponents = DEFAULT_AVATAR,
+    options: UserProfileCreationOptions = {}
   ): Promise<UserProfile> {
     try {
       const db = getFirestore();
@@ -182,7 +225,26 @@ export class UserProfileService {
         userId,
         email,
         displayName,
+        role: options.role || 'student',
         avatar,
+        headline: options.headline || '',
+        course: options.course || '',
+        registration: options.registration || '',
+        academicDepartment: options.academicDepartment || '',
+        academicFocus: options.academicFocus || '',
+        bio: options.bio || '',
+        professionalSummary: options.professionalSummary || '',
+        programmingLanguages: options.programmingLanguages || '',
+        phoneNumber: options.phoneNumber || '',
+        companyName: options.companyName || '',
+        companyLegalName: options.companyLegalName || '',
+        companyCnpj: options.companyCnpj || '',
+        companySegment: options.companySegment || '',
+        companyPhone: options.companyPhone || '',
+        companyWebsite: options.companyWebsite || '',
+        companyContactName: options.companyContactName || '',
+        companyContactRole: options.companyContactRole || '',
+        companyDescription: options.companyDescription || '',
         createdAt: now,
         updatedAt: now,
       };
@@ -192,6 +254,25 @@ export class UserProfileService {
       await setDoc(userRef, {
         email,
         displayName,
+        role: options.role || 'student',
+        headline: options.headline || '',
+        course: options.course || '',
+        registration: options.registration || '',
+        academicDepartment: options.academicDepartment || '',
+        academicFocus: options.academicFocus || '',
+        bio: options.bio || '',
+        professionalSummary: options.professionalSummary || '',
+        programmingLanguages: options.programmingLanguages || '',
+        phoneNumber: options.phoneNumber || '',
+        companyName: options.companyName || '',
+        companyLegalName: options.companyLegalName || '',
+        companyCnpj: options.companyCnpj || '',
+        companySegment: options.companySegment || '',
+        companyPhone: options.companyPhone || '',
+        companyWebsite: options.companyWebsite || '',
+        companyContactName: options.companyContactName || '',
+        companyContactRole: options.companyContactRole || '',
+        companyDescription: options.companyDescription || '',
         avatarBody: avatar.body,
         avatarHair: avatar.hair,
         avatarHat: avatar.hat,
