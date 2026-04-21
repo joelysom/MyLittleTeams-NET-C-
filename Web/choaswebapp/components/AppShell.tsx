@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChevronRight, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from 'lucide-react';
 import AvatarDisplay from './AvatarDisplay';
@@ -22,6 +22,7 @@ type AppShellProps = {
   onLogout: () => Promise<void>;
   children: React.ReactNode;
   contentClassName?: string;
+  sidebarFooterContent?: ReactNode | null;
 };
 
 const defaultContentClassName = 'mx-auto min-h-screen max-w-[1600px] px-4 pb-8 pt-20 sm:px-6 sm:pt-20 lg:px-8 lg:pb-10 lg:pt-8';
@@ -34,6 +35,7 @@ export default function AppShell({
   onLogout,
   children,
   contentClassName = defaultContentClassName,
+  sidebarFooterContent,
 }: AppShellProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -63,6 +65,60 @@ export default function AppShell({
   };
 
   const shellUserAvatar = user?.avatar || DEFAULT_AVATAR;
+  const defaultSidebarFooter = (
+    <div className="border-t border-slate-200 p-4">
+      <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center gap-3">
+          <AvatarDisplay
+            avatar={shellUserAvatar}
+            imageSrc={user?.profilePhotoSource || ''}
+            size="sm"
+            fallback={user?.displayName?.charAt(0).toUpperCase() || 'U'}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-slate-900">{user?.displayName || 'Usuário'}</p>
+            <p className="truncate text-xs text-slate-500">{user?.email || ''}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
+          <button
+            type="button"
+            onClick={() => handleNavigate('/profile')}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+              activeNavId === 'profile'
+                ? 'bg-blue-600 text-white'
+                : 'border border-slate-200 bg-white text-slate-900 hover:bg-slate-100 lg:text-slate-700'
+            }`}
+          >
+            <Settings size={16} />
+            Perfil
+          </button>
+          <button
+            type="button"
+            onClick={() => handleNavigate('/settings')}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
+              activeNavId === 'settings'
+                ? 'bg-blue-600 text-white'
+                : 'border border-slate-200 bg-white text-slate-900 hover:bg-slate-100 lg:text-slate-700'
+            }`}
+          >
+            <Settings size={16} />
+            Ajustes
+          </button>
+          <button
+            type="button"
+            onClick={() => void onLogout()}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 lg:text-red-700"
+          >
+            <LogOut size={16} />
+            Sair
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+  const footerContent = sidebarFooterContent === undefined ? defaultSidebarFooter : sidebarFooterContent;
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 text-slate-900">
@@ -143,57 +199,7 @@ export default function AppShell({
           </div>
         </nav>
 
-        <div className="border-t border-slate-200 p-4">
-          <div className="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-center gap-3">
-              <AvatarDisplay
-                avatar={shellUserAvatar}
-                imageSrc={user?.profilePhotoSource || ''}
-                size="sm"
-                fallback={user?.displayName?.charAt(0).toUpperCase() || 'U'}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-slate-900">{user?.displayName || 'Usuário'}</p>
-                <p className="truncate text-xs text-slate-500">{user?.email || ''}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
-              <button
-                type="button"
-                onClick={() => handleNavigate('/profile')}
-                className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                  activeNavId === 'profile'
-                    ? 'bg-blue-600 text-white'
-                    : 'border border-slate-200 bg-white text-slate-900 hover:bg-slate-100 lg:text-slate-700'
-                }`}
-              >
-                <Settings size={16} />
-                Perfil
-              </button>
-              <button
-                type="button"
-                onClick={() => handleNavigate('/settings')}
-                className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-                  activeNavId === 'settings'
-                    ? 'bg-blue-600 text-white'
-                    : 'border border-slate-200 bg-white text-slate-900 hover:bg-slate-100 lg:text-slate-700'
-                }`}
-              >
-                <Settings size={16} />
-                Ajustes
-              </button>
-              <button
-                type="button"
-                onClick={() => void onLogout()}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 lg:text-red-700"
-              >
-                <LogOut size={16} />
-                Sair
-              </button>
-            </div>
-          </div>
-        </div>
+        {footerContent ? footerContent : null}
       </aside>
 
       {mobileMenuOpen && (

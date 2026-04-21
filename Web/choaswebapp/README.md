@@ -25,6 +25,19 @@ This is a [Next.js](https://nextjs.org) project with Firebase integration.
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Deploy to Vercel
+
+This project is ready to deploy from the `Web/choaswebapp` folder.
+
+1. Import the project into Vercel with the project root set to `Web/choaswebapp`.
+2. Let Vercel use the provided `vercel.json` configuration.
+3. Add these environment variables in Vercel Project Settings:
+   - `NEXT_PUBLIC_FIREBASE_API_KEY`
+   - `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+   - `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+   - `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+4. Keep any secrets out of the client bundle. Only variables prefixed with `NEXT_PUBLIC_` are exposed to the browser.
+
 ## Features
 
 - Modern landing page with navbar

@@ -410,9 +410,14 @@ function normalizeTeamData(data: Record<string, unknown>, teamIdFallback: string
 async function loadTeamDocumentByTeamId(teamId: string): Promise<Record<string, unknown> | null> {
   const db = getFirestore();
 
-  const directDocument = await getDoc(doc(db, 'teams', teamId));
-  if (directDocument.exists()) {
-    return directDocument.data();
+  try {
+    const directDocument = await getDoc(doc(db, 'teams', teamId));
+    if (directDocument.exists()) {
+      return directDocument.data();
+    }
+  } catch {
+    // Some roles can list team documents but cannot read them directly by id.
+    // Fall back to the indexed query below so company views can still load.
   }
 
   const teamQuery = query(collection(db, 'teams'), where('teamId', '==', teamId));
@@ -523,6 +528,22 @@ export async function loadUserTeamWorkspaces(userId: string): Promise<TeamWorksp
   const teamIds = Array.from(new Set(snapshot.docs.map((document) => asString(document.data().teamId)).filter(Boolean)));
   const teams = await Promise.all(teamIds.map((teamId) => loadTeamWorkspaceByTeamId(teamId)));
 
+  return teams.filter((team): team is TeamWorkspace => Boolean(team));
+}
+
+export async function loadAllTeamWorkspaces(): Promise<TeamWorkspace[]> {
+  const db = getFirestore();
+  const snapshot = await getDocs(collection(db, 'teams'));
+
+  const teamIds = Array.from(
+    new Set(
+      snapshot.docs
+        .map((document) => asString(document.data().teamId, document.id))
+        .filter(Boolean),
+    ),
+  );
+
+  const teams = await Promise.all(teamIds.map((teamId) => loadTeamWorkspaceByTeamId(teamId)));
   return teams.filter((team): team is TeamWorkspace => Boolean(team));
 }
 

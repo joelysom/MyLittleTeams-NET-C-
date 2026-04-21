@@ -7,7 +7,7 @@ import { auth } from '../../lib/firebase';
 import AppShell from '../../components/AppShell';
 import { DEFAULT_AVATAR, type AvatarComponents } from '../../lib/avatarService';
 import { getUserProfileService } from '../../lib/userProfileService';
-import { appNavItems, getAppNavIdFromPath, type AppNavId } from '../../lib/appNavigation';
+import { appNavItems, companyNavItems, getAppNavIdFromPath, getCompanyNavIdFromPath, type AppNavId } from '../../lib/appNavigation';
 
 interface User {
   uid: string;
@@ -15,6 +15,7 @@ interface User {
   displayName?: string;
   avatar: AvatarComponents;
   profilePhotoSource?: string;
+  role?: string;
 }
 
 export default function ProfileLayout({
@@ -26,49 +27,47 @@ export default function ProfileLayout({
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeNav, setActiveNav] = useState<AppNavId>(getAppNavIdFromPath(pathname));
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        setUser({
-          uid: currentUser.uid,
-          email: currentUser.email || '',
-          displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
-          avatar: DEFAULT_AVATAR,
-          profilePhotoSource: '',
-        });
-        setLoading(false);
-
-        void (async () => {
-          try {
-            const profile = await getUserProfileService().getUserProfile(currentUser.uid);
-            if (!profile) {
-              return;
-            }
-
-            setUser({
-              uid: currentUser.uid,
-              email: profile.email || currentUser.email || '',
-              displayName: profile.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
-              avatar: profile.avatar || DEFAULT_AVATAR,
-              profilePhotoSource: profile.profilePhotoSource || profile.profilePhoto || '',
-            });
-          } catch (error) {
-            console.error('Erro ao carregar perfil do usuário:', error);
-          }
-        })();
-      } else {
+      if (!currentUser) {
         router.push('/login');
+        return;
       }
+
+      void (async () => {
+        try {
+          const profile = await getUserProfileService().getUserProfile(currentUser.uid);
+          setUser({
+            uid: currentUser.uid,
+            email: profile?.email || currentUser.email || '',
+            displayName: profile?.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+            avatar: profile?.avatar || DEFAULT_AVATAR,
+            profilePhotoSource: profile?.profilePhotoSource || profile?.profilePhoto || '',
+            role: profile?.role || 'student',
+          });
+        } catch (error) {
+          console.error('Erro ao carregar perfil do usuário:', error);
+          setUser({
+            uid: currentUser.uid,
+            email: currentUser.email || '',
+            displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuário',
+            avatar: DEFAULT_AVATAR,
+            profilePhotoSource: '',
+            role: 'student',
+          });
+        } finally {
+          setLoading(false);
+        }
+      })();
     });
 
     return () => unsubscribe();
   }, [router]);
 
-  useEffect(() => {
-    setActiveNav(getAppNavIdFromPath(pathname));
-  }, [pathname]);
+  const isCompanyAccount = user?.role === 'company';
+  const activeNav: AppNavId = isCompanyAccount ? getCompanyNavIdFromPath(pathname) : getAppNavIdFromPath(pathname);
+  const navItems = isCompanyAccount ? companyNavItems : appNavItems;
 
   const handleLogout = async () => {
     try {
@@ -96,8 +95,8 @@ export default function ProfileLayout({
 
   return (
     <AppShell
-      title={headerTitle}
-      navItems={appNavItems}
+      title={isCompanyAccount ? 'Perfil institucional' : headerTitle}
+      navItems={navItems}
       activeNavId={activeNav}
       user={user ? {
         displayName: user.displayName,

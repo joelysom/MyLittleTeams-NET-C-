@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { collection, doc, getDocs, getFirestore, updateDoc } from 'firebase/firestore';
 import AvatarDisplay from '../../../../components/AvatarDisplay';
 import { DEFAULT_AVATAR } from '../../../../lib/avatarService';
+import { useAuth } from '../../../../lib/useAuth';
+import { getUserProfileService, type UserProfile } from '../../../../lib/userProfileService';
 import {
   buildTeamBalanceLabel,
   buildTeamLeadershipLabel,
@@ -64,15 +66,38 @@ const defaultTaskDraft: TaskDraft = {
 export default function TeamWorkspacePage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
+  const user = useAuth();
   const [team, setTeam] = useState<TeamWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentProfile, setCurrentProfile] = useState<UserProfile | null>(null);
   const [boardView, setBoardView] = useState<TeamBoardView>('trello');
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(defaultTaskDraft);
   const [csdDraft, setCsdDraft] = useState<CsdDraft>({ category: 'certainty', text: '' });
   const [saving, setSaving] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [draggedTaskCard, setDraggedTaskCard] = useState<{ cardId: string; fromColumnId: string } | null>(null);
   const [draggedCsdNote, setDraggedCsdNote] = useState<{ bucket: 'certainties' | 'assumptions' | 'doubts'; index: number } | null>(null);
+  const isCompanyViewer = currentProfile?.role === 'company';
+
+  useEffect(() => {
+    const loadCurrentProfile = async () => {
+      if (!user) {
+        return;
+      }
+
+      try {
+        const profile = await getUserProfileService().getUserProfile(user.uid);
+        setCurrentProfile(profile);
+      } catch (error) {
+        console.error('Erro ao carregar perfil atual:', error);
+      } finally {
+        setProfileLoaded(true);
+      }
+    };
+
+    void loadCurrentProfile();
+  }, [user]);
 
   useEffect(() => {
     const teamId = params?.teamId;
@@ -367,7 +392,7 @@ export default function TeamWorkspacePage() {
     }
   };
 
-  if (loading) {
+  if (loading || (user && !profileLoaded)) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -397,6 +422,133 @@ export default function TeamWorkspacePage() {
   }
 
   const teamLogoSource = getTeamLogoSource(team);
+
+  if (isCompanyViewer) {
+    const studentMembersView = getStudentTeamMembers(team);
+    const facultyMembersView = getFacultyTeamMembers(team);
+    const assetCount = team.assets.length;
+    const milestoneCount = team.milestones.length;
+
+    return (
+      <div className="space-y-6 pb-10">
+        <div className="rounded-[2rem] border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="flex flex-col gap-6 border-b border-slate-200 bg-gradient-to-r from-slate-50 via-blue-50 to-indigo-50 p-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex items-start gap-5">
+              <button
+                onClick={() => router.push('/dashboard/projetos')}
+                className="mt-1 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+                title="Voltar"
+              >
+                <ArrowLeft size={18} />
+              </button>
+
+              <div className="relative">
+                {teamLogoSource ? (
+                  <img
+                    src={teamLogoSource}
+                    alt={team.teamName}
+                    className="h-20 w-20 rounded-2xl border border-white object-cover shadow-lg"
+                  />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-2xl font-bold text-white shadow-lg">
+                    {team.teamName.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+              </div>
+
+              <div className="max-w-4xl">
+                <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-600">Visualização da empresa</p>
+                <h1 className="mt-2 text-3xl font-black text-slate-900 md:text-4xl">{team.teamName}</h1>
+                <p className="mt-2 text-sm text-slate-600">{team.course} • {team.className || 'Turma não informada'} • {team.academicTerm || 'sem semestre'}</p>
+                <p className="mt-3 text-sm text-slate-600">{buildTeamBalanceLabel(team)}</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <a
+                href="/dashboard/chats"
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                Conversar
+              </a>
+              <a
+                href="/dashboard/contato-institucional"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Contato institucional
+              </a>
+            </div>
+          </div>
+
+          <div className="grid gap-4 p-6 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard icon={Users} label="Discentes" value={studentMembersView.length.toString()} subtitle="Equipe de execução" accent="from-blue-500 to-blue-600" />
+            <MetricCard icon={Settings2} label="Docentes" value={facultyMembersView.length.toString()} subtitle="Professor focal e orientadores" accent="from-violet-500 to-violet-600" />
+            <MetricCard icon={SquareKanban} label="Arquivos" value={assetCount.toString()} subtitle="Materiais visíveis" accent="from-emerald-500 to-emerald-600" />
+            <MetricCard icon={Calendar} label="Marcos" value={milestoneCount.toString()} subtitle={`${counts.overdue} em atraso`} accent="from-amber-500 to-amber-600" />
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <section className="space-y-6">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-2xl font-bold text-slate-900">Membros do projeto</h2>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {studentMembersView.map((member) => (
+                  <span key={member.userId || member.name} className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                    {member.name}
+                  </span>
+                ))}
+                {facultyMembersView.map((member) => (
+                  <span key={member.userId || member.name} className="rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                    {member.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-2xl font-bold text-slate-900">Arquivos</h2>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {team.assets.slice(0, 8).map((asset) => (
+                  <div key={asset.assetId} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">{asset.fileName || 'Arquivo'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{asset.category || 'Material'} • {asset.description || 'Sem descrição'}</p>
+                  </div>
+                ))}
+                {team.assets.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">Nenhum arquivo anexado.</p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <aside className="space-y-4">
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-900">Resumo</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{buildTeamProfessorFocusLabel(team)}</p>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{buildTeamLeadershipLabel(team)}</p>
+              <p className="mt-3 text-sm leading-6 text-slate-600">{team.teacherNotes || 'Sem observações adicionais.'}</p>
+            </div>
+
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-900">Marcos recentes</h2>
+              <div className="mt-4 space-y-3">
+                {team.milestones.slice(0, 5).map((milestone) => (
+                  <div key={milestone.id} className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm font-semibold text-slate-900">{milestone.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{milestone.status}</p>
+                  </div>
+                ))}
+                {team.milestones.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">Nenhum marco registrado.</p>
+                ) : null}
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-10">
