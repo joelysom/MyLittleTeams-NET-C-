@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -32,16 +34,23 @@ namespace MeuApp
         }
 
         private static readonly HttpClient httpClient = new HttpClient();
+        private static readonly JsonSerializerOptions SavedLoginJsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        private const string SavedLoginAccountsFileName = "saved-login-accounts.json";
+        private readonly List<SavedLoginAccount> _savedLoginAccounts = new List<SavedLoginAccount>();
         private bool _loginDarkModeEnabled;
+        private bool _showManualLogin = true;
 
         public LoginWindow()
         {
             InitializeComponent();
             _loginDarkModeEnabled = AccessibilityPreferences.DarkModeEnabled;
+            LoadSavedLoginAccounts();
+            _showManualLogin = _savedLoginAccounts.Count == 0;
             ApplyLoginTheme();
             UpdateProfessorSignupFieldsVisibility();
             UpdateTabVisualState();
             UpdateLoginAccessibilityPanelState();
+            RenderSavedAccountsPanel();
         }
 
         protected override void OnAccessibilitySettingsChanged(AccessibilitySettings settings)
@@ -131,6 +140,7 @@ namespace MeuApp
 
             Background = GetThemeBrushFromResources("LoginWindowBackgroundBrush", Color.FromRgb(255, 255, 255));
             UpdateTabVisualState();
+            RenderSavedAccountsPanel();
         }
 
         private void SetBrushResource(string key, Color color)
@@ -303,6 +313,532 @@ namespace MeuApp
             }
         }
 
+        private static string SavedLoginAccountsPath
+        {
+            get
+            {
+                var folder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "Choas");
+
+                return Path.Combine(folder, SavedLoginAccountsFileName);
+            }
+        }
+
+        private void LoadSavedLoginAccounts()
+        {
+            _savedLoginAccounts.Clear();
+
+            try
+            {
+                var path = SavedLoginAccountsPath;
+                if (!File.Exists(path))
+                {
+                    return;
+                }
+
+                var content = File.ReadAllText(path);
+                var accounts = JsonSerializer.Deserialize<List<SavedLoginAccount>>(content) ?? new List<SavedLoginAccount>();
+                _savedLoginAccounts.AddRange(accounts
+                    .Where(item => item != null
+                        && !string.IsNullOrWhiteSpace(item.UserId)
+                        && !string.IsNullOrWhiteSpace(item.ProtectedRefreshToken))
+                    .GroupBy(item => item.UserId, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.OrderByDescending(item => item.LastSignedInAt).First())
+                    .OrderByDescending(item => item.LastSignedInAt));
+            }
+            catch
+            {
+                _savedLoginAccounts.Clear();
+            }
+        }
+
+        private void PersistSavedLoginAccounts()
+        {
+            try
+            {
+                var path = SavedLoginAccountsPath;
+                Directory.CreateDirectory(Path.GetDirectoryName(path) ?? string.Empty);
+                File.WriteAllText(path, JsonSerializer.Serialize(_savedLoginAccounts, SavedLoginJsonOptions));
+            }
+            catch
+            {
+                // Login still works even when the local device cannot persist the account list.
+            }
+        }
+
+        private void RenderSavedAccountsPanel()
+        {
+            if (SavedAccountsContent == null || SavedAccountsListPanel == null || ManualLoginFieldsPanel == null)
+            {
+                return;
+            }
+
+            SavedAccountsListPanel.Children.Clear();
+
+            var accounts = _savedLoginAccounts
+                .Where(item => item != null
+                    && !string.IsNullOrWhiteSpace(item.UserId)
+                    && !string.IsNullOrWhiteSpace(item.ProtectedRefreshToken))
+                .OrderByDescending(item => item.LastSignedInAt)
+                .ToList();
+
+            if (accounts.Count != _savedLoginAccounts.Count)
+            {
+                _savedLoginAccounts.Clear();
+                _savedLoginAccounts.AddRange(accounts);
+                PersistSavedLoginAccounts();
+            }
+
+            var hasSavedAccounts = accounts.Count > 0;
+            if (!hasSavedAccounts)
+            {
+                _showManualLogin = true;
+            }
+
+            SavedAccountsContent.Visibility = hasSavedAccounts ? Visibility.Visible : Visibility.Collapsed;
+            ManualLoginFieldsPanel.Visibility = _showManualLogin || !hasSavedAccounts
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (AddAnotherAccountButton != null)
+            {
+                AddAnotherAccountButton.Content = _showManualLogin && hasSavedAccounts
+                    ? "Usar conta salva"
+                    : "Adicionar outra conta";
+            }
+
+            if (ClearSavedAccountsButton != null)
+            {
+                ClearSavedAccountsButton.Visibility = hasSavedAccounts ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            foreach (var account in accounts)
+            {
+                SavedAccountsListPanel.Children.Add(CreateSavedAccountCard(account));
+            }
+        }
+
+        private Border CreateSavedAccountCard(SavedLoginAccount account)
+        {
+            var card = new Border
+            {
+                Background = GetThemeBrushFromResources("LoginSurfaceAltBrush", Color.FromRgb(248, 250, 252)),
+                BorderBrush = GetThemeBrushFromResources("LoginBorderBrush", Color.FromRgb(229, 231, 235)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var avatar = CreateSavedAccountAvatar(account, 48);
+            Grid.SetColumn(avatar, 0);
+            layout.Children.Add(avatar);
+
+            var content = new StackPanel
+            {
+                Margin = new Thickness(12, 0, 0, 0)
+            };
+
+            content.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(account.Name) ? account.Email : account.Name,
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrushFromResources("LoginPrimaryTextBrush", Color.FromRgb(31, 31, 31)),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            content.Children.Add(new TextBlock
+            {
+                Text = BuildSavedAccountSubtitle(account),
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 0),
+                Foreground = GetThemeBrushFromResources("LoginSecondaryTextBrush", Color.FromRgb(113, 113, 113)),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            var actions = new WrapPanel
+            {
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+
+            var continueButton = CreateSavedAccountActionButton("Continuar", true);
+            continueButton.Tag = account;
+            continueButton.Click += ContinueSavedAccount_Click;
+            actions.Children.Add(continueButton);
+
+            var removeButton = CreateSavedAccountActionButton("Remover", false);
+            removeButton.Tag = account;
+            removeButton.Click += RemoveSavedAccount_Click;
+            actions.Children.Add(removeButton);
+
+            content.Children.Add(actions);
+            Grid.SetColumn(content, 1);
+            layout.Children.Add(content);
+
+            card.Child = layout;
+            return card;
+        }
+
+        private Button CreateSavedAccountActionButton(string label, bool primary)
+        {
+            return new Button
+            {
+                Content = label,
+                Height = 34,
+                MinWidth = primary ? 108 : 96,
+                Padding = new Thickness(14, 6, 14, 6),
+                Margin = new Thickness(0, 0, 8, 0),
+                Background = primary
+                    ? GetThemeBrushFromResources("LoginAccentBrush", Color.FromRgb(0, 120, 212))
+                    : GetThemeBrushFromResources("LoginSurfaceBrush", Color.FromRgb(255, 255, 255)),
+                Foreground = primary
+                    ? Brushes.White
+                    : GetThemeBrushFromResources("LoginPrimaryTextBrush", Color.FromRgb(31, 31, 31)),
+                BorderBrush = primary
+                    ? Brushes.Transparent
+                    : GetThemeBrushFromResources("LoginBorderBrush", Color.FromRgb(229, 231, 235)),
+                BorderThickness = primary ? new Thickness(0) : new Thickness(1),
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand
+            };
+        }
+
+        private UIElement CreateSavedAccountAvatar(SavedLoginAccount account, double size)
+        {
+            var border = new Border
+            {
+                Width = size,
+                Height = size,
+                CornerRadius = new CornerRadius(size / 2),
+                Background = GetThemeBrushFromResources("LoginInfoCardBrush", Color.FromRgb(247, 250, 255)),
+                BorderBrush = GetThemeBrushFromResources("LoginInfoCardBorderBrush", Color.FromRgb(215, 231, 255)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var imageSource = TryCreateImageSourceFromDataUri(account.ProfilePhotoDataUri);
+            if (imageSource != null)
+            {
+                border.Background = new ImageBrush(imageSource)
+                {
+                    Stretch = Stretch.UniformToFill
+                };
+
+                return border;
+            }
+
+            border.Child = new TextBlock
+            {
+                Text = BuildInitials(account.Name, account.Email),
+                FontSize = 15,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = GetThemeBrushFromResources("LoginAccentBrush", Color.FromRgb(0, 120, 212)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            return border;
+        }
+
+        private static string BuildSavedAccountSubtitle(SavedLoginAccount account)
+        {
+            var role = TeamPermissionService.IsProfessorLike(account.Role) ? "Professor" : "Aluno";
+            var email = account.Email ?? string.Empty;
+            var course = account.Course ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(course))
+            {
+                return $"{role} - {course} - {email}";
+            }
+
+            return $"{role} - {email}";
+        }
+
+        private static string BuildInitials(string? name, string? email)
+        {
+            var source = !string.IsNullOrWhiteSpace(name) ? name : email;
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                return "CH";
+            }
+
+            var words = source
+                .Replace("@", " ")
+                .Replace(".", " ")
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (words.Length == 0)
+            {
+                return "CH";
+            }
+
+            return string.Concat(words.Take(2).Select(word => char.ToUpperInvariant(word[0])));
+        }
+
+        private ImageSource? TryCreateImageSourceFromDataUri(string? dataUri)
+        {
+            if (string.IsNullOrWhiteSpace(dataUri))
+            {
+                return null;
+            }
+
+            try
+            {
+                var commaIndex = dataUri.IndexOf(',');
+                if (commaIndex < 0 || commaIndex >= dataUri.Length - 1)
+                {
+                    return null;
+                }
+
+                var bytes = Convert.FromBase64String(dataUri[(commaIndex + 1)..]);
+                using var memoryStream = new MemoryStream(bytes);
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = memoryStream;
+                bitmap.EndInit();
+
+                if (bitmap.CanFreeze)
+                {
+                    bitmap.Freeze();
+                }
+
+                return bitmap;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void AddAnotherAccount_Click(object sender, RoutedEventArgs e)
+        {
+            if (_savedLoginAccounts.Count == 0)
+            {
+                _showManualLogin = true;
+            }
+            else
+            {
+                _showManualLogin = !_showManualLogin;
+            }
+
+            RenderSavedAccountsPanel();
+
+            if (_showManualLogin)
+            {
+                LoginEmail.Focus();
+            }
+        }
+
+        private void ClearSavedAccounts_Click(object sender, RoutedEventArgs e)
+        {
+            _savedLoginAccounts.Clear();
+            _showManualLogin = true;
+            PersistSavedLoginAccounts();
+            RenderSavedAccountsPanel();
+        }
+
+        private void RemoveSavedAccount_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not SavedLoginAccount account)
+            {
+                return;
+            }
+
+            RemoveSavedAccount(account.UserId, account.Email);
+        }
+
+        private void RemoveSavedAccount(string? userId, string? email)
+        {
+            _savedLoginAccounts.RemoveAll(item =>
+                (!string.IsNullOrWhiteSpace(userId) && string.Equals(item.UserId, userId, StringComparison.OrdinalIgnoreCase))
+                || (!string.IsNullOrWhiteSpace(email) && string.Equals(item.Email, email, StringComparison.OrdinalIgnoreCase)));
+
+            _showManualLogin = _savedLoginAccounts.Count == 0;
+            PersistSavedLoginAccounts();
+            RenderSavedAccountsPanel();
+        }
+
+        private async void ContinueSavedAccount_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not SavedLoginAccount account)
+            {
+                return;
+            }
+
+            var refreshToken = UnprotectRefreshToken(account.ProtectedRefreshToken);
+            if (string.IsNullOrWhiteSpace(refreshToken))
+            {
+                RemoveSavedAccount(account.UserId, account.Email);
+                MessageBox.Show("Esta conta salva nao pode mais ser lida neste usuario do Windows. Entre novamente para salva-la.", "Conta removida", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            try
+            {
+                Mouse.OverrideCursor = Cursors.Wait;
+                IsEnabled = false;
+
+                var authResult = await FirebaseRefreshTokenAsync(refreshToken);
+                if (!authResult.Success || string.IsNullOrWhiteSpace(authResult.IdToken))
+                {
+                    var connectionIssue = IsConnectionError(authResult.ErrorMessage);
+                    if (!connectionIssue)
+                    {
+                        RemoveSavedAccount(account.UserId, account.Email);
+                        LoginEmail.Text = account.Email ?? string.Empty;
+                        _showManualLogin = true;
+                        RenderSavedAccountsPanel();
+                    }
+
+                    MessageBox.Show(
+                        connectionIssue
+                            ? "Nao foi possivel validar a conta salva agora. Verifique a conexao e tente novamente."
+                            : "A sessao salva expirou ou foi revogada. Entre novamente para salvar a conta.",
+                        "Nao foi possivel continuar",
+                        MessageBoxButton.OK,
+                        connectionIssue ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(authResult.LocalId))
+                {
+                    authResult.LocalId = account.UserId;
+                }
+
+                if (string.IsNullOrWhiteSpace(authResult.Email))
+                {
+                    authResult.Email = account.Email;
+                }
+
+                if (string.IsNullOrWhiteSpace(authResult.RefreshToken))
+                {
+                    authResult.RefreshToken = refreshToken;
+                }
+
+                var profile = await GetUserProfileAsync(authResult.LocalId!, authResult.IdToken!)
+                    ?? CreateProfileFromSavedAccount(account, authResult.LocalId!);
+
+                RememberAuthenticatedAccount(authResult, profile, account.Email);
+                OpenAuthenticatedMainWindow(profile, authResult.IdToken!);
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+                IsEnabled = true;
+            }
+        }
+
+        private static string ProtectRefreshToken(string refreshToken)
+        {
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(refreshToken);
+                var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+                return Convert.ToBase64String(protectedBytes);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string? UnprotectRefreshToken(string? protectedRefreshToken)
+        {
+            if (string.IsNullOrWhiteSpace(protectedRefreshToken))
+            {
+                return null;
+            }
+
+            try
+            {
+                var protectedBytes = Convert.FromBase64String(protectedRefreshToken);
+                var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void RememberAuthenticatedAccount(AuthResult authResult, UserProfile profile, string? fallbackEmail = null)
+        {
+            if (string.IsNullOrWhiteSpace(authResult.LocalId) || string.IsNullOrWhiteSpace(authResult.RefreshToken))
+            {
+                return;
+            }
+
+            var protectedRefreshToken = ProtectRefreshToken(authResult.RefreshToken);
+            if (string.IsNullOrWhiteSpace(protectedRefreshToken))
+            {
+                return;
+            }
+
+            var account = new SavedLoginAccount
+            {
+                UserId = authResult.LocalId,
+                Email = string.IsNullOrWhiteSpace(profile.Email) ? fallbackEmail ?? authResult.Email ?? string.Empty : profile.Email,
+                Name = profile.Name ?? string.Empty,
+                Role = TeamPermissionService.NormalizeRole(profile.Role),
+                Course = profile.Course ?? string.Empty,
+                Registration = profile.Registration ?? string.Empty,
+                ProfilePhotoDataUri = profile.ProfilePhotoDataUri ?? string.Empty,
+                AvatarBody = profile.AvatarBody ?? string.Empty,
+                AvatarHair = profile.AvatarHair ?? string.Empty,
+                AvatarHat = profile.AvatarHat ?? string.Empty,
+                AvatarAccessory = profile.AvatarAccessory ?? string.Empty,
+                AvatarClothing = profile.AvatarClothing ?? string.Empty,
+                ProtectedRefreshToken = protectedRefreshToken,
+                LastSignedInAt = DateTime.UtcNow
+            };
+
+            _savedLoginAccounts.RemoveAll(item =>
+                string.Equals(item.UserId, account.UserId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Email, account.Email, StringComparison.OrdinalIgnoreCase));
+            _savedLoginAccounts.Insert(0, account);
+
+            while (_savedLoginAccounts.Count > 8)
+            {
+                _savedLoginAccounts.RemoveAt(_savedLoginAccounts.Count - 1);
+            }
+
+            _showManualLogin = false;
+            PersistSavedLoginAccounts();
+            RenderSavedAccountsPanel();
+        }
+
+        private static UserProfile CreateProfileFromSavedAccount(SavedLoginAccount account, string localId)
+        {
+            return new UserProfile
+            {
+                UserId = localId,
+                Name = string.IsNullOrWhiteSpace(account.Name) ? account.Email : account.Name,
+                Email = account.Email ?? string.Empty,
+                Course = account.Course ?? string.Empty,
+                Registration = account.Registration ?? string.Empty,
+                Role = TeamPermissionService.NormalizeRole(account.Role),
+                ProfilePhotoDataUri = account.ProfilePhotoDataUri ?? string.Empty,
+                AvatarBody = account.AvatarBody ?? string.Empty,
+                AvatarHair = account.AvatarHair ?? string.Empty,
+                AvatarHat = account.AvatarHat ?? string.Empty,
+                AvatarAccessory = account.AvatarAccessory ?? string.Empty,
+                AvatarClothing = account.AvatarClothing ?? string.Empty
+            };
+        }
+
+        private void OpenAuthenticatedMainWindow(UserProfile profile, string idToken)
+        {
+            var mainWindow = new MainWindow(profile, idToken ?? string.Empty);
+            mainWindow.Show();
+            Close();
+        }
+
         private async void LoginButton_Click(object sender, RoutedEventArgs e)
         {
             string email = LoginEmail.Text;
@@ -359,11 +895,21 @@ namespace MeuApp
                     }
 
                     var bootstrapProfile = CreateBootstrapProfile(loginResult, email);
+                    var keepConnected = KeepConnectedCheckBox.IsChecked == true;
+                    if (keepConnected)
+                    {
+                        RememberAuthenticatedAccount(loginResult, bootstrapProfile, email);
+                    }
+                    else
+                    {
+                        RemoveSavedAccount(loginResult.LocalId, email);
+                    }
+
                     var mainWindow = new MainWindow(bootstrapProfile, loginResult.IdToken ?? string.Empty);
                     mainWindow.Show();
                     this.Close();
 
-                    _ = HydrateProfileAfterLoginAsync(mainWindow, loginResult.LocalId!, loginResult.IdToken!, bootstrapProfile);
+                    _ = HydrateProfileAfterLoginAsync(mainWindow, loginResult.LocalId!, loginResult.IdToken!, bootstrapProfile, keepConnected ? loginResult : null);
                 }
                 finally
                 {
@@ -437,17 +983,25 @@ namespace MeuApp
                 : "Aluno";
         }
 
-        private async Task HydrateProfileAfterLoginAsync(MainWindow mainWindow, string localId, string idToken, UserProfile fallbackProfile)
+        private async Task HydrateProfileAfterLoginAsync(MainWindow mainWindow, string localId, string idToken, UserProfile fallbackProfile, AuthResult? rememberAuthResult = null)
         {
+            var effectiveProfile = fallbackProfile;
+
             try
             {
                 var profile = await GetUserProfileAsync(localId, idToken) ?? fallbackProfile;
+                effectiveProfile = profile;
 
                 await mainWindow.Dispatcher.InvokeAsync(() => mainWindow.UpdateUserProfile(profile));
             }
             catch
             {
                 await mainWindow.Dispatcher.InvokeAsync(() => mainWindow.UpdateUserProfile(fallbackProfile));
+            }
+
+            if (rememberAuthResult != null)
+            {
+                RememberAuthenticatedAccount(rememberAuthResult, effectiveProfile, fallbackProfile.Email);
             }
         }
 
@@ -524,6 +1078,14 @@ namespace MeuApp
                     MessageBox.Show($"Não foi possível salvar o perfil: {saveResult.ErrorMessage}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
+                if (SignupKeepConnectedCheckBox.IsChecked == true)
+                {
+                    RememberAuthenticatedAccount(signupResult, profile, email);
+                }
+                else
+                {
+                    RemoveSavedAccount(signupResult.LocalId, email);
+                }
 
                 var mainWindow = new MainWindow(profile, signupResult.IdToken ?? string.Empty);
                 mainWindow.Show();
@@ -560,7 +1122,9 @@ namespace MeuApp
                         Success = true,
                         IdToken = json.GetProperty("idToken").GetString(),
                         LocalId = json.GetProperty("localId").GetString(),
-                        Email = json.GetProperty("email").GetString()
+                        Email = json.GetProperty("email").GetString(),
+                        RefreshToken = json.TryGetProperty("refreshToken", out var refreshToken) ? refreshToken.GetString() : null,
+                        ExpiresIn = json.TryGetProperty("expiresIn", out var expiresIn) ? expiresIn.GetString() : null
                     };
                 }
 
@@ -576,6 +1140,57 @@ namespace MeuApp
                 catch
                 {
                     return new AuthResult { Success = false, ErrorMessage = "Erro desconhecido no login Firebase" };
+                }
+            }
+            catch (HttpRequestException)
+            {
+                return new AuthResult { Success = false, ErrorMessage = "NETWORK_ERROR" };
+            }
+            catch (TaskCanceledException)
+            {
+                return new AuthResult { Success = false, ErrorMessage = "NETWORK_TIMEOUT" };
+            }
+        }
+
+        private async Task<AuthResult> FirebaseRefreshTokenAsync(string refreshToken)
+        {
+            try
+            {
+                var endpoint = $"https://securetoken.googleapis.com/v1/token?key={AppConfig.FirebaseApiKey}";
+                var payload = new FormUrlEncodedContent(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "refresh_token",
+                    ["refresh_token"] = refreshToken
+                });
+
+                var response = await httpClient.PostAsync(endpoint, payload);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    return new AuthResult
+                    {
+                        Success = true,
+                        IdToken = json.GetProperty("id_token").GetString(),
+                        LocalId = json.GetProperty("user_id").GetString(),
+                        RefreshToken = json.TryGetProperty("refresh_token", out var newRefreshToken) ? newRefreshToken.GetString() : refreshToken,
+                        ExpiresIn = json.TryGetProperty("expires_in", out var expiresIn) ? expiresIn.GetString() : null
+                    };
+                }
+
+                try
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    return new AuthResult
+                    {
+                        Success = false,
+                        ErrorMessage = json.GetProperty("error").GetProperty("message").GetString() ?? "TOKEN_REFRESH_FAILED"
+                    };
+                }
+                catch
+                {
+                    return new AuthResult { Success = false, ErrorMessage = "TOKEN_REFRESH_FAILED" };
                 }
             }
             catch (HttpRequestException)
@@ -942,7 +1557,9 @@ namespace MeuApp
                     Success = true,
                     IdToken = json.GetProperty("idToken").GetString(),
                     LocalId = json.GetProperty("localId").GetString(),
-                    Email = json.GetProperty("email").GetString()
+                    Email = json.GetProperty("email").GetString(),
+                    RefreshToken = json.TryGetProperty("refreshToken", out var refreshToken) ? refreshToken.GetString() : null,
+                    ExpiresIn = json.TryGetProperty("expiresIn", out var expiresIn) ? expiresIn.GetString() : null
                 };
             }
 
@@ -1205,6 +1822,24 @@ namespace MeuApp
 
             return DateTime.MinValue;
         }
+
+        private sealed class SavedLoginAccount
+        {
+            public string UserId { get; set; } = string.Empty;
+            public string Email { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public string Role { get; set; } = "student";
+            public string Course { get; set; } = string.Empty;
+            public string Registration { get; set; } = string.Empty;
+            public string ProfilePhotoDataUri { get; set; } = string.Empty;
+            public string AvatarBody { get; set; } = string.Empty;
+            public string AvatarHair { get; set; } = string.Empty;
+            public string AvatarHat { get; set; } = string.Empty;
+            public string AvatarAccessory { get; set; } = string.Empty;
+            public string AvatarClothing { get; set; } = string.Empty;
+            public string ProtectedRefreshToken { get; set; } = string.Empty;
+            public DateTime LastSignedInAt { get; set; } = DateTime.UtcNow;
+        }
     }
 
     public class UserProfile
@@ -1267,6 +1902,8 @@ namespace MeuApp
         public string? IdToken { get; set; }
         public string? LocalId { get; set; }
         public string? Email { get; set; }
+        public string? RefreshToken { get; set; }
+        public string? ExpiresIn { get; set; }
         public string? ErrorMessage { get; set; }
     }
 }

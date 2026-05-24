@@ -152,6 +152,7 @@ namespace MeuApp
 
         private void ApplyAccessibilitySettings(AccessibilitySettings settings)
         {
+            App.ApplyGlobalTheme(settings);
             ApplyTextScale(settings.TextScalePercent);
             OnAccessibilitySettingsChanged(settings);
         }

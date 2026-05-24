@@ -3,89 +3,85 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:mah="clr-namespace:MahApps.Metro.Controls;assembly=MahApps.Metro"
     xmlns:local="clr-namespace:MeuApp"
-    Title="Choas | Buscar conexões" Height="500" Width="600"
+    Title="Choas | Buscar conexoes" Height="500" Width="600"
     WindowStartupLocation="CenterOwner"
-    Background="White"
+    Background="{DynamicResource WindowBackgroundBrush}"
     BorderThickness="0"
     ResizeMode="CanResize">
 
-    <Grid Background="White">
+    <Grid Background="{DynamicResource MainContentBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
         <local:WindowTitleBar Grid.Row="0"
-                              Background="White"
-                              BorderBrush="#FFE5E7EB"
+                              Background="{DynamicResource CardBackgroundBrush}"
+                              BorderBrush="{DynamicResource SidebarBorderBrush}"
                               BorderThickness="0,0,0,1"
-                              Foreground="#FF0F172A"
-                              MutedForegroundBrush="#FF64748B"
-                              CommandHoverBrush="#FFF8FAFC"
+                              Foreground="{DynamicResource PrimaryTextBrush}"
+                              MutedForegroundBrush="{DynamicResource SecondaryTextBrush}"
+                              CommandHoverBrush="{DynamicResource SearchBackgroundBrush}"
                               CloseHoverBrush="#FFFEE2E2"
-                              CloseForegroundBrush="#FFDC2626"
-                              AccentBrush="#FF0078D4"
-                              AccentMutedBrush="#FFE8F0FF"
-                              QuickActionsBackgroundBrush="White"
-                              QuickActionsMutedSurfaceBrush="#FFF8FAFC"
-                              QuickActionsBorderBrush="#FFCBD5E1"
-                              WindowCommandsBackground="#FFF8FAFC"
-                              WindowCommandsBorderBrush="#FFCBD5E1"
+                              CloseForegroundBrush="{DynamicResource DangerBrush}"
+                              AccentBrush="{DynamicResource AccentBrush}"
+                              AccentMutedBrush="{DynamicResource AccentMutedBrush}"
+                              QuickActionsBackgroundBrush="{DynamicResource CardBackgroundBrush}"
+                              QuickActionsMutedSurfaceBrush="{DynamicResource MutedCardBackgroundBrush}"
+                              QuickActionsBorderBrush="{DynamicResource CardBorderBrush}"
+                              WindowCommandsBackground="{DynamicResource MutedCardBackgroundBrush}"
+                              WindowCommandsBorderBrush="{DynamicResource CardBorderBrush}"
                               InnerPadding="20,10"
                               TitleBarMinHeight="72">
             <local:WindowTitleBar.HeaderContent>
                 <StackPanel>
-                    <TextBlock Text="Resultados da busca" FontFamily="{StaticResource AppDisplayFontFamily}" FontSize="18" FontWeight="ExtraBold" Foreground="#FF0F172A"/>
-                    <TextBlock Text="Conexões, perfis e atalhos de conversa" FontSize="11" Foreground="#FF64748B"/>
+                    <TextBlock Text="Resultados da busca" FontFamily="{StaticResource AppDisplayFontFamily}" FontSize="18" FontWeight="ExtraBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                    <TextBlock Text="Conexoes, perfis e atalhos de conversa" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}"/>
                 </StackPanel>
             </local:WindowTitleBar.HeaderContent>
         </local:WindowTitleBar>
 
         <StackPanel Grid.Row="1" Orientation="Vertical" Margin="20">
-            <!-- SEARCH HEADER -->
             <StackPanel Orientation="Vertical" Margin="0,0,0,16">
-                <TextBlock Text="🔍 Resultados da busca de conexões" FontSize="18" FontWeight="ExtraBold" Foreground="#FF333333" Margin="0,0,0,8"/>
-                <TextBlock x:Name="SearchQueryText" Text="Buscando por: ..." FontSize="12" Foreground="#FF666666"/>
+                <TextBlock Text="Resultados da busca de conexoes" FontSize="18" FontWeight="ExtraBold" Foreground="{DynamicResource PrimaryTextBrush}" Margin="0,0,0,8"/>
+                <TextBlock x:Name="SearchQueryText" Text="Buscando por: ..." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"/>
             </StackPanel>
 
-            <!-- RESULTS LIST -->
-            <Border Background="#FFF5F5F5" BorderBrush="#FFE0E0E0" BorderThickness="1" CornerRadius="8" Padding="0">
+            <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="0">
                 <ListBox x:Name="ResultsList" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Results}">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="White" BorderBrush="#FFE8E8E8" BorderThickness="0,0,0,1" Padding="16,12" Margin="0">
+                            <Border Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="0,0,0,1" Padding="16,12" Margin="0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- USER INFO -->
                                     <StackPanel Grid.Column="0" Orientation="Vertical">
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                            <Ellipse Width="32" Height="32" Fill="#FF0078D4" VerticalAlignment="Top" Margin="0,0,12,0"/>
+                                            <Ellipse Width="32" Height="32" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Top" Margin="0,0,12,0"/>
                                             <StackPanel Orientation="Vertical" VerticalAlignment="Top">
-                                                <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="#FF333333"/>
-                                                <TextBlock Text="{Binding Email}" FontSize="11" Foreground="#FF999999" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                                <TextBlock Text="{Binding Email}" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,2,0,0"/>
                                             </StackPanel>
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal" Margin="44,0,0,0">
                                             <StackPanel Orientation="Vertical">
-                                                <TextBlock Text="Matrícula" FontSize="10" Foreground="#FF999999"/>
-                                                <TextBlock Text="{Binding Registration}" FontSize="11" FontWeight="SemiBold" Foreground="#FF333333"/>
+                                                <TextBlock Text="Matricula" FontSize="10" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                                <TextBlock Text="{Binding Registration}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                             </StackPanel>
                                             <StackPanel Orientation="Vertical" Margin="16,0,0,0">
-                                                <TextBlock Text="Curso" FontSize="10" Foreground="#FF999999"/>
-                                                <TextBlock Text="{Binding Course}" FontSize="11" FontWeight="SemiBold" Foreground="#FF333333"/>
+                                                <TextBlock Text="Curso" FontSize="10" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                                <TextBlock Text="{Binding Course}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </StackPanel>
 
-                                    <!-- ACTIONS -->
                                     <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center">
-                                        <Button Content="Conversar" Background="#FF0078D4" Foreground="White" FontSize="11" Padding="10,6" BorderThickness="0" Cursor="Hand" Click="StartConversation_Click" Tag="{Binding UserId}" Margin="0,0,0,8"/>
-                                        <Button Content="Detalhes" Background="#FFFFFFFF" Foreground="#FF0F172A" FontSize="11" Padding="10,6" BorderBrush="#FFCBD5E1" BorderThickness="1" Cursor="Hand" Click="ViewProfile_Click" Margin="0,0,0,8"/>
-                                        <Button Content="{Binding ConnectionButtonLabel}" Background="#FFF8FAFC" Foreground="#FF0F172A" FontSize="11" Padding="10,6" BorderBrush="#FFCBD5E1" BorderThickness="1" Cursor="Hand" IsEnabled="{Binding CanCreateConnection}" Click="AddFriend_Click"/>
+                                        <Button Content="Conversar" Background="{DynamicResource AccentBrush}" Foreground="White" FontSize="11" Padding="10,6" BorderThickness="0" Cursor="Hand" Click="StartConversation_Click" Tag="{Binding UserId}" Margin="0,0,0,8"/>
+                                        <Button Content="Detalhes" Background="{DynamicResource CardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11" Padding="10,6" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Cursor="Hand" Click="ViewProfile_Click" Margin="0,0,0,8"/>
+                                        <Button Content="{Binding ConnectionButtonLabel}" Background="{DynamicResource MutedCardBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" FontSize="11" Padding="10,6" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" Cursor="Hand" IsEnabled="{Binding CanCreateConnection}" Click="AddFriend_Click"/>
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -94,11 +90,8 @@
                 </ListBox>
             </Border>
 
-            <!-- NO RESULTS MESSAGE -->
-            <TextBlock x:Name="NoResultsText" Text="Nenhuma conexão encontrada" FontSize="13" Foreground="#FF999999" TextAlignment="Center" Margin="0,32" Visibility="Collapsed"/>
-
-            <!-- LOADING MESSAGE -->
-            <TextBlock x:Name="LoadingText" Text="Buscando..." FontSize="13" Foreground="#FF0078D4" TextAlignment="Center" Margin="0,32" Visibility="Collapsed"/>
+            <TextBlock x:Name="NoResultsText" Text="Nenhuma conexao encontrada" FontSize="13" Foreground="{DynamicResource SecondaryTextBrush}" TextAlignment="Center" Margin="0,32" Visibility="Collapsed"/>
+            <TextBlock x:Name="LoadingText" Text="Buscando..." FontSize="13" Foreground="{DynamicResource AccentBrush}" TextAlignment="Center" Margin="0,32" Visibility="Collapsed"/>
         </StackPanel>
     </Grid>
 </local:ChromeWindow>

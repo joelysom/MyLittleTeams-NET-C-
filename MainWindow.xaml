@@ -889,7 +889,7 @@
 
                     <Button x:Name="ProfessorNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Professor" ToolTip="Docência" Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="18" Height="18" Foreground="#FF7C3AED" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="ProfessorNavLabel" Text="Docência" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
@@ -1056,7 +1056,7 @@
                             <Border x:Name="TeamsEmptyStateCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="24" Margin="0,0,0,14">
                                 <StackPanel HorizontalAlignment="Center" Width="420">
                                     <TextBlock Text="Sem equipes ativas" FontSize="22" FontWeight="ExtraBold" Foreground="{DynamicResource PrimaryTextBrush}" TextAlignment="Center" Margin="0,0,0,10"/>
-                                    <TextBlock Text="Quando voce criar ou ingressar em uma equipe de projeto por codigo, a organização correspondente aparecera aqui. As turmas da Docência ficam na aba própria." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,18"/>
+                                    <TextBlock Text="Quando voce criar ou ingressar em uma equipe de projeto ou turma por codigo, o contexto correspondente aparecera aqui." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,18"/>
                                     <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="16">
                                         <TextBlock Text="Use o botão de nova equipe no canto superior para criar uma equipe de projeto ou cole um código para o app encaminhar você para Equipes ou Docência, conforme o destino correto." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
                                     </Border>
@@ -1333,8 +1333,8 @@
 
                             <Border x:Name="TeamListCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14" Visibility="Collapsed">
                                 <StackPanel>
-                                    <TextBlock Text="Equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
-                                    <TextBlock Text="Selecione uma equipe para abrir os detalhes, materiais e painéis de gestão." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
+                                    <TextBlock Text="Turmas e equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Abra uma turma para mural, alunos e atividades, ou selecione uma equipe de projeto para detalhes, materiais e paineis de gestao." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
                                     <TextBox x:Name="TeamListSearchBox"
                                              Height="42"
                                              Padding="12,10"
@@ -1404,7 +1404,7 @@
 
                         <StackPanel Orientation="Vertical" Margin="0,0,0,18">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="20" Height="20" Foreground="#FF7C3AED" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="Docência" Style="{StaticResource DisplaySectionTitleStyle}"/>
                             </StackPanel>
                             <TextBlock Text="Abra cada turma em página própria, gerencie alunos e códigos de entrada e mantenha os projetos integradores fora deste fluxo." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>

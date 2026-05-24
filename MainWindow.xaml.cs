@@ -8726,6 +8726,88 @@ namespace MeuApp
             return border;
         }
 
+        private Border CreateTeachingClassMetricCard(string title, string value, string subtitle)
+        {
+            var border = new Border
+            {
+                Width = 180,
+                Margin = new Thickness(0, 0, 12, 12),
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8)
+            };
+
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = value,
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 6, 0, 4),
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 11,
+                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            border.Child = stack;
+            return border;
+        }
+
+        private Border CreateTeachingClassSectionCard(string title, string description, UIElement content, Thickness? margin = null)
+        {
+            var stack = new StackPanel();
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = description,
+                    Margin = new Thickness(0, 8, 0, 0),
+                    FontSize = 12,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                });
+            }
+
+            stack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 16, 0, 0),
+                Child = content
+            });
+
+            return new Border
+            {
+                Margin = margin ?? new Thickness(0, 0, 0, 16),
+                Padding = new Thickness(18),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Child = stack
+            };
+        }
+
         private Button CreateTeamWorkspaceActionButton(string text, Color backgroundColor, RoutedEventHandler onClick, PackIconMaterialKind? iconKind = null)
         {
             var backgroundBrush = new SolidColorBrush(backgroundColor);
@@ -10599,14 +10681,25 @@ namespace MeuApp
 
             var activeQuery = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
             var teamsToRender = ResolveVisibleTeamListResults();
+            var teachingClassesToRender = ResolveVisibleTeachingClasses(activeQuery);
+            var shouldShowTeachingClasses = teachingClassesToRender.Count > 0 || CurrentViewerCanManageTeachingClasses();
+
+            if (shouldShowTeachingClasses)
+            {
+                TeamListPanel.Children.Add(CreateTeachingClassesSectionCard(teachingClassesToRender, activeQuery));
+            }
+
             if (teamsToRender.Count == 0)
             {
-                TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
-                    string.IsNullOrWhiteSpace(activeQuery)
-                        ? CurrentViewerCanUseProfessorDiscovery()
-                            ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
-                            : "Nenhuma equipe de projeto carregada ainda para sua conta."
-                        : $"Nenhuma equipe de projeto encontrada para \"{activeQuery}\"."));
+                if (!shouldShowTeachingClasses)
+                {
+                    TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
+                        string.IsNullOrWhiteSpace(activeQuery)
+                            ? CurrentViewerCanUseProfessorDiscovery()
+                                ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
+                                : "Nenhuma equipe de projeto carregada ainda para sua conta."
+                            : $"Nenhuma equipe de projeto encontrada para \"{activeQuery}\"."));
+                }
 
                 RenderProfileProjectSelection(_currentProfile);
                 RenderCalendarAgenda();
@@ -11636,9 +11729,11 @@ namespace MeuApp
         {
             TeamEntryOptionsPopup.IsOpen = false;
             var hasProjectTeams = _teamWorkspaces.Count > 0;
+            var hasTeachingClasses = _teachingClasses.Count > 0;
+            var hasTeachingAccess = hasTeachingClasses || CurrentViewerCanManageTeachingClasses();
             var hasActiveWorkspace = _activeTeamWorkspace != null;
 
-            TeamsEmptyStateCard.Visibility = !hasProjectTeams && _teamEntryMode == TeamEntryMode.None && !hasActiveWorkspace
+            TeamsEmptyStateCard.Visibility = !hasProjectTeams && !hasTeachingAccess && _teamEntryMode == TeamEntryMode.None && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamJoinCard.Visibility = _teamEntryMode == TeamEntryMode.Join && !hasActiveWorkspace
@@ -11647,7 +11742,7 @@ namespace MeuApp
             TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamListCard.Visibility = !hasActiveWorkspace && (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || CurrentViewerCanManageTeachingClasses())
+            TeamListCard.Visibility = !hasActiveWorkspace && (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || hasTeachingAccess)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamWorkspaceCard.Visibility = hasActiveWorkspace ? Visibility.Visible : Visibility.Collapsed;
@@ -15814,6 +15909,7 @@ namespace MeuApp
             }
 
             ProfessorDashboardHost.Children.Clear();
+            ProfessorDashboardContent.Background = GetTeachingClassTeamsBackgroundBrush();
 
             if (_currentProfile == null)
             {
@@ -15855,7 +15951,7 @@ namespace MeuApp
                     : $"{teachingClasses.Count} turma(s) carregada(s) na Docência. Escolha uma turma pelos cards para acompanhar o mural e os materiais.";
             }
 
-            ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+            ProfessorDashboardStatusText.Foreground = GetTeachingClassTeamsSecondaryTextBrush();
 
             ProfessorDashboardHost.Children.Add(CreateProfessorTeachingWorkspace(teachingClasses));
         }
@@ -17283,8 +17379,8 @@ namespace MeuApp
         {
             var header = new Border
             {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("SidebarBorderBrush"),
+                Background = GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(22, 18, 22, 18)
             };
@@ -17299,7 +17395,7 @@ namespace MeuApp
                 Text = eyebrow,
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = GetThemeBrush("SecondaryTextBrush")
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush()
             });
             titleStack.Children.Add(new TextBlock
             {
@@ -17308,7 +17404,7 @@ namespace MeuApp
                 FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 22,
                 FontWeight = FontWeights.ExtraBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap
             });
             titleStack.Children.Add(new TextBlock
@@ -17316,7 +17412,7 @@ namespace MeuApp
                 Text = description,
                 Margin = new Thickness(0, 8, 0, 0),
                 FontSize = 12,
-                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap,
                 LineHeight = 20,
                 MaxWidth = maxDescriptionWidth
@@ -17334,10 +17430,215 @@ namespace MeuApp
             return header;
         }
 
+        private Border CreateTeachingClassChannelTopBar(TeachingClassInfo teachingClass, Brush accentBrush, bool canManage, bool isAssignmentsModule)
+        {
+            var topBar = new Border
+            {
+                Background = GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(18, 12, 18, 0)
+            };
+
+            var layout = new Grid();
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var identity = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 0, 20, 0)
+            };
+            var badge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 36, false, 13, 1);
+            badge.Margin = new Thickness(0, 0, 10, 0);
+            identity.Children.Add(badge);
+            identity.Children.Add(new StackPanel
+            {
+                MaxWidth = 280,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = isAssignmentsModule ? "Atividades" : "Geral",
+                        FontFamily = GetAppDisplayFontFamily(),
+                        FontSize = 17,
+                        FontWeight = FontWeights.ExtraBold,
+                        Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                        TextWrapping = TextWrapping.Wrap
+                    },
+                    new TextBlock
+                    {
+                        Text = teachingClass.ClassName,
+                        Margin = new Thickness(0, 2, 0, 0),
+                        FontSize = 11,
+                        Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                }
+            });
+            layout.Children.Add(identity);
+
+            var tabs = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Bottom
+            };
+            tabs.Children.Add(CreateTeachingClassTopTabButton(
+                "Postagens",
+                PackIconMaterialKind.MessageTextOutline,
+                accentBrush,
+                !isAssignmentsModule,
+                () =>
+                {
+                    _activeTeachingClassModule = TeachingClassModuleHome;
+                    _ = EnsureTeachingClassHomeFeedAsync(teachingClass);
+                    RenderProfessorDashboard();
+                }));
+            tabs.Children.Add(CreateTeachingClassTopTabButton(
+                "Atividades",
+                PackIconMaterialKind.ClipboardTextOutline,
+                accentBrush,
+                isAssignmentsModule,
+                () =>
+                {
+                    _activeTeachingClassModule = TeachingClassModuleAssignments;
+                    _ = EnsureTeachingClassAssignmentsAsync(teachingClass);
+                    RenderProfessorDashboard();
+                }));
+            tabs.Children.Add(CreateTeachingClassTopTabButton(
+                "Pessoas",
+                PackIconMaterialKind.AccountGroupOutline,
+                accentBrush,
+                false,
+                () => ShowTeachingClassOperationDialog(teachingClass)));
+            Grid.SetColumn(tabs, 1);
+            layout.Children.Add(tabs);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(18, 0, 0, 0)
+            };
+
+            var refreshButton = CreateTeachingClassTopIconButton(PackIconMaterialKind.Refresh, "Atualizar turma");
+            refreshButton.Click += async (_, __) =>
+            {
+                if (ProfessorDashboardStatusText != null)
+                {
+                    ProfessorDashboardStatusText.Text = "Atualizando dados da turma no Firebase...";
+                    ProfessorDashboardStatusText.Foreground = GetThemeBrush("SecondaryTextBrush");
+                }
+
+                if (isAssignmentsModule)
+                {
+                    await EnsureTeachingClassAssignmentsAsync(teachingClass, force: true);
+                }
+                else
+                {
+                    await EnsureTeachingClassHomeFeedAsync(teachingClass, force: true);
+                }
+
+                RenderProfessorDashboard();
+            };
+            actions.Children.Add(refreshButton);
+
+            var menuButton = CreateTeachingClassTopIconButton(PackIconMaterialKind.DotsHorizontal, "Ações da turma");
+            var actionsPopup = CreateTeachingClassActionsPopup(menuButton, _teachingClasses, teachingClass, accentBrush);
+            menuButton.Click += (_, __) => actionsPopup.IsOpen = !actionsPopup.IsOpen;
+            actions.Children.Add(menuButton);
+
+            Grid.SetColumn(actions, 2);
+            layout.Children.Add(actions);
+
+            topBar.Child = layout;
+            return topBar;
+        }
+
+        private Button CreateTeachingClassTopTabButton(string label, PackIconMaterialKind iconKind, Brush accentBrush, bool isActive, Action onClick)
+        {
+            var foreground = isActive ? accentBrush : GetTeachingClassTeamsSecondaryTextBrush();
+            var button = new Button
+            {
+                MinWidth = 108,
+                Padding = new Thickness(12, 10, 12, 0),
+                Margin = new Thickness(0, 0, 4, 0),
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                Focusable = false
+            };
+            button.Click += (_, __) => onClick();
+
+            var content = new StackPanel();
+            content.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Children =
+                {
+                    new PackIconMaterial
+                    {
+                        Kind = iconKind,
+                        Width = 15,
+                        Height = 15,
+                        Foreground = foreground,
+                        VerticalAlignment = VerticalAlignment.Center
+                    },
+                    new TextBlock
+                    {
+                        Text = label,
+                        Margin = new Thickness(7, 0, 0, 0),
+                        FontSize = 12,
+                        FontWeight = isActive ? FontWeights.ExtraBold : FontWeights.SemiBold,
+                        Foreground = foreground,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                }
+            });
+            content.Children.Add(new Border
+            {
+                Height = 3,
+                Margin = new Thickness(0, 10, 0, 0),
+                Background = isActive ? accentBrush : Brushes.Transparent,
+                CornerRadius = new CornerRadius(3, 3, 0, 0)
+            });
+            button.Content = content;
+            return button;
+        }
+
+        private Button CreateTeachingClassTopIconButton(PackIconMaterialKind iconKind, string tooltip)
+        {
+            return new Button
+            {
+                Width = 38,
+                Height = 38,
+                Margin = new Thickness(0, 0, 8, 0),
+                Padding = new Thickness(0),
+                Background = GetTeachingClassTeamsCardBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip,
+                Content = new PackIconMaterial
+                {
+                    Kind = iconKind,
+                    Width = 17,
+                    Height = 17,
+                    Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+        }
+
         private Button CreateTeachingClassHamburgerButton(string tooltip, Brush? lineBrush = null)
         {
             var foreground = lineBrush ?? (_appDarkModeEnabled
-                ? new SolidColorBrush(Color.FromRgb(226, 232, 240))
+                ? GetTeachingClassTeamsPrimaryTextBrush()
                 : new SolidColorBrush(Color.FromRgb(51, 65, 85)));
 
             Border CreateLine(double width)
@@ -18529,29 +18830,143 @@ namespace MeuApp
             return CreateProfessorTeachingDetailArea(teachingClasses);
         }
 
+        private SolidColorBrush GetTeachingClassAccentBrush()
+        {
+            return GetThemeBrush("AccentBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsBackgroundBrush()
+        {
+            return GetThemeBrush("MainContentBackgroundBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsSurfaceBrush()
+        {
+            return GetThemeBrush("SurfaceBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsCardBrush()
+        {
+            return GetThemeBrush("CardBackgroundBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsHoverBrush()
+        {
+            return GetThemeBrush("MutedCardBackgroundBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsBorderBrush()
+        {
+            return GetThemeBrush("CardBorderBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsPrimaryTextBrush()
+        {
+            return GetThemeBrush("PrimaryTextBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTeamsSecondaryTextBrush()
+        {
+            return GetThemeBrush("SecondaryTextBrush");
+        }
+
+        private SolidColorBrush GetTeachingClassTileColorBrush(TeachingClassInfo teachingClass)
+        {
+            return GetThemeBrush("AccentMutedBrush");
+        }
+
         private Border CreateTeachingClassesGalleryWorkspace(List<TeachingClassInfo> teachingClasses)
         {
-            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var accentBrush = GetTeachingClassAccentBrush();
             var canManage = CurrentViewerCanManageTeachingClasses();
-            var layout = new Grid();
-            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            layout.Children.Add(CreateTeachingClassWorkspaceHeader(
-                "Docência",
-                canManage ? "Suas turmas docentes" : "Suas turmas e UCs",
-                canManage
-                    ? "Escolha uma turma pelos cards, como uma entrada de times/canais. Depois disso, a setinha lateral volta para esta galeria inicial das classes."
-                    : "Escolha uma turma pelos cards para acompanhar o mural, os materiais e os avisos publicados para a sala.",
-                teachingClasses,
-                null,
-                accentBrush,
-                760));
+            var root = new Grid
+            {
+                Background = GetTeachingClassTeamsBackgroundBrush()
+            };
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var commandBar = new Grid
+            {
+                Margin = new Thickness(22, 18, 22, 12)
+            };
+            commandBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            commandBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Classes",
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetTeachingClassTeamsPrimaryTextBrush()
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = canManage
+                    ? "Turmas, codigos e mural em um painel direto, sem visual de capa promocional."
+                    : "Escolha uma turma para abrir o mural, as atividades e a lista de pessoas.",
+                Margin = new Thickness(0, 5, 0, 0),
+                FontSize = 11,
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
+                TextWrapping = TextWrapping.Wrap
+            });
+            commandBar.Children.Add(titleStack);
+
+            if (canManage)
+            {
+                var createButton = new Button
+                {
+                    Content = CreateIconLabelContent("Nova turma", PackIconMaterialKind.AccountMultiplePlusOutline, GetTeachingClassTeamsPrimaryTextBrush(), GetTeachingClassTeamsPrimaryTextBrush(), 15, 12, FontWeights.SemiBold),
+                    Height = 34,
+                    Padding = new Thickness(12, 7, 12, 7),
+                    Background = GetTeachingClassTeamsSurfaceBrush(),
+                    Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                    BorderBrush = GetTeachingClassTeamsBorderBrush(),
+                    BorderThickness = new Thickness(1),
+                    Cursor = Cursors.Hand
+                };
+                createButton.Click += (_, __) => OpenTeachingClassComposer(navigateToProfessorSection: false);
+                Grid.SetColumn(createButton, 1);
+                commandBar.Children.Add(createButton);
+            }
+
+            root.Children.Add(commandBar);
+
+            var sectionStack = new StackPanel
+            {
+                Margin = new Thickness(22, 14, 22, 22)
+            };
+            sectionStack.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children =
+                {
+                    new PackIconMaterial
+                    {
+                        Kind = PackIconMaterialKind.ChevronDown,
+                        Width = 15,
+                        Height = 15,
+                        Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
+                        VerticalAlignment = VerticalAlignment.Center
+                    },
+                    new TextBlock
+                    {
+                        Text = "Classes",
+                        Margin = new Thickness(10, 0, 0, 0),
+                        FontSize = 13,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                }
+            });
 
             var cardsWrap = new WrapPanel
             {
-                Margin = new Thickness(24, 24, 24, 24),
-                ItemWidth = 308,
+                Margin = new Thickness(0, 18, 0, 0),
+                ItemWidth = 330,
                 Orientation = Orientation.Horizontal
             };
 
@@ -18559,287 +18974,198 @@ namespace MeuApp
             {
                 cardsWrap.Children.Add(CreateTeachingClassGalleryCard(teachingClass, accentBrush));
             }
+            sectionStack.Children.Add(cardsWrap);
 
             var scrollViewer = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = cardsWrap
+                Content = sectionStack
             };
             Grid.SetRow(scrollViewer, 1);
-            layout.Children.Add(scrollViewer);
+            root.Children.Add(scrollViewer);
 
             return new Border
             {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                Background = GetTeachingClassTeamsBackgroundBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
-                Child = layout
+                CornerRadius = new CornerRadius(4),
+                Child = root
             };
         }
 
-        private Border CreateTeachingClassGalleryCard(TeachingClassInfo teachingClass, Brush accentBrush)
+        private Border CreateTeachingClassTileBadge(TeachingClassInfo teachingClass, double size)
         {
-            var accentSolid = accentBrush as SolidColorBrush ?? new SolidColorBrush(Color.FromRgb(124, 58, 237));
-            var isSelected = string.Equals(_teachingClassGallerySelectionId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
-            var coverSource = TryCreateImageSourceFromDataUri(teachingClass.IconPreviewImageDataUri);
-            var coverChipBackground = GetOverlayContrastBrush(118, 150);
-            var selectedCoverChipBackground = _appDarkModeEnabled ? GetOverlayContrastBrush(255, 204) : Brushes.White;
-            var idleBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 14) : GetThemeBrush("MutedCardBackgroundBrush");
-            var hoverBackground = isSelected ? CreateSoftAccentBrush(accentBrush, 22) : CreateSoftAccentBrush(accentBrush, 10);
-            var idleBorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush");
-            var hoverBorderBrush = accentBrush;
-            var cardLift = new TranslateTransform();
-            var coverScale = new ScaleTransform(1, 1);
-            var coverIdleOverlay = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(Color.FromArgb(isSelected ? (byte)34 : (byte)18, 255, 255, 255), 0),
-                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 0.34),
-                    new GradientStop(Color.FromArgb(176, 15, 23, 42), 1)
-                },
-                new Point(0.05, 0),
-                new Point(0.95, 1));
-            var coverHoverOverlay = new LinearGradientBrush(
-                new GradientStopCollection
-                {
-                    new GradientStop(Color.FromArgb(30, 255, 255, 255), 0),
-                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 0.28),
-                    new GradientStop(Color.FromArgb(132, accentSolid.Color.R, accentSolid.Color.G, accentSolid.Color.B), 1)
-                },
-                new Point(0.05, 0),
-                new Point(0.95, 1));
-            var cardShadow = new DropShadowEffect
+            var imageSource = TryCreateImageSourceFromDataUri(teachingClass.IconPreviewImageDataUri);
+            var badge = new Border
             {
-                Color = Color.FromRgb(15, 23, 42),
-                BlurRadius = isSelected ? 32 : 20,
-                ShadowDepth = 0,
-                Opacity = isSelected ? 0.22 : 0.12
+                Width = size,
+                Height = size,
+                CornerRadius = new CornerRadius(4),
+                Background = GetTeachingClassTileColorBrush(teachingClass),
+                ClipToBounds = true
             };
-            Brush coverBrush = coverSource != null
-                ? new ImageBrush(coverSource)
+
+            if (imageSource != null)
+            {
+                badge.Background = new ImageBrush(imageSource)
                 {
                     Stretch = Stretch.UniformToFill,
                     AlignmentX = AlignmentX.Center,
                     AlignmentY = AlignmentY.Center
-                }
-                : new LinearGradientBrush(
-                    new GradientStopCollection
-                    {
-                        new GradientStop(Color.FromRgb(30, 41, 59), 0),
-                        new GradientStop(accentSolid.Color, 0.58),
-                        new GradientStop(Color.FromRgb(79, 70, 229), 1)
-                    },
-                    new Point(0, 0),
-                    new Point(1, 1));
+                };
+                return badge;
+            }
+
+            badge.Child = new TextBlock
+            {
+                Text = GetTeamInitials(teachingClass.ClassName),
+                FontFamily = GetAppDisplayFontFamily(),
+                FontSize = Math.Max(18, size * 0.32),
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("AccentBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            return badge;
+        }
+
+        private Border CreateTeachingClassGalleryCard(TeachingClassInfo teachingClass, Brush accentBrush)
+        {
+            var isSelected = string.Equals(_teachingClassGallerySelectionId, teachingClass.ClassId, StringComparison.OrdinalIgnoreCase);
+            var cardTransform = new TranslateTransform();
+            var idleBackground = isSelected ? GetTeachingClassTeamsHoverBrush() : GetTeachingClassTeamsCardBrush();
+            var idleBorder = isSelected ? accentBrush : GetTeachingClassTeamsBorderBrush();
 
             var button = new Button
             {
-                Width = 296,
-                Margin = new Thickness(0, 0, 20, 22),
+                Width = 320,
+                MinHeight = 154,
+                Margin = new Thickness(0, 0, 20, 20),
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Stretch,
                 Cursor = Cursors.Hand,
                 Tag = teachingClass
             };
             button.Click += (_, __) => OpenTeachingClassWorkspace(teachingClass, navigateToProfessorSection: false);
 
-            var coverShell = new Border
-            {
-                Height = 154,
-                CornerRadius = new CornerRadius(28, 28, 0, 0),
-                ClipToBounds = true
-            };
+            var cardGrid = new Grid();
+            cardGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            cardGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var coverGrid = new Grid
+            var mainGrid = new Grid
             {
-                RenderTransformOrigin = new Point(0.5, 0.5),
-                RenderTransform = coverScale
+                Margin = new Thickness(12, 12, 12, 0)
             };
-            coverGrid.Children.Add(new Border
-            {
-                Background = coverBrush
-            });
-            var coverOverlay = new Border
-            {
-                Background = coverIdleOverlay
-            };
-            coverGrid.Children.Add(coverOverlay);
+            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var coverTopRow = new Grid
-            {
-                Margin = new Thickness(18, 16, 18, 0)
-            };
-            coverTopRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            coverTopRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            coverTopRow.Children.Add(CreateStaticTeamChip(
-                string.IsNullOrWhiteSpace(teachingClass.AcademicTerm) ? teachingClass.Course : teachingClass.AcademicTerm,
-                coverChipBackground,
-                Brushes.White));
-            var stateChip = CreateStaticTeamChip(
-                isSelected ? "Última aberta" : "Abrir turma",
-                isSelected ? selectedCoverChipBackground : coverChipBackground,
-                isSelected ? accentBrush : Brushes.White);
-            Grid.SetColumn(stateChip, 1);
-            coverTopRow.Children.Add(stateChip);
-            coverGrid.Children.Add(coverTopRow);
+            var logo = CreateTeachingClassTileBadge(teachingClass, 72);
+            logo.Margin = new Thickness(0, 0, 12, 0);
+            mainGrid.Children.Add(logo);
 
-            var coverTextStack = new StackPanel
+            var titleStack = new StackPanel
             {
-                Margin = new Thickness(18, 0, 18, 18),
-                VerticalAlignment = VerticalAlignment.Bottom
+                VerticalAlignment = VerticalAlignment.Center
             };
-            coverTextStack.Children.Add(new TextBlock
+            titleStack.Children.Add(new TextBlock
             {
                 Text = teachingClass.ClassName,
-                FontFamily = GetAppDisplayFontFamily(),
-                FontSize = 20,
-                FontWeight = FontWeights.ExtraBold,
-                Foreground = Brushes.White,
-                TextWrapping = TextWrapping.Wrap
-            });
-            coverTextStack.Children.Add(new TextBlock
-            {
-                Text = $"{teachingClass.Course} • {teachingClass.StudentIds.Count} aluno(s)",
-                Margin = new Thickness(0, 6, 0, 0),
-                FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromArgb(232, 255, 255, 255)),
-                TextWrapping = TextWrapping.Wrap
-            });
-            coverGrid.Children.Add(coverTextStack);
-            coverShell.Child = coverGrid;
-
-            var body = new StackPanel
-            {
-                Margin = new Thickness(18, 48, 18, 18)
-            };
-            body.Children.Add(new TextBlock
-            {
-                Text = string.IsNullOrWhiteSpace(teachingClass.Description)
-                    ? "Canal da turma pronto para mural, código de entrada e acompanhamento pedagógico da disciplina."
-                    : teachingClass.Description,
-                FontSize = 11.5,
-                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap,
-                LineHeight = 18,
-                MaxHeight = 54
+                MaxHeight = 54,
+                LineHeight = 18
             });
-            body.Children.Add(new WrapPanel
+            titleStack.Children.Add(new TextBlock
             {
-                Margin = new Thickness(0, 14, 0, 0),
-                Children =
-                {
-                    CreateStaticTeamChip($"Código {teachingClass.JoinCode}", CreateSoftAccentBrush(accentBrush, 26), accentBrush),
-                    CreateStaticTeamChip($"{teachingClass.HomePosts.Count} post(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")),
-                    CreateStaticTeamChip($"{teachingClass.ProfessorNames.Count} docente(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush"))
-                }
-            });
-
-            var footerGrid = new Grid
-            {
-                Margin = new Thickness(0, 16, 0, 0)
-            };
-            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            footerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            footerGrid.Children.Add(new TextBlock
-            {
-                Text = teachingClass.ProfessorNames.Count == 0
-                    ? "Sem docente adicional registrado"
-                    : string.Join(" • ", teachingClass.ProfessorNames.Distinct(StringComparer.OrdinalIgnoreCase).Take(2)),
-                FontSize = 10.5,
-                Foreground = GetThemeBrush("TertiaryTextBrush"),
+                Text = string.IsNullOrWhiteSpace(teachingClass.Course)
+                    ? teachingClass.AcademicTerm
+                    : $"{teachingClass.Course} - {teachingClass.AcademicTerm}",
+                Margin = new Thickness(0, 5, 0, 0),
+                FontSize = 11,
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-                MaxWidth = 154
+                MaxHeight = 40
             });
+            Grid.SetColumn(titleStack, 1);
+            mainGrid.Children.Add(titleStack);
 
-            var openCalloutText = new TextBlock
+            var dots = new TextBlock
             {
-                Text = isSelected ? "Reabrir turma" : "Entrar",
-                FontSize = 11.5,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
-                VerticalAlignment = VerticalAlignment.Center
+                Text = "...",
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
+                Margin = new Thickness(10, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Top
             };
-            var openCalloutIcon = new PackIconMaterial
+            Grid.SetColumn(dots, 2);
+            mainGrid.Children.Add(dots);
+            cardGrid.Children.Add(mainGrid);
+
+            var bottomRow = new StackPanel
             {
-                Kind = PackIconMaterialKind.ChevronRight,
-                Width = 16,
-                Height = 16,
-                Margin = new Thickness(8, 0, 0, 0),
-                Foreground = isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
-                VerticalAlignment = VerticalAlignment.Center
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(20, 16, 20, 14)
             };
-            var openCallout = new Border
+
+            void AddBottomIcon(PackIconMaterialKind kind, string tooltip)
             {
-                Padding = new Thickness(12, 8, 12, 8),
-                Background = isSelected ? CreateSoftAccentBrush(accentBrush, 30) : GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(14),
-                Child = new StackPanel
+                bottomRow.Children.Add(new PackIconMaterial
                 {
-                    Orientation = Orientation.Horizontal,
-                    Children =
-                    {
-                        openCalloutText,
-                        openCalloutIcon
-                    }
-                }
-            };
-            Grid.SetColumn(openCallout, 1);
-            footerGrid.Children.Add(openCallout);
-            body.Children.Add(footerGrid);
+                    Kind = kind,
+                    Width = 18,
+                    Height = 18,
+                    Margin = new Thickness(0, 0, 18, 0),
+                    Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
+                    ToolTip = tooltip,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
 
-            var rootGrid = new Grid();
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.Children.Add(coverShell);
+            AddBottomIcon(PackIconMaterialKind.MessageTextOutline, $"{teachingClass.HomePosts.Count} post(s)");
+            AddBottomIcon(PackIconMaterialKind.AccountGroupOutline, $"{teachingClass.StudentIds.Count} aluno(s)");
+            AddBottomIcon(PackIconMaterialKind.ContentCopy, $"Codigo {teachingClass.JoinCode}");
 
-            var iconBadge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 74, false, 24, 2);
-            iconBadge.Margin = new Thickness(18, 0, 0, -36);
-            iconBadge.HorizontalAlignment = HorizontalAlignment.Left;
-            iconBadge.VerticalAlignment = VerticalAlignment.Bottom;
-            iconBadge.BorderBrush = _appDarkModeEnabled ? GetElevatedSurfaceBrush() : Brushes.White;
-            iconBadge.BorderThickness = new Thickness(3);
-            Grid.SetRow(iconBadge, 0);
-            rootGrid.Children.Add(iconBadge);
+            if (isSelected)
+            {
+                bottomRow.Children.Add(new TextBlock
+                {
+                    Text = "Aberta",
+                    Margin = new Thickness(6, 1, 0, 0),
+                    FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = accentBrush
+                });
+            }
 
-            Grid.SetRow(body, 1);
-            rootGrid.Children.Add(body);
+            Grid.SetRow(bottomRow, 1);
+            cardGrid.Children.Add(bottomRow);
 
             var cardBorder = new Border
             {
                 Background = idleBackground,
-                BorderBrush = idleBorderBrush,
+                BorderBrush = idleBorder,
                 BorderThickness = new Thickness(isSelected ? 1.4 : 1),
-                CornerRadius = new CornerRadius(28),
-                ClipToBounds = true,
-                RenderTransform = cardLift,
-                Effect = cardShadow,
-                Child = rootGrid
+                CornerRadius = new CornerRadius(4),
+                RenderTransform = cardTransform,
+                Child = cardGrid
             };
             button.Content = cardBorder;
 
             void ApplyHoverState(bool hovered)
             {
-                cardBorder.Background = hovered ? hoverBackground : idleBackground;
-                cardBorder.BorderBrush = hovered ? hoverBorderBrush : idleBorderBrush;
-                cardLift.Y = hovered ? -6 : 0;
-                coverScale.ScaleX = hovered ? 1.035 : 1;
-                coverScale.ScaleY = hovered ? 1.035 : 1;
-                cardShadow.BlurRadius = hovered ? 34 : (isSelected ? 32 : 20);
-                cardShadow.Opacity = hovered ? (isSelected ? 0.3 : 0.2) : (isSelected ? 0.22 : 0.12);
-                coverOverlay.Background = hovered ? coverHoverOverlay : coverIdleOverlay;
-                openCallout.Background = hovered
-                    ? CreateSoftAccentBrush(accentBrush, isSelected ? (byte)36 : (byte)24)
-                    : (isSelected ? CreateSoftAccentBrush(accentBrush, 30) : GetThemeBrush("CardBackgroundBrush"));
-                openCallout.BorderBrush = hovered || isSelected ? accentBrush : GetThemeBrush("CardBorderBrush");
-                openCalloutText.Foreground = hovered || isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush");
-                openCalloutIcon.Foreground = hovered || isSelected ? accentBrush : GetThemeBrush("PrimaryTextBrush");
+                cardBorder.Background = hovered ? GetTeachingClassTeamsHoverBrush() : idleBackground;
+                cardBorder.BorderBrush = hovered || isSelected ? accentBrush : idleBorder;
+                cardTransform.Y = hovered ? -1 : 0;
+                dots.Foreground = hovered || isSelected ? accentBrush : GetTeachingClassTeamsSecondaryTextBrush();
             }
 
             button.MouseEnter += (_, __) => ApplyHoverState(true);
@@ -19088,7 +19414,7 @@ namespace MeuApp
 
         private Border CreateTeachingClassEmptyWorkspaceCard(bool hasNoClasses)
         {
-            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var accentBrush = GetTeachingClassAccentBrush();
             var canManage = CurrentViewerCanManageTeachingClasses();
             var body = new StackPanel
             {
@@ -19102,7 +19428,7 @@ namespace MeuApp
                         FontFamily = GetAppDisplayFontFamily(),
                         FontSize = 22,
                         FontWeight = FontWeights.ExtraBold,
-                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                        Foreground = GetTeachingClassTeamsPrimaryTextBrush()
                     },
                     new TextBlock
                     {
@@ -19115,7 +19441,7 @@ namespace MeuApp
                                 : "Escolha uma turma pelos cards para acompanhar o mural, os materiais e os avisos publicados.",
                         Margin = new Thickness(0, 10, 0, 0),
                         FontSize = 12,
-                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
                         TextWrapping = TextWrapping.Wrap,
                         LineHeight = 20,
                         MaxWidth = 620
@@ -19141,17 +19467,17 @@ namespace MeuApp
 
             return new Border
             {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                Background = GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(4),
                 Child = layout
             };
         }
 
         private Border CreateTeachingClassCreateWorkspaceCard()
         {
-            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var accentBrush = GetTeachingClassAccentBrush();
             var editingClass = string.IsNullOrWhiteSpace(_teachingClassEditingClassId)
                 ? null
                 : FindTeachingClassById(_teachingClassEditingClassId) ?? _activeTeachingClass;
@@ -19564,23 +19890,24 @@ namespace MeuApp
 
             return new Border
             {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = accentBrush,
+                Background = GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(4),
                 Child = layout
             };
         }
 
         private UIElement CreateTeachingClassInlineWorkspace(TeachingClassInfo teachingClass)
         {
-            var accentBrush = new SolidColorBrush(Color.FromRgb(124, 58, 237));
+            var accentBrush = GetTeachingClassAccentBrush();
             var canManage = CanManageTeachingClass(teachingClass);
             var shellGrid = new Grid
             {
-                MinHeight = 760
+                MinHeight = 760,
+                Background = GetTeachingClassTeamsBackgroundBrush()
             };
-            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(272) });
+            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(288) });
             shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
             shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -19600,10 +19927,10 @@ namespace MeuApp
 
             return new Border
             {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                Background = GetTeachingClassTeamsBackgroundBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(4),
                 ClipToBounds = true,
                 Child = shellGrid
             };
@@ -19613,37 +19940,49 @@ namespace MeuApp
         {
             var sidebarGrid = new Grid
             {
-                Background = GetThemeBrush("MutedCardBackgroundBrush")
+                Background = GetTeachingClassTeamsSurfaceBrush()
             };
             sidebarGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             sidebarGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var headerGrid = new Grid
+            var headerStack = new StackPanel
             {
-                Margin = new Thickness(18, 18, 18, 0)
+                Margin = new Thickness(16, 16, 16, 0)
             };
-            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var backButton = new Button
             {
-                Width = 38,
-                Height = 38,
-                Margin = new Thickness(0, 0, 12, 0),
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(1),
+                Height = 36,
+                Padding = new Thickness(0, 0, 8, 0),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = Brushes.Transparent,
+                Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand,
-                Content = new PackIconMaterial
+                Content = new StackPanel
                 {
-                    Kind = PackIconMaterialKind.ChevronLeft,
-                    Width = 18,
-                    Height = 18,
-                    Foreground = GetThemeBrush("PrimaryTextBrush"),
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
+                    Orientation = Orientation.Horizontal,
+                    Children =
+                    {
+                        new PackIconMaterial
+                        {
+                            Kind = PackIconMaterialKind.ChevronLeft,
+                            Width = 18,
+                            Height = 18,
+                            Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                            VerticalAlignment = VerticalAlignment.Center
+                        },
+                        new TextBlock
+                        {
+                            Text = "Todas as turmas",
+                            Margin = new Thickness(8, 0, 0, 0),
+                            FontSize = 12,
+                            FontWeight = FontWeights.SemiBold,
+                            Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
+                            VerticalAlignment = VerticalAlignment.Center
+                        }
+                    }
                 }
             };
             backButton.Click += (_, __) =>
@@ -19651,20 +19990,18 @@ namespace MeuApp
                 _activeTeachingClass = null;
                 RenderProfessorDashboard();
             };
-            headerGrid.Children.Add(backButton);
+            headerStack.Children.Add(backButton);
 
             var iconBadge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 44, false, 16, 1);
             iconBadge.Margin = new Thickness(0, 0, 12, 0);
-            Grid.SetColumn(iconBadge, 1);
-            headerGrid.Children.Add(iconBadge);
 
             var classIdentity = new StackPanel();
             classIdentity.Children.Add(new TextBlock
             {
-                Text = "Turma ativa",
+                Text = "Canal geral",
                 FontSize = 11,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = GetThemeBrush("SecondaryTextBrush")
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush()
             });
             classIdentity.Children.Add(new TextBlock
             {
@@ -19673,7 +20010,7 @@ namespace MeuApp
                 FontFamily = GetAppDisplayFontFamily(),
                 FontSize = 18,
                 FontWeight = FontWeights.ExtraBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap
             });
             classIdentity.Children.Add(new TextBlock
@@ -19681,17 +20018,41 @@ namespace MeuApp
                 Text = $"{teachingClass.Course} • {teachingClass.AcademicTerm}",
                 Margin = new Thickness(0, 4, 0, 0),
                 FontSize = 11,
-                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap
             });
-            Grid.SetColumn(classIdentity, 2);
-            headerGrid.Children.Add(classIdentity);
-            sidebarGrid.Children.Add(headerGrid);
+
+            var classHeaderGrid = new Grid();
+            classHeaderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            classHeaderGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            classHeaderGrid.Children.Add(iconBadge);
+            Grid.SetColumn(classIdentity, 1);
+            classHeaderGrid.Children.Add(classIdentity);
+
+            headerStack.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 12, 0, 0),
+                Padding = new Thickness(12),
+                Background = GetTeachingClassTeamsCardBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Child = classHeaderGrid
+            });
+            sidebarGrid.Children.Add(headerStack);
 
             var sectionsHost = new StackPanel
             {
-                Margin = new Thickness(18, 16, 18, 16)
+                Margin = new Thickness(16, 16, 16, 16)
             };
+            sectionsHost.Children.Add(new TextBlock
+            {
+                Text = "Canais da turma",
+                Margin = new Thickness(2, 0, 0, 10),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush()
+            });
             sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
                 "Página inicial",
                 PackIconMaterialKind.HomeVariantOutline,
@@ -19715,6 +20076,43 @@ namespace MeuApp
                     RenderProfessorDashboard();
                 }));
 
+            sectionsHost.Children.Add(new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 6, 0, 14),
+                Background = GetTeachingClassTeamsBorderBrush()
+            });
+            sectionsHost.Children.Add(new TextBlock
+            {
+                Text = "Ferramentas",
+                Margin = new Thickness(2, 0, 0, 10),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetTeachingClassTeamsSecondaryTextBrush()
+            });
+            sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
+                "Pessoas",
+                PackIconMaterialKind.AccountGroupOutline,
+                accentBrush,
+                false,
+                () => ShowTeachingClassOperationDialog(teachingClass)));
+            sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
+                "Código e docentes",
+                PackIconMaterialKind.ContentCopy,
+                accentBrush,
+                false,
+                () => ShowTeachingClassCodeAndFacultyDialog(teachingClass)));
+
+            if (canManage)
+            {
+                sectionsHost.Children.Add(CreateTeachingClassSidebarNavButton(
+                    "Configurar turma",
+                    PackIconMaterialKind.PencilOutline,
+                    accentBrush,
+                    false,
+                    () => OpenTeachingClassEditor(teachingClass, navigateToProfessorSection: false)));
+            }
+
             var sectionsScroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -19725,7 +20123,7 @@ namespace MeuApp
 
             return new Border
             {
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Background = GetTeachingClassTeamsSurfaceBrush(),
                 Child = sidebarGrid
             };
         }
@@ -19737,9 +20135,9 @@ namespace MeuApp
                 Margin = new Thickness(0, 0, 0, 12),
                 Padding = new Thickness(14, 12, 14, 12),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                Background = isActive ? CreateSoftAccentBrush(accentBrush, 28) : GetThemeBrush("CardBackgroundBrush"),
-                Foreground = isActive ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
-                BorderBrush = isActive ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                Background = isActive ? GetTeachingClassTeamsHoverBrush() : GetTeachingClassTeamsCardBrush(),
+                Foreground = isActive ? accentBrush : GetTeachingClassTeamsPrimaryTextBrush(),
+                BorderBrush = isActive ? accentBrush : GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
                 Cursor = Cursors.Hand
             };
@@ -19757,16 +20155,16 @@ namespace MeuApp
             {
                 Width = 40,
                 Height = 40,
-                CornerRadius = new CornerRadius(20),
-                Background = isActive ? accentBrush : GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = isActive ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                CornerRadius = new CornerRadius(4),
+                Background = isActive ? accentBrush : GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = isActive ? Brushes.Transparent : GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
                 Child = new PackIconMaterial
                 {
                     Kind = iconKind,
                     Width = 18,
                     Height = 18,
-                    Foreground = isActive ? Brushes.White : accentBrush,
+                    Foreground = isActive ? Brushes.White : GetTeachingClassTeamsSecondaryTextBrush(),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     VerticalAlignment = VerticalAlignment.Center
                 }
@@ -19779,7 +20177,7 @@ namespace MeuApp
                 Margin = new Thickness(12, 0, 0, 0),
                 FontSize = 12,
                 FontWeight = FontWeights.Bold,
-                Foreground = isActive ? accentBrush : GetThemeBrush("PrimaryTextBrush"),
+                Foreground = isActive ? accentBrush : GetTeachingClassTeamsPrimaryTextBrush(),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextWrapping = TextWrapping.Wrap
             };
@@ -19890,25 +20288,12 @@ namespace MeuApp
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-            var topBar = CreateTeachingClassWorkspaceHeader(
-                isAssignmentsModule ? "Docência / tarefas e avaliações" : "Docência / página inicial da turma",
-                isAssignmentsModule ? $"Tarefas e avaliações de {teachingClass.ClassName}" : $"Mural pedagógico de {teachingClass.ClassName}",
-                isAssignmentsModule
-                    ? (canManage
-                        ? "Fluxo formal de atividades, entregas, notas e feedback da turma."
-                        : "Veja o que está pendente, entregue sua atividade e acompanhe nota e feedback.")
-                    : (canManage
-                        ? "O topo concentra Turmas, atualização, edição, código e operação docente. A página principal fica dedicada ao mural da turma."
-                        : "O topo concentra Turmas, atualização, código e consulta da composição da sala. A página principal fica dedicada ao mural da turma."),
-                _teachingClasses,
-                teachingClass,
-                accentBrush,
-                780);
+            var topBar = CreateTeachingClassChannelTopBar(teachingClass, accentBrush, canManage, isAssignmentsModule);
             root.Children.Add(topBar);
 
             var mainStack = new StackPanel
             {
-                Margin = new Thickness(22)
+                Margin = new Thickness(22, 18, 22, 22)
             };
 
             if (isAssignmentsModule)
@@ -20036,10 +20421,10 @@ namespace MeuApp
             var activityCount = teachingClass.HomePosts.Count(post => string.Equals(post.PostType, "activity", StringComparison.OrdinalIgnoreCase));
             var commentCount = teachingClass.HomePosts.Sum(post => post.Comments?.Count ?? 0);
             var metrics = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
-            metrics.Children.Add(CreateTeamMetricCard("Posts", teachingClass.HomePosts.Count.ToString(), "publicações no mural", Color.FromRgb(124, 58, 237)));
-            metrics.Children.Add(CreateTeamMetricCard("Atividades", activityCount.ToString(), "itens pedagógicos publicados", Color.FromRgb(37, 99, 235)));
-            metrics.Children.Add(CreateTeamMetricCard("Interações", commentCount.ToString(), "comentários registrados", Color.FromRgb(16, 185, 129)));
-            metrics.Children.Add(CreateTeamMetricCard("Código", teachingClass.JoinCode, "entrada rápida", Color.FromRgb(245, 158, 11)));
+            metrics.Children.Add(CreateTeachingClassMetricCard("Posts", teachingClass.HomePosts.Count.ToString(), "publicações no mural"));
+            metrics.Children.Add(CreateTeachingClassMetricCard("Atividades", activityCount.ToString(), "itens pedagógicos publicados"));
+            metrics.Children.Add(CreateTeachingClassMetricCard("Interações", commentCount.ToString(), "comentários registrados"));
+            metrics.Children.Add(CreateTeachingClassMetricCard("Código", teachingClass.JoinCode, "entrada rápida"));
 
             var content = new StackPanel();
             content.Children.Add(new TextBlock
@@ -20113,14 +20498,11 @@ namespace MeuApp
                 }
             }
 
-            return CreateDialogSectionCard(
-                "Feed pedagógico",
-                canPublish
-                    ? "Publique no mural da turma com anexos, links, atividades e trilha de conversa logo abaixo de cada post."
-                    : "Acompanhe o mural da turma e interaja nas publicações disponíveis.",
-                accentBrush,
-                feedStack,
-                new Thickness(0, 0, 0, 0));
+            return new Border
+            {
+                Background = Brushes.Transparent,
+                Child = feedStack
+            };
         }
 
         private Border CreateTeachingClassPostComposerCard(TeachingClassInfo teachingClass, Brush accentBrush, Action? onPublished = null)
@@ -20752,32 +21134,15 @@ namespace MeuApp
 
             var card = new Border
             {
-                Margin = new Thickness(0, 0, 0, 14),
-                Padding = new Thickness(20),
+                Margin = new Thickness(0, 0, 0, 12),
+                Padding = new Thickness(16),
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
-                Effect = new DropShadowEffect
-                {
-                    BlurRadius = 20,
-                    ShadowDepth = 0,
-                    Opacity = _appDarkModeEnabled ? 0.32 : 0.10,
-                    Color = Colors.Black
-                }
+                CornerRadius = new CornerRadius(8)
             };
 
             var stack = new StackPanel();
-            stack.Children.Add(new Border
-            {
-                Width = 82,
-                Height = 5,
-                Margin = new Thickness(0, 0, 0, 16),
-                CornerRadius = new CornerRadius(999),
-                Background = accentBrush,
-                Opacity = 0.92,
-                HorizontalAlignment = HorizontalAlignment.Left
-            });
 
             var headerGrid = new Grid();
             headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -20904,10 +21269,10 @@ namespace MeuApp
                 {
                     Margin = new Thickness(0, 14, 0, 0),
                     Padding = new Thickness(14),
-                    Background = CreateSoftAccentBrush(accentBrush, 16),
-                    BorderBrush = accentBrush,
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(16),
+                    CornerRadius = new CornerRadius(8),
                     Child = new StackPanel
                     {
                         Children =
@@ -20917,7 +21282,7 @@ namespace MeuApp
                                 Text = string.IsNullOrWhiteSpace(post.ActivityLabel) ? "Atividade publicada" : post.ActivityLabel,
                                 FontSize = 11,
                                 FontWeight = FontWeights.SemiBold,
-                                Foreground = accentBrush
+                                Foreground = GetThemeBrush("PrimaryTextBrush")
                             },
                             new TextBlock
                             {
@@ -20946,7 +21311,7 @@ namespace MeuApp
                     Text = "Link compartilhado",
                     FontSize = 11,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = accentBrush
+                    Foreground = GetThemeBrush("SecondaryTextBrush")
                 });
                 linkInfo.Children.Add(new TextBlock
                 {
@@ -20971,7 +21336,7 @@ namespace MeuApp
                     Background = GetThemeBrush("CardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(16),
+                    CornerRadius = new CornerRadius(8),
                     Child = linkCard
                 });
             }
@@ -21014,7 +21379,7 @@ namespace MeuApp
                         Background = GetThemeBrush("CardBackgroundBrush"),
                         BorderBrush = GetThemeBrush("CardBorderBrush"),
                         BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(16),
+                        CornerRadius = new CornerRadius(8),
                         Child = attachmentGrid
                     });
                 }
@@ -21274,10 +21639,10 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 18, 0, 0),
                 Padding = new Thickness(16),
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                Background = GetTeachingClassTeamsSurfaceBrush(),
+                BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
+                CornerRadius = new CornerRadius(8),
                 Child = commentsHost
             });
             card.Child = stack;
@@ -21294,7 +21659,7 @@ namespace MeuApp
                 Background = indentLevel == 0 ? GetThemeBrush("CardBackgroundBrush") : CreateSoftAccentBrush(accentBrush, 14),
                 BorderBrush = indentLevel == 0 ? GetThemeBrush("CardBorderBrush") : CreateSoftAccentBrush(accentBrush, 84),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18)
+                CornerRadius = new CornerRadius(8)
             };
 
             var stack = new StackPanel();
@@ -22720,10 +23085,10 @@ namespace MeuApp
                 var totalReviewed = assignmentPosts.Sum(GetTeachingClassAssignmentReviewedCount);
                 var pendingReview = Math.Max(0, totalSubmitted - totalReviewed);
 
-                metrics.Children.Add(CreateTeamMetricCard("Atividades", totalAssignments.ToString(), "publicadas", Color.FromRgb(37, 99, 235)));
-                metrics.Children.Add(CreateTeamMetricCard("Entregas", totalSubmitted.ToString(), totalStudents == 1 ? "aluno com envio" : "envios recebidos", Color.FromRgb(16, 185, 129)));
-                metrics.Children.Add(CreateTeamMetricCard("Correções", totalReviewed.ToString(), "devolutivas concluídas", Color.FromRgb(124, 58, 237)));
-                metrics.Children.Add(CreateTeamMetricCard("Pendentes", pendingReview.ToString(), "aguardando nota", Color.FromRgb(245, 158, 11)));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Atividades", totalAssignments.ToString(), "publicadas"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Entregas", totalSubmitted.ToString(), totalStudents == 1 ? "aluno com envio" : "envios recebidos"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Correções", totalReviewed.ToString(), "devolutivas concluídas"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Pendentes", pendingReview.ToString(), "aguardando nota"));
 
                 summaryStack.Children.Add(new TextBlock
                 {
@@ -22746,10 +23111,10 @@ namespace MeuApp
                 var overdueCount = studentRows.Count(item => item.Submission == null && item.Post.ActivityDueAt.HasValue && item.Post.ActivityDueAt.Value.Date < DateTime.Today);
                 var gradedCount = studentRows.Count(item => item.Submission?.Review != null);
 
-                metrics.Children.Add(CreateTeamMetricCard("Novas", newCount.ToString(), "ainda sem envio", Color.FromRgb(37, 99, 235)));
-                metrics.Children.Add(CreateTeamMetricCard("Em dia", onTimeCount.ToString(), "com prazo ativo", Color.FromRgb(16, 185, 129)));
-                metrics.Children.Add(CreateTeamMetricCard("Em atraso", overdueCount.ToString(), "exigem atenção", Color.FromRgb(220, 38, 38)));
-                metrics.Children.Add(CreateTeamMetricCard("Corrigidas", gradedCount.ToString(), "nota devolvida", Color.FromRgb(124, 58, 237)));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Novas", newCount.ToString(), "ainda sem envio"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Em dia", onTimeCount.ToString(), "com prazo ativo"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Em atraso", overdueCount.ToString(), "exigem atenção"));
+                metrics.Children.Add(CreateTeachingClassMetricCard("Corrigidas", gradedCount.ToString(), "nota devolvida"));
 
                 summaryStack.Children.Add(new TextBlock
                 {
@@ -22844,36 +23209,32 @@ namespace MeuApp
             }
 
             var host = new StackPanel();
-            host.Children.Add(CreateDialogSectionCard(
+            host.Children.Add(CreateTeachingClassSectionCard(
                 "Pulso acadêmico",
                 canManage
                     ? "Visão rápida do fluxo formal de tarefas, avaliações e correções desta turma."
                     : "Sua fila atual de entregas, prazos e devolutivas.",
-                accentBrush,
                 summaryStack,
                 new Thickness(0, 0, 0, 16)));
-            host.Children.Add(CreateDialogSectionCard(
+            host.Children.Add(CreateTeachingClassSectionCard(
                 "Filtros rápidos",
                 canManage
                     ? "Separe as atividades que ainda precisam de ação, as que já foram corrigidas ou as que ainda não receberam nenhuma entrega."
                     : "Filtre sua lista por etapa do fluxo para encontrar mais rápido o que falta enviar, o que atrasou e o que já foi corrigido.",
-                accentBrush,
                 filtersHost,
                 new Thickness(0, 0, 0, 16)));
-            host.Children.Add(CreateDialogSectionCard(
+            host.Children.Add(CreateTeachingClassSectionCard(
                 "Alertas da Docência",
                 canManage
                     ? "Prazo próximo, novas entregas e notas publicadas aparecem aqui como um radar operacional da turma."
                     : "Prazo próximo e publicação de nota aparecem aqui para você não depender só do mural da turma.",
-                accentBrush,
                 notificationsHost,
                 new Thickness(0, 0, 0, 16)));
-            host.Children.Add(CreateDialogSectionCard(
+            host.Children.Add(CreateTeachingClassSectionCard(
                 "Tarefas e avaliações",
                 canManage
                     ? "Abra uma atividade para receber entregas, lançar nota, editar instruções ou devolver feedback para cada aluno."
                     : "Abra uma atividade para consultar instruções, responder questionários, anexar arquivos e acompanhar a correção.",
-                accentBrush,
                 listHost,
                 new Thickness(0, 0, 0, 0)));
 
@@ -22889,7 +23250,6 @@ namespace MeuApp
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count();
             var reviewedCount = (post.Submissions ?? new List<TeachingClassActivitySubmissionInfo>()).Count(item => item.Review != null);
-            var statusBrush = GetTeachingClassAssignmentStudentStatusBrush(post, submission);
             var primaryLabel = canManage
                 ? "Abrir entregas"
                 : submission == null
@@ -22903,27 +23263,10 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
-                Effect = new DropShadowEffect
-                {
-                    BlurRadius = 18,
-                    ShadowDepth = 0,
-                    Opacity = _appDarkModeEnabled ? 0.28 : 0.08,
-                    Color = Colors.Black
-                }
+                CornerRadius = new CornerRadius(8)
             };
 
             var stack = new StackPanel();
-            stack.Children.Add(new Border
-            {
-                Width = 76,
-                Height = 5,
-                Margin = new Thickness(0, 0, 0, 16),
-                CornerRadius = new CornerRadius(999),
-                Background = accentBrush,
-                Opacity = 0.92,
-                HorizontalAlignment = HorizontalAlignment.Left
-            });
 
             stack.Children.Add(new WrapPanel
             {
@@ -22979,10 +23322,10 @@ namespace MeuApp
                 {
                     Margin = new Thickness(0, 12, 0, 0),
                     Padding = new Thickness(12),
-                    Background = CreateSoftAccentBrush(statusBrush, 18),
-                    BorderBrush = statusBrush,
+                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(14),
+                    CornerRadius = new CornerRadius(8),
                     Child = new TextBlock
                     {
                         Text = submission?.Review != null
@@ -22990,7 +23333,7 @@ namespace MeuApp
                             : GetTeachingClassAssignmentStudentStatusLabel(post, submission),
                         FontSize = 11.5,
                         FontWeight = FontWeights.SemiBold,
-                        Foreground = statusBrush,
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
                         TextWrapping = TextWrapping.Wrap
                     }
                 });

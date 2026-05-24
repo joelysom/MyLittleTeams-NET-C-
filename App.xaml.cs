@@ -2,6 +2,7 @@
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Media;
 
 namespace MeuApp;
 
@@ -15,6 +16,7 @@ public partial class App : Application
         {
             DebugHelper.InitializeSilent();
             DebugConsoleManager.Configure(e.Args);
+            ApplyGlobalTheme(AccessibilityPreferences.Current);
 
             // Log de inicialização
             LogToFile($"=== App started at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} ===");
@@ -57,6 +59,99 @@ public partial class App : Application
         DebugConsoleManager.Shutdown();
         DebugHelper.Shutdown();
         base.OnExit(e);
+    }
+
+    public static void ApplyGlobalTheme(AccessibilitySettings settings)
+    {
+        var highContrastEnabled = settings.HighContrastEnabled;
+        var darkModeEnabled = settings.DarkModeEnabled;
+
+        SetGlobalBrush("WindowBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(3, 7, 18)
+            : darkModeEnabled ? Color.FromRgb(7, 17, 31) : Color.FromRgb(243, 247, 252));
+        SetGlobalBrush("SurfaceBrush", highContrastEnabled
+            ? Color.FromRgb(6, 12, 24)
+            : darkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+        SetGlobalBrush("SidebarBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(0, 0, 0)
+            : darkModeEnabled ? Color.FromRgb(9, 17, 30) : Color.FromRgb(248, 250, 252));
+        SetGlobalBrush("SidebarBorderBrush", highContrastEnabled
+            ? Color.FromRgb(56, 189, 248)
+            : darkModeEnabled ? Color.FromRgb(30, 41, 59) : Color.FromRgb(226, 232, 240));
+        SetGlobalBrush("TopBarBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(6, 12, 24)
+            : darkModeEnabled ? Color.FromRgb(11, 18, 32) : Colors.White);
+        SetGlobalBrush("MainContentBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(4, 9, 18)
+            : darkModeEnabled ? Color.FromRgb(8, 16, 27) : Color.FromRgb(248, 251, 255));
+        SetGlobalBrush("SearchBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(11, 18, 32)
+            : darkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+        SetGlobalBrush("SearchBorderBrush", highContrastEnabled
+            ? Color.FromRgb(56, 189, 248)
+            : darkModeEnabled ? Color.FromRgb(36, 50, 71) : Color.FromRgb(216, 226, 238));
+        SetGlobalBrush("PrimaryTextBrush", highContrastEnabled
+            ? Color.FromRgb(248, 250, 252)
+            : darkModeEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));
+        SetGlobalBrush("SecondaryTextBrush", highContrastEnabled
+            ? Color.FromRgb(203, 213, 225)
+            : darkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(71, 85, 105));
+        SetGlobalBrush("TertiaryTextBrush", highContrastEnabled
+            ? Color.FromRgb(148, 163, 184)
+            : darkModeEnabled ? Color.FromRgb(125, 139, 162) : Color.FromRgb(100, 116, 139));
+        SetGlobalBrush("CardBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(6, 12, 24)
+            : darkModeEnabled ? Color.FromRgb(15, 23, 42) : Colors.White);
+        SetGlobalBrush("MutedCardBackgroundBrush", highContrastEnabled
+            ? Color.FromRgb(11, 18, 32)
+            : darkModeEnabled ? Color.FromRgb(17, 28, 46) : Color.FromRgb(248, 250, 252));
+        SetGlobalBrush("CardBorderBrush", highContrastEnabled
+            ? Color.FromRgb(56, 189, 248)
+            : darkModeEnabled ? Color.FromRgb(34, 50, 71) : Color.FromRgb(219, 229, 240));
+        SetGlobalBrush("AccentBrush", highContrastEnabled
+            ? Color.FromRgb(125, 211, 252)
+            : darkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
+        SetGlobalBrush("AccentMutedBrush", highContrastEnabled
+            ? Color.FromRgb(12, 36, 63)
+            : darkModeEnabled ? Color.FromRgb(16, 38, 69) : Color.FromRgb(232, 238, 255));
+        SetGlobalBrush("SuccessBrush", highContrastEnabled
+            ? Color.FromRgb(74, 222, 128)
+            : darkModeEnabled ? Color.FromRgb(34, 197, 94) : Color.FromRgb(22, 163, 74));
+        SetGlobalBrush("WarningBrush", highContrastEnabled
+            ? Color.FromRgb(250, 204, 21)
+            : Color.FromRgb(245, 158, 11));
+        SetGlobalBrush("DangerBrush", highContrastEnabled
+            ? Color.FromRgb(248, 113, 113)
+            : darkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
+        SetGlobalBrush("ToggleTrackOffBrush", highContrastEnabled
+            ? Color.FromRgb(71, 85, 105)
+            : darkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
+        SetGlobalBrush("ToggleTrackOnBrush", highContrastEnabled
+            ? Color.FromRgb(14, 165, 233)
+            : darkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
+        SetGlobalBrush("ToggleThumbBrush", Colors.White);
+
+        SetGlobalBrush("BrandSurfaceBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(11, 18, 32) : Color.FromRgb(248, 250, 252));
+        SetGlobalBrush("BrandTextBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));
+        SetGlobalBrush("BrandMutedTextBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(71, 85, 105));
+        SetGlobalBrush("BrandBorderBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(34, 50, 71) : Color.FromRgb(226, 232, 240));
+    }
+
+    private static void SetGlobalBrush(string key, Color color)
+    {
+        var resources = Current?.Resources;
+        if (resources == null)
+        {
+            return;
+        }
+
+        if (resources[key] is SolidColorBrush brush && !brush.IsFrozen)
+        {
+            brush.Color = color;
+            return;
+        }
+
+        resources[key] = new SolidColorBrush(color);
     }
 
     private static string BuildUserFacingErrorSummary(Exception? exception)

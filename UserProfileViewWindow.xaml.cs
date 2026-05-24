@@ -40,6 +40,12 @@ namespace MeuApp
             _portfolioTeams = (portfolioTeams ?? Array.Empty<TeamWorkspaceInfo>()).ToList();
             AvatarHost.Content = avatarVisual;
             RefreshViewModel();
+            Loaded += (_, __) => ApplyProfileThemeReadability(AccessibilityPreferences.Current);
+        }
+
+        protected override void OnAccessibilitySettingsChanged(AccessibilitySettings settings)
+        {
+            ApplyProfileThemeReadability(settings);
         }
 
         private void RefreshViewModel()
@@ -48,6 +54,102 @@ namespace MeuApp
             DataContext = _viewModel;
             OpenPortfolioButton.IsEnabled = _viewModel.HasPortfolio;
             OpenLinkedInButton.IsEnabled = _viewModel.HasLinkedIn;
+            ApplyProfileThemeReadability(AccessibilityPreferences.Current);
+        }
+
+        private void ApplyProfileThemeReadability(AccessibilitySettings settings)
+        {
+            if (!settings.DarkModeEnabled && !settings.HighContrastEnabled)
+            {
+                return;
+            }
+
+            Background = GetThemeBrush("WindowBackgroundBrush", Color.FromRgb(7, 17, 31));
+            if (Content is DependencyObject root)
+            {
+                ApplyReadableDarkTheme(root);
+            }
+        }
+
+        private void ApplyReadableDarkTheme(DependencyObject node)
+        {
+            var primaryText = GetThemeBrush("PrimaryTextBrush", Color.FromRgb(226, 232, 240));
+            var secondaryText = GetThemeBrush("SecondaryTextBrush", Color.FromRgb(148, 163, 184));
+            var cardBackground = GetThemeBrush("CardBackgroundBrush", Color.FromRgb(15, 23, 42));
+            var mutedBackground = GetThemeBrush("MutedCardBackgroundBrush", Color.FromRgb(17, 28, 46));
+            var borderBrush = GetThemeBrush("CardBorderBrush", Color.FromRgb(34, 50, 71));
+
+            if (node is Panel panel && IsVeryLightBrush(panel.Background))
+            {
+                panel.Background = GetThemeBrush("MainContentBackgroundBrush", Color.FromRgb(8, 16, 27));
+            }
+
+            if (node is Border border)
+            {
+                if (IsVeryLightBrush(border.Background))
+                {
+                    border.Background = cardBackground;
+                }
+
+                if (IsVeryLightBrush(border.BorderBrush))
+                {
+                    border.BorderBrush = borderBrush;
+                }
+            }
+
+            if (node is TextBlock textBlock && IsLowContrastDarkBrush(textBlock.Foreground))
+            {
+                textBlock.Foreground = IsMutedDarkBrush(textBlock.Foreground) ? secondaryText : primaryText;
+            }
+
+            if (node is Control control)
+            {
+                if (IsVeryLightBrush(control.Background))
+                {
+                    control.Background = mutedBackground;
+                }
+
+                if (IsVeryLightBrush(control.BorderBrush))
+                {
+                    control.BorderBrush = borderBrush;
+                }
+
+                if (IsLowContrastDarkBrush(control.Foreground))
+                {
+                    control.Foreground = primaryText;
+                }
+            }
+
+            var childCount = VisualTreeHelper.GetChildrenCount(node);
+            for (var index = 0; index < childCount; index++)
+            {
+                ApplyReadableDarkTheme(VisualTreeHelper.GetChild(node, index));
+            }
+        }
+
+        private Brush GetThemeBrush(string key, Color fallback)
+        {
+            return TryFindResource(key) as Brush ?? new SolidColorBrush(fallback);
+        }
+
+        private static bool IsVeryLightBrush(Brush? brush)
+        {
+            return brush is SolidColorBrush solid && solid.Color.A > 0 && GetLuminance(solid.Color) >= 224;
+        }
+
+        private static bool IsLowContrastDarkBrush(Brush? brush)
+        {
+            return brush is SolidColorBrush solid && solid.Color.A > 0 && GetLuminance(solid.Color) <= 118;
+        }
+
+        private static bool IsMutedDarkBrush(Brush? brush)
+        {
+            return brush is SolidColorBrush solid && solid.Color.A > 0 && GetLuminance(solid.Color) >= 72;
+        }
+
+        private static double GetLuminance(Color color)
+        {
+            return (0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B);
         }
 
         private void OpenPortfolio_Click(object sender, RoutedEventArgs e)

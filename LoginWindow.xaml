@@ -589,18 +589,45 @@
                         <Rectangle Height="2" Fill="{DynamicResource LoginDividerBrush}" Margin="0,0,0,24"/>
 
                         <StackPanel x:Name="LoginContent" Orientation="Vertical">
-                            <TextBlock Text="Email ou Telefone" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
+                            <StackPanel x:Name="SavedAccountsContent" Visibility="Collapsed" Margin="0,0,0,20">
+                                <TextBlock Text="Continuar com uma conta salva" FontSize="18" FontWeight="ExtraBold" Foreground="{DynamicResource LoginPrimaryTextBrush}"/>
+                                <TextBlock Text="Escolha uma conta deste dispositivo ou entre com outra credencial." FontSize="12" Foreground="{DynamicResource LoginSecondaryTextBrush}" Margin="0,6,0,14" TextWrapping="Wrap"/>
+                                <StackPanel x:Name="SavedAccountsListPanel"/>
+                                <WrapPanel Margin="0,12,0,0">
+                                    <Button x:Name="AddAnotherAccountButton"
+                                            Content="Adicionar outra conta"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Width="188"
+                                            Margin="0,0,10,0"
+                                            Click="AddAnotherAccount_Click"/>
+                                    <Button x:Name="ClearSavedAccountsButton"
+                                            Content="Sair de todas"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Width="140"
+                                            Margin="0"
+                                            Click="ClearSavedAccounts_Click"/>
+                                </WrapPanel>
+                            </StackPanel>
 
-                            <TextBlock Text="Senha" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <PasswordBox x:Name="LoginPassword" Style="{StaticResource LoginPasswordStyle}"/>
+                            <StackPanel x:Name="ManualLoginFieldsPanel" Orientation="Vertical">
+                                <TextBlock Text="Email ou Telefone" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <TextBox x:Name="LoginEmail" Style="{StaticResource LoginInputStyle}" mah:TextBoxHelper.Watermark="seu@email.com"/>
 
-                            <TextBlock Text="Manter conectado" FontSize="12" Foreground="{DynamicResource LoginMutedTextBrush}" Margin="0,12,0,0"/>
-                            <CheckBox Background="Transparent" Foreground="{DynamicResource LoginAccentBrush}" Margin="0,8,0,0" IsChecked="True"/>
+                                <TextBlock Text="Senha" FontSize="13" Foreground="{DynamicResource LoginPrimaryTextBrush}" FontWeight="SemiBold" Margin="0,16,0,4"/>
+                                <PasswordBox x:Name="LoginPassword" Style="{StaticResource LoginPasswordStyle}"/>
 
-                            <Button Content="Entrar" Style="{StaticResource PrimaryButtonStyle}" Click="LoginButton_Click" Foreground="White"/>
+                                <CheckBox x:Name="KeepConnectedCheckBox"
+                                          Content="Manter conectado neste dispositivo"
+                                          Background="Transparent"
+                                          Foreground="{DynamicResource LoginMutedTextBrush}"
+                                          Margin="0,14,0,0"
+                                          IsChecked="True"/>
+                                <TextBlock Text="Quando ativo, esta conta aparece aqui para continuar sem digitar a senha novamente." FontSize="11" Foreground="{DynamicResource LoginSecondaryTextBrush}" Margin="24,6,0,0" TextWrapping="Wrap"/>
 
-                            <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="{DynamicResource LoginAccentBrush}" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline" MouseLeftButtonUp="ForgotPasswordLink_MouseLeftButtonUp"/>
+                                <Button Content="Entrar" Style="{StaticResource PrimaryButtonStyle}" Click="LoginButton_Click" Foreground="White"/>
+
+                                <TextBlock Text="Esqueceu a senha?" FontSize="12" Foreground="{DynamicResource LoginAccentBrush}" Margin="0,16,0,0" Cursor="Hand" TextDecorations="Underline" MouseLeftButtonUp="ForgotPasswordLink_MouseLeftButtonUp"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <StackPanel x:Name="SignupContent" Orientation="Vertical" Visibility="Collapsed">
@@ -649,6 +676,13 @@
                                 <CheckBox Background="Transparent" Foreground="{DynamicResource LoginAccentBrush}"/>
                                 <TextBlock Text="Concordo com os Termos de Serviço" FontSize="12" Foreground="{DynamicResource LoginMutedTextBrush}" VerticalAlignment="Center"/>
                             </StackPanel>
+
+                            <CheckBox x:Name="SignupKeepConnectedCheckBox"
+                                      Content="Manter conectado neste dispositivo"
+                                      Background="Transparent"
+                                      Foreground="{DynamicResource LoginMutedTextBrush}"
+                                      Margin="0,12,0,0"
+                                      IsChecked="True"/>
 
                             <Button Content="Criar Conta" Style="{StaticResource PrimaryButtonStyle}" Click="SignupButton_Click" Foreground="White"/>
                         </StackPanel>
