@@ -16,6 +16,7 @@ O projeto roda em Windows com .NET 8 e usa uma shell principal em `MainWindow` p
 - [Como Executar Localmente](#como-executar-localmente)
 - [Fluxos Principais](#fluxos-principais)
 - [Diagnostico e Observabilidade](#diagnostico-e-observabilidade)
+- [Atualizacoes automaticas](#atualizacoes-automaticas)
 - [Documentacao Complementar](#documentacao-complementar)
 - [Limitacoes e Atencoes](#limitacoes-e-atencoes)
 - [Roadmap Sugerido](#roadmap-sugerido)
@@ -48,6 +49,7 @@ Em termos de dominio, o app esta mais proximo de um ambiente de colaboracao acad
 - Regras de seguranca do Firestore: arquivo raiz `firestore.rules`.
 - Logs de debug: `logs\AppDebug.log` sob a pasta de saida da aplicacao.
 - Log de erros de startup/UI: `MeuApp_Errors.log` na pasta de saida.
+- Atualizacao automatica: o app consulta GitHub Releases e baixa pacotes novos quando existe tag maior que a versao instalada.
 
 ## Funcionalidades
 
@@ -467,6 +469,13 @@ dotnet test "MeuApp.Tests/MeuApp.Tests.csproj"
 
 Alguns guias historicos da raiz ainda citam `Desktop\AppDebug.log` como destino do log. O codigo atual em `DebugHelper.cs` grava em `logs\AppDebug.log` dentro da pasta de saida da aplicacao. Se houver divergencia entre um guia antigo e o comportamento atual, confie primeiro no codigo.
 
+## Atualizacoes automaticas
+
+- O app verifica GitHub Releases em segundo plano durante a inicializacao.
+- A release precisa ter tag maior que a versao instalada, por exemplo `v1.0.1`.
+- O pacote recomendado e o `.zip` gerado pelo workflow `.github/workflows/release.yml`.
+- Veja o passo a passo em [UPDATE_GUIDE.md](UPDATE_GUIDE.md).
+
 ## Documentacao Complementar
 
 - [CHAT_DESIGN.md](CHAT_DESIGN.md)
@@ -478,6 +487,7 @@ Alguns guias historicos da raiz ainda citam `Desktop\AppDebug.log` como destino 
 - [SOLUTION_IMPLEMENTATION_SUMMARY.md](SOLUTION_IMPLEMENTATION_SUMMARY.md)
 - [SOLUTION_TEAMS_PERSISTENCE.md](SOLUTION_TEAMS_PERSISTENCE.md)
 - [TEST_TEAMS_PERSISTENCE.md](TEST_TEAMS_PERSISTENCE.md)
+- [UPDATE_GUIDE.md](UPDATE_GUIDE.md)
 
 Esses arquivos registram historico de implementacao, testes e debug. O README serve como visao consolidada; os guias acima aprofundam partes especificas.
 

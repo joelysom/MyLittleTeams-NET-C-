@@ -268,6 +268,35 @@ public class AppConfigTests
 }
 
 [TestClass]
+public class AppUpdateServiceTests
+{
+    [TestMethod]
+    public void TryParseReleaseVersion_AcceptsGitHubStyleTags()
+    {
+        Assert.AreEqual(new Version(1, 2, 3, 0), AppUpdateService.TryParseReleaseVersion("v1.2.3"));
+        Assert.AreEqual(new Version(2, 0, 0, 0), AppUpdateService.TryParseReleaseVersion("Choas 2.0.0-beta.1"));
+        Assert.IsNull(AppUpdateService.TryParseReleaseVersion("sem-versao"));
+    }
+
+    [TestMethod]
+    public void SelectPreferredAsset_PrefersInstallersBeforeArchivesAndPortableExecutables()
+    {
+        var assets = new[]
+        {
+            new UpdateReleaseAsset("Choas-win-x64.zip", "https://example.test/Choas-win-x64.zip", 100),
+            new UpdateReleaseAsset("Choas.exe", "https://example.test/Choas.exe", 100),
+            new UpdateReleaseAsset("Choas.Setup.1.2.3.exe", "https://example.test/Choas.Setup.1.2.3.exe", 100)
+        };
+
+        var selected = AppUpdateService.SelectPreferredAsset(assets);
+
+        Assert.IsNotNull(selected);
+        Assert.AreEqual("Choas.Setup.1.2.3.exe", selected!.Name);
+        Assert.AreEqual(UpdatePackageKind.Installer, AppUpdateService.GetPackageKind(selected.Name));
+    }
+}
+
+[TestClass]
 public class TeachingClassServiceTests
 {
     [TestMethod]

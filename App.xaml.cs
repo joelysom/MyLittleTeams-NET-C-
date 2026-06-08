@@ -44,6 +44,7 @@ public partial class App : Application
             };
 
             LogToFile("Startup completed successfully");
+            _ = AppUpdateService.CheckForUpdatesOnStartupAsync();
         }
         catch (Exception ex)
         {
@@ -123,6 +124,24 @@ public partial class App : Application
         SetGlobalBrush("DangerBrush", highContrastEnabled
             ? Color.FromRgb(248, 113, 113)
             : darkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
+        SetGlobalBrush("ChatIconBrush", highContrastEnabled
+            ? Color.FromRgb(94, 234, 212)
+            : darkModeEnabled ? Color.FromRgb(45, 212, 191) : Color.FromRgb(15, 118, 110));
+        SetGlobalBrush("ConnectionsIconBrush", highContrastEnabled
+            ? Color.FromRgb(125, 211, 252)
+            : darkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(2, 132, 199));
+        SetGlobalBrush("TeamsIconBrush", highContrastEnabled
+            ? Color.FromRgb(147, 197, 253)
+            : darkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
+        SetGlobalBrush("CalendarIconBrush", highContrastEnabled
+            ? Color.FromRgb(253, 186, 116)
+            : darkModeEnabled ? Color.FromRgb(251, 146, 60) : Color.FromRgb(234, 88, 12));
+        SetGlobalBrush("FilesIconBrush", highContrastEnabled
+            ? Color.FromRgb(196, 181, 253)
+            : darkModeEnabled ? Color.FromRgb(167, 139, 250) : Color.FromRgb(124, 58, 237));
+        SetGlobalBrush("SettingsIconBrush", highContrastEnabled
+            ? Color.FromRgb(203, 213, 225)
+            : darkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(100, 116, 139));
         SetGlobalBrush("ToggleTrackOffBrush", highContrastEnabled
             ? Color.FromRgb(71, 85, 105)
             : darkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
@@ -130,6 +149,18 @@ public partial class App : Application
             ? Color.FromRgb(14, 165, 233)
             : darkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
         SetGlobalBrush("ToggleThumbBrush", Colors.White);
+        SetGlobalBrush("ScrollBarTrackBrush", highContrastEnabled
+            ? Color.FromRgb(3, 7, 18)
+            : darkModeEnabled ? Color.FromRgb(15, 23, 42) : Color.FromRgb(241, 243, 245));
+        SetGlobalBrush("ScrollBarThumbBrush", highContrastEnabled
+            ? Color.FromRgb(125, 211, 252)
+            : darkModeEnabled ? Color.FromRgb(71, 85, 105) : Color.FromRgb(168, 176, 189));
+        SetGlobalBrush("ScrollBarThumbHoverBrush", highContrastEnabled
+            ? Color.FromRgb(186, 230, 253)
+            : darkModeEnabled ? Color.FromRgb(100, 116, 139) : Color.FromRgb(127, 137, 150));
+        SetGlobalBrush("ScrollBarThumbPressedBrush", highContrastEnabled
+            ? Color.FromRgb(224, 242, 254)
+            : darkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(100, 116, 139));
 
         SetGlobalBrush("BrandSurfaceBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(11, 18, 32) : Color.FromRgb(248, 250, 252));
         SetGlobalBrush("BrandTextBrush", darkModeEnabled || highContrastEnabled ? Color.FromRgb(226, 232, 240) : Color.FromRgb(15, 23, 42));

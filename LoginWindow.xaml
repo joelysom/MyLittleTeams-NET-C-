@@ -74,53 +74,7 @@
             <Setter Property="Margin" Value="0,8,0,0"/>
         </Style>
 
-        <Style x:Key="LoginScrollBarThumbStyle" TargetType="Thumb">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="ThumbBorder"
-                                Margin="2"
-                                CornerRadius="999"
-                                Background="{DynamicResource LoginBorderBrush}"/>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource LoginAccentBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource LoginAccentHoverBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="LoginVerticalScrollBarStyle" TargetType="ScrollBar">
-            <Setter Property="Width" Value="10"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ScrollBar">
-                        <Grid Width="{TemplateBinding Width}" Background="Transparent">
-                            <Border Margin="2,0"
-                                    CornerRadius="999"
-                                    Background="{DynamicResource LoginSurfaceAltBrush}"/>
-                            <Track x:Name="PART_Track" IsDirectionReversed="True">
-                                <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
-                                </Track.DecreaseRepeatButton>
-                                <Track.Thumb>
-                                    <Thumb Style="{StaticResource LoginScrollBarThumbStyle}"/>
-                                </Track.Thumb>
-                                <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
-                                </Track.IncreaseRepeatButton>
-                            </Track>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <Style x:Key="LoginVerticalScrollBarStyle" TargetType="ScrollBar" BasedOn="{StaticResource AppClassicScrollBarStyle}"/>
 
         <Style x:Key="LoginComboBoxToggleButtonStyle" TargetType="ToggleButton">
             <Setter Property="Focusable" Value="False"/>

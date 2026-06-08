@@ -13,9 +13,28 @@ namespace MeuApp
         public string StorageBucket { get; set; } = string.Empty;
     }
 
+    public sealed class UpdaterSettings
+    {
+        public bool Enabled { get; set; } = true;
+        public string GitHubOwner { get; set; } = string.Empty;
+        public string GitHubRepository { get; set; } = string.Empty;
+        public bool IncludePrereleases { get; set; }
+    }
+
+    public sealed class AiAssistantSettings
+    {
+        public bool Enabled { get; set; } = true;
+        public string BaseUrl { get; set; } = string.Empty;
+        public string EndpointPath { get; set; } = string.Empty;
+        public string EndpointUrl { get; set; } = string.Empty;
+        public int TimeoutSeconds { get; set; } = 45;
+    }
+
     internal sealed class AppConfigDocument
     {
         public FirebaseSettings Firebase { get; set; } = new FirebaseSettings();
+        public UpdaterSettings Updater { get; set; } = new UpdaterSettings();
+        public AiAssistantSettings AiAssistant { get; set; } = new AiAssistantSettings();
     }
 
     public static class AppConfig
@@ -23,9 +42,19 @@ namespace MeuApp
         private const string DefaultFirebaseApiKey = "AIzaSyA2V4MEzgOoKEEZAAXH49DXbzxUo0_CuWU";
         private const string DefaultFirebaseProjectId = "obsseractpi";
         private const string DefaultFirebaseStorageBucket = "obsseractpi.firebasestorage.app";
+        private const string DefaultGitHubOwner = "joelysom";
+        private const string DefaultGitHubRepository = "MyLittleTeams-NET-C-";
+        private const string DefaultAiAssistantBaseUrl = "https://choas-web-app.vercel.app";
+        private const string DefaultAiAssistantEndpointPath = "/api/ai/chat";
         private static readonly Lazy<FirebaseSettings> FirebaseSettingsLazy = new Lazy<FirebaseSettings>(LoadFirebaseSettings);
+        private static readonly Lazy<UpdaterSettings> UpdaterSettingsLazy = new Lazy<UpdaterSettings>(LoadUpdaterSettings);
+        private static readonly Lazy<AiAssistantSettings> AiAssistantSettingsLazy = new Lazy<AiAssistantSettings>(LoadAiAssistantSettings);
 
         public static FirebaseSettings Firebase => FirebaseSettingsLazy.Value;
+
+        public static UpdaterSettings Updater => UpdaterSettingsLazy.Value;
+
+        public static AiAssistantSettings AiAssistant => AiAssistantSettingsLazy.Value;
 
         public static string FirebaseApiKey => Firebase.ApiKey;
 
@@ -98,11 +127,7 @@ namespace MeuApp
                 StorageBucket = DefaultFirebaseStorageBucket
             };
 
-            foreach (var configPath in new[]
-            {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.local.json"),
-                Path.Combine(Environment.CurrentDirectory, "appsettings.local.json")
-            })
+            foreach (var configPath in GetLocalConfigPaths())
             {
                 if (!File.Exists(configPath))
                 {
@@ -175,6 +200,219 @@ namespace MeuApp
             }
 
             return settings;
+        }
+
+        private static UpdaterSettings LoadUpdaterSettings()
+        {
+            var settings = new UpdaterSettings
+            {
+                Enabled = true,
+                GitHubOwner = DefaultGitHubOwner,
+                GitHubRepository = DefaultGitHubRepository,
+                IncludePrereleases = false
+            };
+
+            foreach (var configPath in GetLocalConfigPaths())
+            {
+                if (!File.Exists(configPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var json = File.ReadAllText(configPath);
+                    var document = JsonSerializer.Deserialize<AppConfigDocument>(json);
+                    if (document?.Updater == null)
+                    {
+                        continue;
+                    }
+
+                    settings.Enabled = document.Updater.Enabled;
+
+                    if (!string.IsNullOrWhiteSpace(document.Updater.GitHubOwner))
+                    {
+                        settings.GitHubOwner = document.Updater.GitHubOwner.Trim();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(document.Updater.GitHubRepository))
+                    {
+                        settings.GitHubRepository = document.Updater.GitHubRepository.Trim();
+                    }
+
+                    settings.IncludePrereleases = document.Updater.IncludePrereleases;
+                }
+                catch
+                {
+                    // Usa fallback interno quando a configuração local estiver inválida.
+                }
+            }
+
+            var updaterEnabledOverride = Environment.GetEnvironmentVariable("CHOAS_UPDATER_ENABLED");
+            if (TryParseBoolean(updaterEnabledOverride, out var updaterEnabled))
+            {
+                settings.Enabled = updaterEnabled;
+            }
+
+            var githubOwnerOverride = Environment.GetEnvironmentVariable("CHOAS_GITHUB_OWNER");
+            if (!string.IsNullOrWhiteSpace(githubOwnerOverride))
+            {
+                settings.GitHubOwner = githubOwnerOverride.Trim();
+            }
+
+            var githubRepositoryOverride = Environment.GetEnvironmentVariable("CHOAS_GITHUB_REPOSITORY");
+            if (!string.IsNullOrWhiteSpace(githubRepositoryOverride))
+            {
+                settings.GitHubRepository = githubRepositoryOverride.Trim();
+            }
+
+            var includePrereleasesOverride = Environment.GetEnvironmentVariable("CHOAS_UPDATER_INCLUDE_PRERELEASES");
+            if (TryParseBoolean(includePrereleasesOverride, out var includePrereleases))
+            {
+                settings.IncludePrereleases = includePrereleases;
+            }
+
+            return settings;
+        }
+
+        private static AiAssistantSettings LoadAiAssistantSettings()
+        {
+            var settings = new AiAssistantSettings
+            {
+                Enabled = true,
+                BaseUrl = DefaultAiAssistantBaseUrl,
+                EndpointPath = DefaultAiAssistantEndpointPath,
+                EndpointUrl = string.Empty,
+                TimeoutSeconds = 45
+            };
+
+            foreach (var configPath in GetLocalConfigPaths())
+            {
+                if (!File.Exists(configPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var json = File.ReadAllText(configPath);
+                    var document = JsonSerializer.Deserialize<AppConfigDocument>(json);
+                    if (document?.AiAssistant == null)
+                    {
+                        continue;
+                    }
+
+                    settings.Enabled = document.AiAssistant.Enabled;
+
+                    if (!string.IsNullOrWhiteSpace(document.AiAssistant.BaseUrl))
+                    {
+                        settings.BaseUrl = document.AiAssistant.BaseUrl.Trim();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(document.AiAssistant.EndpointPath))
+                    {
+                        settings.EndpointPath = NormalizeEndpointPath(document.AiAssistant.EndpointPath);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(document.AiAssistant.EndpointUrl))
+                    {
+                        settings.EndpointUrl = document.AiAssistant.EndpointUrl.Trim();
+                    }
+
+                    if (document.AiAssistant.TimeoutSeconds > 0)
+                    {
+                        settings.TimeoutSeconds = document.AiAssistant.TimeoutSeconds;
+                    }
+                }
+                catch
+                {
+                    // Usa fallback interno quando a configuracao local estiver invalida.
+                }
+            }
+
+            var enabledOverride = Environment.GetEnvironmentVariable("CHOAS_AI_ENABLED");
+            if (TryParseBoolean(enabledOverride, out var enabled))
+            {
+                settings.Enabled = enabled;
+            }
+
+            var endpointOverride = Environment.GetEnvironmentVariable("CHOAS_AI_ENDPOINT_URL");
+            if (!string.IsNullOrWhiteSpace(endpointOverride))
+            {
+                settings.EndpointUrl = endpointOverride.Trim();
+            }
+
+            var baseUrlOverride = Environment.GetEnvironmentVariable("CHOAS_AI_BASE_URL");
+            if (!string.IsNullOrWhiteSpace(baseUrlOverride))
+            {
+                settings.BaseUrl = baseUrlOverride.Trim();
+            }
+
+            var endpointPathOverride = Environment.GetEnvironmentVariable("CHOAS_AI_ENDPOINT_PATH");
+            if (!string.IsNullOrWhiteSpace(endpointPathOverride))
+            {
+                settings.EndpointPath = NormalizeEndpointPath(endpointPathOverride);
+            }
+
+            var timeoutOverride = Environment.GetEnvironmentVariable("CHOAS_AI_TIMEOUT_SECONDS");
+            if (int.TryParse(timeoutOverride, out var timeoutSeconds) && timeoutSeconds > 0)
+            {
+                settings.TimeoutSeconds = timeoutSeconds;
+            }
+
+            settings.EndpointPath = NormalizeEndpointPath(settings.EndpointPath);
+            settings.TimeoutSeconds = Math.Clamp(settings.TimeoutSeconds, 10, 120);
+
+            return settings;
+        }
+
+        private static string NormalizeEndpointPath(string? endpointPath)
+        {
+            var normalized = (endpointPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return DefaultAiAssistantEndpointPath;
+            }
+
+            return normalized.StartsWith("/", StringComparison.Ordinal) ? normalized : "/" + normalized;
+        }
+
+        private static IReadOnlyList<string> GetLocalConfigPaths()
+        {
+            return new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "appsettings.local.json"),
+                Path.Combine(Environment.CurrentDirectory, "appsettings.local.json")
+            };
+        }
+
+        private static bool TryParseBoolean(string? value, out bool result)
+        {
+            if (bool.TryParse(value, out result))
+            {
+                return true;
+            }
+
+            var normalized = (value ?? string.Empty).Trim();
+            if (string.Equals(normalized, "1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "yes", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "sim", StringComparison.OrdinalIgnoreCase))
+            {
+                result = true;
+                return true;
+            }
+
+            if (string.Equals(normalized, "0", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "no", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "nao", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, "não", StringComparison.OrdinalIgnoreCase))
+            {
+                result = false;
+                return true;
+            }
+
+            result = false;
+            return false;
         }
 
         private static IReadOnlyList<string> BuildFirebaseStorageBucketCandidates(string configuredBucket, string projectId)

@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -59,6 +60,9 @@ namespace MeuApp
         private const int TeachingClassIconUploadSize = 960;
         private const int TeachingClassIconUploadQuality = 84;
         private const int MaxRemoteTeamAssetBytes = 26214400;
+        private const int FilesHubThumbnailDecodePixelWidth = 320;
+        private const int FilesHubPreviewImageDecodePixelWidth = 1800;
+        private const int FilesHubThumbnailCacheLimit = 160;
         private const string TeachingClassModuleHome = "home";
         private const string TeachingClassModuleAssignments = "assignments";
         private const string TeachingClassAssignmentFilterAll = "todos";
@@ -66,8 +70,18 @@ namespace MeuApp
         private const string TeachingClassAssignmentFilterOverdue = "em-atraso";
         private const string TeachingClassAssignmentFilterReviewed = "corrigida";
         private const string TeachingClassAssignmentFilterNoSubmission = "sem-entrega";
+        private const string AiAssistantContactId = "__choas_ai_assistant";
+        private const string AiAssistantConversationId = "__choas_ai_thread";
+        private const string AiAssistantDisplayName = "Choas IA";
         private const string SelfChatPlaceholderText = "Aqui é o seu chat próprio para notas, lembretes, fotos e arquivos rápidos.";
         private const string SelfChatPreviewText = "Seus lembretes, fotos e arquivos ficam aqui.";
+        private const string AiAssistantPreviewText = "Pesquisa, projetos e dúvidas do Choas com OpenAI/Codex.";
+        private const double ConversationAttachmentPreviewWidth = 316;
+        private const double ConversationAttachmentPreviewHeight = 180;
+        private const double ConversationMediaGroupPreviewWidth = 316;
+        private const double ConversationMediaGroupPreviewHeight = 216;
+        private const double ConversationMediaGroupTwoPreviewHeight = 176;
+        private const double ConversationMediaGroupPreviewGap = 3;
         private static readonly HttpClient httpClient = new HttpClient();
         private static readonly string[] KnownProgrammingLanguages =
         {
@@ -239,6 +253,7 @@ namespace MeuApp
         private int _teamListSearchVersion = 0;
         private bool _suppressTeamMemberSearch = false;
         private TeamBoardView _activeTeamBoardView = TeamBoardView.Trello;
+        private bool _isTeamWorkspaceDetailsPanelOpen = false;
         private TeamTaskCardInfo? _draggedTeamTaskCard = null;
         private CsdNoteDragInfo? _draggedCsdNote = null;
         private Popup? _boardDragPreviewPopup = null;
@@ -247,6 +262,22 @@ namespace MeuApp
         private FrameworkElement? _boardDragSourceElement = null;
         private double _boardDragSourceOriginalOpacity = 1;
         private Conversation? _selectedConversation = null;
+        private readonly Conversation _aiAssistantConversation = new Conversation
+        {
+            ConversationId = AiAssistantConversationId,
+            ContactId = AiAssistantContactId,
+            ContactName = AiAssistantDisplayName,
+            LastMessage = AiAssistantPreviewText,
+            LastMessageTime = DateTime.Now,
+            LastSenderId = AiAssistantContactId,
+            HasUnread = false,
+            IsFavorite = true,
+            CanRemoveFromFavorites = false,
+            CustomSortOrder = -10,
+            Messages = new List<ChatMessage>()
+        };
+        private readonly AiAssistantChatService _aiAssistantChatService = new AiAssistantChatService();
+        private bool _aiAssistantRequestInFlight = false;
         private TeamWorkspaceInfo? _activeTeamWorkspace = null;
         private TeamEntryMode _teamEntryMode = TeamEntryMode.None;
         private string _chatListFilter = string.Empty;
@@ -254,7 +285,7 @@ namespace MeuApp
         private ChatConversationSortMode _activeConversationSortMode = ChatConversationSortMode.Custom;
         private readonly Dictionary<string, DateTime> _mutedConversationUntil = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private const double ExpandedSidebarWidth = 288;
-        private const double CollapsedSidebarWidth = 96;
+        private const double CollapsedSidebarWidth = 84;
         private bool _appDarkModeEnabled = false;
         private bool _isSidebarCollapsed = false;
         private string _activeNavigationTag = "Chats";
@@ -308,8 +339,12 @@ namespace MeuApp
         private FilesHubState _filesHubState = new FilesHubState();
         private bool _filesHubStateLoaded = false;
         private int _filesHubRenderSequence = 0;
+        private int _filesHubStateRevision = 0;
+        private int _filesHubRenderedStateRevision = -1;
         private bool _showChoasIntroBubble = false;
         private string _filesHubStatusMessage = string.Empty;
+        private readonly ConcurrentDictionary<string, FilesHubThumbnailCacheEntry> _filesHubThumbnailCache = new ConcurrentDictionary<string, FilesHubThumbnailCacheEntry>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<ImageSource?>> _filesHubThumbnailTasks = new ConcurrentDictionary<string, Task<ImageSource?>>(StringComparer.OrdinalIgnoreCase);
         private BitmapImage? _choasGifSource = null;
         private string? _choasGifSourcePath = null;
 
@@ -427,6 +462,14 @@ namespace MeuApp
             public FilesHubItem Item { get; init; } = new FilesHubItem();
             public bool FileExists { get; init; }
             public bool IsSynced { get; init; }
+            public bool IsImagePreviewCandidate { get; init; }
+            public string ThumbnailCacheKey { get; init; } = string.Empty;
+        }
+
+        private sealed class FilesHubThumbnailCacheEntry
+        {
+            public ImageSource Source { get; init; } = null!;
+            public DateTime LastAccessUtc { get; set; } = DateTime.UtcNow;
         }
 
         private sealed class FilesHubRenderSection
@@ -441,6 +484,19 @@ namespace MeuApp
             public string DominantType { get; init; } = "Projeto";
             public FilesHubItem? LatestItem { get; init; }
             public List<FilesHubRenderSection> Sections { get; init; } = new List<FilesHubRenderSection>();
+        }
+
+        private sealed class FilesHubVirtualEntry
+        {
+            private readonly Func<UIElement> _contentFactory;
+            private UIElement? _content;
+
+            public FilesHubVirtualEntry(Func<UIElement> contentFactory)
+            {
+                _contentFactory = contentFactory;
+            }
+
+            public UIElement Content => _content ??= _contentFactory();
         }
 
         private sealed class FilesHubAssociationSelection
@@ -534,6 +590,8 @@ namespace MeuApp
         public MainWindow()
         {
             InitializeComponent();
+            MinWidth = Math.Max(MinWidth, 1180);
+            MinHeight = Math.Max(MinHeight, 700);
             _appDarkModeEnabled = AccessibilityPreferences.DarkModeEnabled;
             ProgrammingLanguageInput.ItemsSource = KnownProgrammingLanguages.OrderBy(language => language).ToList();
             InitializeTeamsUi();
@@ -583,6 +641,7 @@ namespace MeuApp
                 _ = LoadTeamsFromDatabaseAsync(force: true);
                 _ = LoadTeachingClassesFromDatabaseAsync(force: true);
                 _ = RefreshConnectionsCacheAsync();
+                _ = WarmFilesHubStateCacheAsync();
                 _realtimeSyncTimer.Start();
             }
             else
@@ -665,6 +724,17 @@ namespace MeuApp
             yield return SettingsNavButton;
         }
 
+        private IEnumerable<PackIconMaterial> GetNavigationIcons()
+        {
+            yield return ChatsNavIcon;
+            yield return ConnectionsNavIcon;
+            yield return TeamsNavIcon;
+            yield return ProfessorNavIcon;
+            yield return CalendarNavIcon;
+            yield return FilesNavIcon;
+            yield return SettingsNavIcon;
+        }
+
         private void ToggleSidebar_Click(object sender, RoutedEventArgs e)
         {
             _isSidebarCollapsed = !_isSidebarCollapsed;
@@ -681,15 +751,20 @@ namespace MeuApp
             SidebarColumn.Width = new GridLength(_isSidebarCollapsed ? CollapsedSidebarWidth : ExpandedSidebarWidth);
 
             var expandedVisibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
-            SidebarBrandIconBadge.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+            SidebarRootGrid.Margin = _isSidebarCollapsed ? new Thickness(10, 12, 10, 14) : new Thickness(14, 14, 14, 18);
+            SidebarBrandCard.Padding = _isSidebarCollapsed ? new Thickness(9) : new Thickness(14);
+            SidebarBrandCard.CornerRadius = _isSidebarCollapsed ? new CornerRadius(16) : new CornerRadius(22);
+            SidebarBrandIconBadge.Visibility = Visibility.Visible;
             SidebarBrandTextPanel.Visibility = expandedVisibility;
-            SidebarBrandCompactText.Visibility = _isSidebarCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            SidebarBrandCompactText.Visibility = Visibility.Collapsed;
             SidebarWorkspaceBadge.Visibility = expandedVisibility;
             SidebarProfileDetails.Visibility = expandedVisibility;
             SidebarCollapseButton.Visibility = _isSidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
             SidebarRestoreHandle.Visibility = _isSidebarCollapsed ? Visibility.Visible : Visibility.Collapsed;
+            SidebarProfileCard.CornerRadius = _isSidebarCollapsed ? new CornerRadius(16) : new CornerRadius(20);
             SidebarProfileButton.HorizontalContentAlignment = _isSidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
             SidebarProfileButton.Padding = _isSidebarCollapsed ? new Thickness(10) : new Thickness(14);
+            SidebarProfileLayout.HorizontalAlignment = _isSidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
             SidebarCollapseIcon.Kind = PackIconMaterialKind.ChevronDoubleLeft;
 
             ChatsNavLabel.Visibility = expandedVisibility;
@@ -708,7 +783,19 @@ namespace MeuApp
                 }
 
                 button.HorizontalContentAlignment = _isSidebarCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
-                button.Padding = _isSidebarCollapsed ? new Thickness(12) : new Thickness(14, 12, 14, 12);
+                button.Padding = _isSidebarCollapsed ? new Thickness(0) : new Thickness(14, 12, 14, 12);
+                button.Height = _isSidebarCollapsed ? 44 : double.NaN;
+                button.Margin = _isSidebarCollapsed ? new Thickness(0, 0, 0, 8) : new Thickness(0, 0, 0, 6);
+            }
+
+            foreach (var icon in GetNavigationIcons())
+            {
+                if (icon == null)
+                {
+                    continue;
+                }
+
+                icon.Margin = _isSidebarCollapsed ? new Thickness(0) : new Thickness(0, 0, 12, 0);
             }
 
             UpdateChatsBadge();
@@ -850,6 +937,7 @@ namespace MeuApp
 
             if (FilesContent.Visibility == Visibility.Visible)
             {
+                _filesHubRenderedStateRevision = -1;
                 RenderFilesHub();
             }
         }
@@ -941,9 +1029,18 @@ namespace MeuApp
         {
             _filesHubState = new FilesHubState();
             _filesHubStateLoaded = false;
+            _filesHubStateRevision++;
+            _filesHubRenderedStateRevision = -1;
             _filesHubStatusMessage = string.Empty;
             _showChoasIntroBubble = false;
+            ClearFilesHubThumbnailCache();
             StopChoasAnimation();
+        }
+
+        private void ClearFilesHubThumbnailCache()
+        {
+            _filesHubThumbnailCache.Clear();
+            _filesHubThumbnailTasks.Clear();
         }
 
         private void EnsureFilesHubStateLoaded()
@@ -956,6 +1053,8 @@ namespace MeuApp
             var loadResult = LoadFilesHubState();
             _filesHubState = loadResult.State;
             _filesHubStateLoaded = true;
+            _filesHubStateRevision++;
+            _filesHubRenderedStateRevision = -1;
 
             if (!string.IsNullOrWhiteSpace(loadResult.StatusMessage))
             {
@@ -1023,6 +1122,44 @@ namespace MeuApp
             };
         }
 
+        private async Task WarmFilesHubStateCacheAsync()
+        {
+            if (_filesHubStateLoaded)
+            {
+                return;
+            }
+
+            try
+            {
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+
+                if (_filesHubStateLoaded)
+                {
+                    return;
+                }
+
+                var loadResult = await LoadFilesHubStateAsync();
+                if (_filesHubStateLoaded)
+                {
+                    return;
+                }
+
+                _filesHubState = loadResult.State;
+                _filesHubStateLoaded = true;
+                _filesHubStateRevision++;
+                _filesHubRenderedStateRevision = -1;
+
+                if (!string.IsNullOrWhiteSpace(loadResult.StatusMessage))
+                {
+                    _filesHubStatusMessage = loadResult.StatusMessage;
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"Falha ao preaquecer o hub de arquivos: {ex.Message}");
+            }
+        }
+
         private FilesHubState NormalizeFilesHubState(FilesHubState? state)
         {
             var normalized = CloneFilesHubState(state ?? new FilesHubState());
@@ -1081,6 +1218,7 @@ namespace MeuApp
 
                 var json = JsonSerializer.Serialize(_filesHubState, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(statePath, json);
+                _filesHubStateRevision++;
                 return true;
             }
             catch (Exception ex)
@@ -1238,92 +1376,201 @@ namespace MeuApp
         private FilesHubAssociationSelection? ShowFilesHubAssociationDialog(IReadOnlyList<string> filePaths)
         {
             var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
-            var dialog = CreateStyledDialogWindow("Vincular arquivos", 660, 620, 620);
-
+            var dialog = CreateStyledDialogWindow("Adicionar arquivos", 720, 540, 460, true);
             var selectedType = "Projeto";
             FilesHubAssociationSelection? result = null;
 
             var contextBox = new TextBox
             {
-                Height = 44,
+                Height = 40,
                 Margin = new Thickness(0, 8, 0, 0),
                 Text = string.Empty
             };
             ApplyDialogInputStyle(contextBox);
 
-            var choicePanel = new WrapPanel();
-            void RenderChoiceCards()
+            var typeHost = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var typeOptions = new[]
             {
-                choicePanel.Children.Clear();
+                (Label: "Projeto", Description: "Base geral do grupo.", Icon: PackIconMaterialKind.FolderOutline),
+                (Label: "Sessao", Description: "Aula, encontro ou sprint.", Icon: PackIconMaterialKind.CalendarClockOutline),
+                (Label: "Trabalho", Description: "Entrega ou produto final.", Icon: PackIconMaterialKind.FileDocumentOutline),
+                (Label: "Atividade", Description: "Apoio rapido ou checklist.", Icon: PackIconMaterialKind.ClipboardTextOutline)
+            };
 
-                var options = new[]
+            Button CreateTypeButton(string label, string description, PackIconMaterialKind iconKind)
+            {
+                var selected = string.Equals(selectedType, label, StringComparison.OrdinalIgnoreCase);
+                var content = new Grid();
+                content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                content.Children.Add(new Border
                 {
-                    (Label: "Projeto", Description: "Material estrutural para a jornada maior do grupo."),
-                    (Label: "Sessao", Description: "Arquivo amarrado a uma rodada, aula ou encontro especifico."),
-                    (Label: "Trabalho", Description: "Entrega formal com dono e contexto mais fechado."),
-                    (Label: "Atividade", Description: "Peca tatica do dia a dia, checklist ou apoio rapido.")
+                    Width = 34,
+                    Height = 34,
+                    CornerRadius = new CornerRadius(8),
+                    Background = selected ? accentBrush : GetThemeBrush("MutedCardBackgroundBrush"),
+                    BorderBrush = selected ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(selected ? 0 : 1),
+                    Child = new PackIconMaterial
+                    {
+                        Kind = iconKind,
+                        Width = 17,
+                        Height = 17,
+                        Foreground = selected ? Brushes.White : accentBrush,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                });
+
+                var copy = new StackPanel
+                {
+                    Margin = new Thickness(10, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center
                 };
-
-                foreach (var option in options)
+                copy.Children.Add(new TextBlock
                 {
-                    var localOption = option;
-                    choicePanel.Children.Add(CreateDialogChoiceCard(
-                        localOption.Label,
-                        localOption.Description,
-                        accentBrush,
-                        string.Equals(selectedType, localOption.Label, StringComparison.OrdinalIgnoreCase),
-                        (_, __) =>
-                        {
-                            selectedType = localOption.Label;
-                            RenderChoiceCards();
-                        },
-                        270));
+                    Text = label,
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                });
+                copy.Children.Add(new TextBlock
+                {
+                    Text = description,
+                    Margin = new Thickness(0, 3, 0, 0),
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                Grid.SetColumn(copy, 1);
+                content.Children.Add(copy);
+
+                var button = new Button
+                {
+                    Width = 154,
+                    MinHeight = 78,
+                    Margin = new Thickness(0, 0, 10, 10),
+                    Padding = new Thickness(12),
+                    Background = selected ? CreateSoftAccentBrush(accentBrush, 24) : GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = selected ? accentBrush : GetThemeBrush("CardBorderBrush"),
+                    BorderThickness = new Thickness(1),
+                    HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                    VerticalContentAlignment = VerticalAlignment.Stretch,
+                    Cursor = Cursors.Hand,
+                    Content = content
+                };
+                button.Click += (_, __) =>
+                {
+                    selectedType = label;
+                    RenderTypeButtons();
+                };
+                return button;
+            }
+
+            void RenderTypeButtons()
+            {
+                typeHost.Children.Clear();
+                foreach (var option in typeOptions)
+                {
+                    typeHost.Children.Add(CreateTypeButton(option.Label, option.Description, option.Icon));
                 }
             }
 
-            RenderChoiceCards();
+            RenderTypeButtons();
 
             var selectedFilesText = string.Join(
                 Environment.NewLine,
-                filePaths.Take(4).Select(path => $"- {IOPath.GetFileName(path)}"));
-            if (filePaths.Count > 4)
+                filePaths.Take(5).Select(path => IOPath.GetFileName(path)));
+            if (filePaths.Count > 5)
             {
-                selectedFilesText += $"{Environment.NewLine}• +{filePaths.Count - 4} arquivo(s)";
+                selectedFilesText += $"{Environment.NewLine}+{filePaths.Count - 5} arquivo(s)";
             }
 
-            var summaryContent = new StackPanel();
-            var summaryChips = new WrapPanel();
-            summaryChips.Children.Add(CreateStaticTeamChip($"{filePaths.Count} arquivo(s)", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
-            summaryChips.Children.Add(CreateStaticTeamChip("Fluxo assistido pelo CHOAS", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
-            summaryContent.Children.Add(summaryChips);
-            summaryContent.Children.Add(new TextBlock
+            var fileSummary = new Border
             {
-                Text = selectedFilesText,
-                Margin = new Thickness(0, 8, 0, 0),
-                FontSize = 12,
-                Foreground = GetThemeBrush("PrimaryTextBrush"),
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight = 20
-            });
-
-            var contextContent = new StackPanel();
-            contextContent.Children.Add(new TextBlock
-            {
-                Text = "Se quiser, nomeie o alvo para o CHOAS lembrar algo mais especifico, como Sprint 02, Aula 05 ou Relatorio final.",
-                FontSize = 12,
-                Foreground = GetThemeBrush("SecondaryTextBrush"),
-                TextWrapping = TextWrapping.Wrap,
-                LineHeight = 20
-            });
-            contextContent.Children.Add(contextBox);
-            contextContent.Children.Add(CreateDialogHintCard("O contexto eh opcional. Sem ele, o arquivo continua organizado pelo tipo principal.", accentBrush));
+                Padding = new Thickness(14),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Child = new Grid
+                {
+                    ColumnDefinitions =
+                    {
+                        new ColumnDefinition { Width = GridLength.Auto },
+                        new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
+                    },
+                    Children =
+                    {
+                        new Border
+                        {
+                            Width = 42,
+                            Height = 42,
+                            CornerRadius = new CornerRadius(10),
+                            Background = CreateSoftAccentBrush(accentBrush, 24),
+                            Child = new PackIconMaterial
+                            {
+                                Kind = PackIconMaterialKind.FileMultipleOutline,
+                                Width = 21,
+                                Height = 21,
+                                Foreground = accentBrush,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center
+                            }
+                        },
+                        new StackPanel
+                        {
+                            Margin = new Thickness(12, 0, 0, 0),
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Children =
+                            {
+                                new TextBlock
+                                {
+                                    Text = filePaths.Count == 1 ? "1 arquivo selecionado" : $"{filePaths.Count} arquivos selecionados",
+                                    FontSize = 13,
+                                    FontWeight = FontWeights.SemiBold,
+                                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                                },
+                                new TextBlock
+                                {
+                                    Text = selectedFilesText,
+                                    Margin = new Thickness(0, 4, 0, 0),
+                                    FontSize = 11,
+                                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                    TextWrapping = TextWrapping.Wrap,
+                                    LineHeight = 17
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            Grid.SetColumn(((Grid)fileSummary.Child).Children[1], 1);
 
             var form = new StackPanel();
-            form.Children.Add(CreateDialogSectionCard("Arquivos selecionados", "Confirme o pacote antes de guardar tudo na mochila local.", accentBrush, summaryContent));
-            form.Children.Add(CreateDialogSectionCard("Associacao principal", "Essa camada define onde o material vai aparecer primeiro quando voce consultar o hub.", accentBrush, choicePanel));
-            form.Children.Add(CreateDialogSectionCard("Rotulo opcional", "Use um apelido curto para a trilha onde esse conjunto entra.", accentBrush, contextContent, new Thickness(0, 0, 0, 0)));
+            form.Children.Add(fileSummary);
+            form.Children.Add(new TextBlock
+            {
+                Text = "Categoria",
+                Margin = new Thickness(0, 18, 0, 0),
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            form.Children.Add(typeHost);
+            form.Children.Add(CreateDialogFieldLabel("Destino opcional", new Thickness(0, 6, 0, 0)));
+            form.Children.Add(contextBox);
+            form.Children.Add(new TextBlock
+            {
+                Text = "Ex.: Sprint 02, Aula 05, Relatorio final. Pode deixar vazio.",
+                Margin = new Thickness(0, 8, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
 
-            var saveButton = CreateDialogActionButton("Guardar arquivos", accentBrush, Brushes.White, Brushes.Transparent, 148);
+            var saveButton = CreateDialogActionButton("Adicionar", accentBrush, Brushes.White, Brushes.Transparent, 126);
             saveButton.Click += (_, __) =>
             {
                 result = new FilesHubAssociationSelection
@@ -1343,7 +1590,7 @@ namespace MeuApp
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            root.Children.Add(CreateDialogHeader("ARQUIVOS", "Vincular pacote", "Guarde seus materiais ja com o contexto certo para evitar uma lista solta e sem memoria de uso.", accentBrush));
+            root.Children.Add(CreateDialogHeader("ARQUIVOS", "Adicionar ao Drive", "Organize agora para encontrar depois sem precisar lembrar onde salvou.", accentBrush));
 
             var scrollViewer = new ScrollViewer
             {
@@ -2178,7 +2425,7 @@ namespace MeuApp
                 return;
             }
 
-            FilesHubScrollStack.Margin = new Thickness(0, 0, 0, _showChoasIntroBubble ? 324 : 220);
+            FilesHubScrollStack.Margin = new Thickness(0);
         }
 
         private void UpdateFilesHubStatusPresentation()
@@ -2198,11 +2445,20 @@ namespace MeuApp
         {
             UpdateFilesHubBottomSpacing();
             UpdateFilesHubStatusPresentation();
-            RenderFilesChoasCompanion();
         }
 
         private void RenderFilesHub(bool showLoadingState = false)
         {
+            if (!showLoadingState &&
+                _filesHubStateLoaded &&
+                _filesHubRenderedStateRevision == _filesHubStateRevision &&
+                FilesHubVirtualList != null &&
+                FilesHubVirtualList.Items.Count > 0)
+            {
+                RefreshChoasPresentation();
+                return;
+            }
+
             var renderSequence = ++_filesHubRenderSequence;
             _ = RenderFilesHubAsync(renderSequence, showLoadingState || !_filesHubStateLoaded);
         }
@@ -2227,6 +2483,8 @@ namespace MeuApp
 
                     _filesHubState = loadResult.State;
                     _filesHubStateLoaded = true;
+                    _filesHubStateRevision++;
+                    _filesHubRenderedStateRevision = -1;
 
                     if (!string.IsNullOrWhiteSpace(loadResult.StatusMessage))
                     {
@@ -2263,9 +2521,11 @@ namespace MeuApp
                 UpdateFilesHubBottomSpacing();
                 UpdateFilesHubStatusPresentation();
                 FilesHubSummaryHost.Children.Clear();
-                FilesHubBodyHost.Children.Clear();
                 StopChoasAnimation();
-                FilesHubBodyHost.Children.Add(CreateFilesHubLoadFailureState());
+                FilesHubVirtualList.ItemsSource = new[]
+                {
+                    new FilesHubVirtualEntry(CreateFilesHubLoadFailureState)
+                };
             }
             finally
             {
@@ -2281,7 +2541,6 @@ namespace MeuApp
             if (!_filesHubState.IntroSeen)
             {
                 _filesHubState.IntroSeen = true;
-                _showChoasIntroBubble = true;
                 TrySaveFilesHubState();
             }
 
@@ -2290,6 +2549,8 @@ namespace MeuApp
                 _filesHubState.ChoasMinimized = false;
                 TrySaveFilesHubState();
             }
+
+            _showChoasIntroBubble = false;
         }
 
         private FilesHubRenderModel PrepareFilesHubRenderModel(FilesHubState state)
@@ -2299,12 +2560,7 @@ namespace MeuApp
                 .ToList();
 
             var preparedItems = items
-                .Select(item => new FilesHubRenderItem
-                {
-                    Item = item,
-                    FileExists = File.Exists(item.StoredFilePath),
-                    IsSynced = IsFilesHubItemSynced(item)
-                })
+                .Select(PrepareFilesHubRenderItem)
                 .ToList();
 
             var dominantType = preparedItems
@@ -2336,13 +2592,57 @@ namespace MeuApp
             };
         }
 
+        private FilesHubRenderItem PrepareFilesHubRenderItem(FilesHubItem item)
+        {
+            var fileExists = false;
+            var isImagePreviewCandidate = false;
+            var thumbnailCacheKey = string.Empty;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(item.StoredFilePath))
+                {
+                    var fileInfo = new FileInfo(item.StoredFilePath);
+                    fileExists = fileInfo.Exists;
+
+                    if (fileExists && IsFilesHubImageExtension(GetFilesHubExtension(item.StoredFilePath, item.FileExtension)))
+                    {
+                        isImagePreviewCandidate = true;
+                        thumbnailCacheKey = BuildFilesHubThumbnailCacheKey(fileInfo, FilesHubThumbnailDecodePixelWidth);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"Falha ao checar arquivo do hub {item.FileName}: {ex.Message}");
+            }
+
+            return new FilesHubRenderItem
+            {
+                Item = item,
+                FileExists = fileExists,
+                IsSynced = IsFilesHubItemSynced(item),
+                IsImagePreviewCandidate = isImagePreviewCandidate,
+                ThumbnailCacheKey = thumbnailCacheKey
+            };
+        }
+
+        private string BuildFilesHubThumbnailCacheKey(FileInfo fileInfo, int decodePixelWidth)
+        {
+            return string.Join(
+                "|",
+                decodePixelWidth.ToString(CultureInfo.InvariantCulture),
+                fileInfo.FullName,
+                fileInfo.Length.ToString(CultureInfo.InvariantCulture),
+                fileInfo.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture));
+        }
+
         private async Task RenderFilesHubPreparedStateAsync(FilesHubRenderModel renderModel, int renderSequence)
         {
             UpdateFilesHubBottomSpacing();
             UpdateFilesHubStatusPresentation();
 
             FilesHubSummaryHost.Children.Clear();
-            FilesHubBodyHost.Children.Clear();
 
             FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
                 "Arquivos",
@@ -2360,30 +2660,39 @@ namespace MeuApp
                 renderModel.LatestItem == null ? "CHOAS ainda sem memoria local" : renderModel.LatestItem.FileName,
                 Color.FromRgb(16, 185, 129)));
 
-            FilesHubBodyHost.Children.Add(CreateFilesHubOverviewBanner(renderModel.ItemCount));
-
-            if (renderModel.ItemCount == 0)
+            FilesHubVirtualList.ItemsSource = BuildFilesHubVirtualEntries(renderModel, renderSequence);
+            if (FilesHubVirtualList.Items.Count > 0)
             {
-                FilesHubBodyHost.Children.Add(CreateFilesHubEmptyState());
+                FilesHubVirtualList.ScrollIntoView(FilesHubVirtualList.Items[0]);
             }
-            else
-            {
-                foreach (var section in renderModel.Sections)
-                {
-                    if (renderSequence != _filesHubRenderSequence || FilesContent.Visibility != Visibility.Visible)
-                    {
-                        return;
-                    }
-
-                    FilesHubBodyHost.Children.Add(CreateFilesHubSection(section));
-                    await Dispatcher.Yield(DispatcherPriority.Background);
-                }
-            }
+            await Dispatcher.Yield(DispatcherPriority.Background);
 
             if (renderSequence == _filesHubRenderSequence && FilesContent.Visibility == Visibility.Visible)
             {
-                RenderFilesChoasCompanion();
+                _filesHubRenderedStateRevision = _filesHubStateRevision;
             }
+        }
+
+        private List<FilesHubVirtualEntry> BuildFilesHubVirtualEntries(FilesHubRenderModel renderModel, int renderSequence)
+        {
+            var entries = new List<FilesHubVirtualEntry>
+            {
+                new FilesHubVirtualEntry(() => CreateFilesHubOverviewBanner(renderModel.ItemCount))
+            };
+
+            if (renderModel.ItemCount == 0)
+            {
+                entries.Add(new FilesHubVirtualEntry(CreateFilesHubEmptyState));
+                return entries;
+            }
+
+            foreach (var section in renderModel.Sections)
+            {
+                var localSection = section;
+                entries.Add(new FilesHubVirtualEntry(() => CreateFilesHubSectionGrid(localSection, renderSequence)));
+            }
+
+            return entries;
         }
 
         private void RenderFilesHubLoadingState()
@@ -2393,7 +2702,6 @@ namespace MeuApp
             UpdateFilesHubBottomSpacing();
             UpdateFilesHubStatusPresentation();
             FilesHubSummaryHost.Children.Clear();
-            FilesHubBodyHost.Children.Clear();
             StopChoasAnimation();
 
             FilesHubSummaryHost.Children.Add(CreateBoardOverviewMetric(
@@ -2412,14 +2720,17 @@ namespace MeuApp
                 "A interface aparece assim que os grupos estiverem prontos",
                 Color.FromRgb(16, 185, 129)));
 
-            FilesHubBodyHost.Children.Add(CreateFilesHubLoadingState());
+            FilesHubVirtualList.ItemsSource = new[]
+            {
+                new FilesHubVirtualEntry(CreateFilesHubLoadingState)
+            };
         }
 
         private Border CreateFilesHubLoadingState()
         {
             var accentBrush = new SolidColorBrush(Color.FromRgb(14, 165, 233));
             var contentGrid = new Grid();
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 0 });
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var textStack = new StackPanel
@@ -2548,16 +2859,7 @@ namespace MeuApp
 
         private UIElement CreateFilesHubLoadingMediaHost()
         {
-            var videoPath = ResolveFilesHubLoadingVideoPath();
-            if (string.IsNullOrWhiteSpace(videoPath))
-            {
-                return CreateFilesHubLoadingMediaFallback();
-            }
-
-            var host = new Grid();
-            host.Children.Add(CreateFilesHubLoadingMediaFallback());
-            _ = TryInitializeFilesHubLoadingAnimationAsync(host, videoPath);
-            return host;
+            return CreateFilesHubLoadingMediaFallback();
         }
 
         private UIElement CreateFilesHubLoadingMediaFallback()
@@ -2695,9 +2997,9 @@ namespace MeuApp
             var textStack = new StackPanel();
             textStack.Children.Add(new TextBlock
             {
-                Text = "Mochila do projeto",
-                FontSize = 22,
-                FontWeight = FontWeights.ExtraBold,
+                Text = "Meu Drive",
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 440
@@ -2705,9 +3007,9 @@ namespace MeuApp
             textStack.Children.Add(new TextBlock
             {
                 Text = itemCount == 0
-                    ? "Arraste o primeiro pacote para dentro da jornada e ja marque o tipo certo para nao virar um deposito generico."
-                    : "Cada arquivo fica guardado com memoria de contexto, pronto para reaparecer no momento certo do fluxo.",
-                Margin = new Thickness(0, 10, 0, 0),
+                    ? "Adicione arquivos e escolha uma categoria para manter a biblioteca organizada desde o começo."
+                    : "Arquivos organizados em grade, com contexto, prévia e ações rápidas.",
+                Margin = new Thickness(0, 8, 0, 0),
                 Foreground = GetThemeBrush("SecondaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap,
                 MaxWidth = 440,
@@ -2725,9 +3027,9 @@ namespace MeuApp
                 Width = 92,
                 Height = 92,
                 Margin = new Thickness(20, 0, 0, 0),
-                CornerRadius = new CornerRadius(24),
+                CornerRadius = new CornerRadius(10),
                 Background = CreateSoftAccentBrush(accentBrush, 30),
-                BorderBrush = accentBrush,
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
                 Child = new StackPanel
                 {
@@ -2763,9 +3065,9 @@ namespace MeuApp
                 Margin = new Thickness(0, 0, 0, 16),
                 Padding = new Thickness(22),
                 Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = accentBrush,
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(24),
+                CornerRadius = new CornerRadius(10),
                 Child = contentGrid
             };
         }
@@ -2780,7 +3082,7 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(24),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(26),
                 Child = new StackPanel
                 {
@@ -2821,16 +3123,10 @@ namespace MeuApp
             };
         }
 
-        private Border CreateFilesHubSection(FilesHubRenderSection section)
+        private Border CreateFilesHubSectionHeader(FilesHubRenderSection section)
         {
             var accentColor = GetFilesHubAssociationAccentColor(section.AssociationType);
             var accentBrush = new SolidColorBrush(accentColor);
-            var itemStack = new StackPanel();
-
-            foreach (var item in section.Items)
-            {
-                itemStack.Children.Add(CreateFilesHubItemCard(item));
-            }
 
             var metaWrap = new WrapPanel();
             metaWrap.Children.Add(CreateStaticTeamChip($"{section.Items.Count} item(ns)", CreateSoftAccentBrush(accentBrush, 28), accentBrush));
@@ -2838,8 +3134,8 @@ namespace MeuApp
 
             return new Border
             {
-                Margin = new Thickness(0, 0, 0, 16),
-                Padding = new Thickness(20),
+                Margin = new Thickness(0, 0, 0, 8),
+                Padding = new Thickness(18, 18, 18, 14),
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = accentBrush,
                 BorderThickness = new Thickness(1),
@@ -2867,68 +3163,301 @@ namespace MeuApp
                         {
                             Margin = new Thickness(0, 10, 0, 8),
                             Child = metaWrap
-                        },
-                        itemStack
+                        }
                     }
                 }
             };
         }
 
-        private Border CreateFilesHubItemCard(FilesHubRenderItem renderItem)
+        private Border CreateFilesHubSectionGrid(FilesHubRenderSection section, int renderSequence)
+        {
+            var accentColor = GetFilesHubAssociationAccentColor(section.AssociationType);
+            var accentBrush = new SolidColorBrush(accentColor);
+
+            var header = new Grid { Margin = new Thickness(0, 2, 0, 12) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.Children.Add(new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = section.AssociationType,
+                        FontSize = 18,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = GetThemeBrush("PrimaryTextBrush")
+                    },
+                    new TextBlock
+                    {
+                        Text = GetFilesHubAssociationDescription(section.AssociationType),
+                        Margin = new Thickness(0, 4, 0, 0),
+                        FontSize = 12,
+                        Foreground = GetThemeBrush("SecondaryTextBrush"),
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                }
+            });
+
+            var countChip = CreateStaticTeamChip($"{section.Items.Count} item(ns)", CreateSoftAccentBrush(accentBrush, 22), accentBrush);
+            countChip.Margin = new Thickness(14, 2, 0, 0);
+            Grid.SetColumn(countChip, 1);
+            header.Children.Add(countChip);
+
+            var tiles = new WrapPanel();
+            foreach (var item in section.Items)
+            {
+                var localItem = item;
+                tiles.Children.Add(CreateFilesHubItemTile(localItem, renderSequence));
+            }
+
+            var root = new StackPanel();
+            root.Children.Add(header);
+            root.Children.Add(tiles);
+
+            return new Border
+            {
+                Margin = new Thickness(0, 0, 0, 24),
+                Child = root
+            };
+        }
+
+        private Border CreateFilesHubItemTile(FilesHubRenderItem renderItem, int renderSequence)
         {
             var item = renderItem.Item;
             var accentColor = GetFilesHubAssociationAccentColor(item.AssociationType);
             var accentBrush = new SolidColorBrush(accentColor);
             var fileExists = renderItem.FileExists;
             var isSynced = renderItem.IsSynced;
-            var previewSource = fileExists && IsFilesHubImageExtension(GetFilesHubExtension(item.StoredFilePath, item.FileExtension))
-                ? TryCreateDecodedBitmapImage(item.StoredFilePath, 320)
-                : null;
+
+            var stack = new StackPanel();
+            stack.Children.Add(CreateFilesHubTilePreview(renderItem, accentBrush, renderSequence));
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = item.FileName,
+                Margin = new Thickness(12, 10, 12, 0),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                MaxHeight = 40,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = BuildFilesHubTileSubtitle(item, fileExists, isSynced),
+                Margin = new Thickness(12, 5, 12, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+
+            var actions = new DockPanel
+            {
+                LastChildFill = false,
+                Margin = new Thickness(10, 10, 10, 10)
+            };
+            var meta = new TextBlock
+            {
+                Text = item.FileExtension,
+                FontSize = 10.5,
+                FontWeight = FontWeights.Bold,
+                Foreground = accentBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(meta, Dock.Left);
+            actions.Children.Add(meta);
+
+            var buttons = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            buttons.Children.Add(CreateFilesHubIconActionButton(PackIconMaterialKind.EyeOutline, fileExists || isSynced ? "Visualizar" : "Indisponivel", OpenFilesHubItem_Click, item, fileExists || isSynced, accentBrush));
+            buttons.Children.Add(CreateFilesHubIconActionButton(isSynced ? PackIconMaterialKind.FileReplaceOutline : PackIconMaterialKind.CloudUploadOutline, isSynced ? "Nova versao" : "Sincronizar", SyncFilesHubItem_Click, item, true, GetThemeBrush("AccentBrush")));
+            buttons.Children.Add(CreateFilesHubIconActionButton(PackIconMaterialKind.TrashCanOutline, "Remover", RemoveFilesHubItem_Click, item, true, GetThemeBrush("SecondaryTextBrush")));
+            DockPanel.SetDock(buttons, Dock.Right);
+            actions.Children.Add(buttons);
+            stack.Children.Add(actions);
+
+            return new Border
+            {
+                Width = 224,
+                MinHeight = 242,
+                Margin = new Thickness(0, 0, 14, 14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                ClipToBounds = true,
+                Child = stack
+            };
+        }
+
+        private Border CreateFilesHubTilePreview(FilesHubRenderItem renderItem, Brush accentBrush, int renderSequence)
+        {
+            var image = new Image
+            {
+                Stretch = Stretch.UniformToFill,
+                Visibility = Visibility.Collapsed,
+                CacheMode = new BitmapCache()
+            };
+            RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.LowQuality);
+
+            var extension = GetFilesHubExtension(renderItem.Item.StoredFilePath, renderItem.Item.FileExtension);
+            var placeholder = new Grid
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Children =
+                {
+                    new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Children =
+                        {
+                            new PackIconMaterial
+                            {
+                                Kind = renderItem.IsImagePreviewCandidate ? PackIconMaterialKind.ImageOutline : GetFilesHubTileIconKind(extension),
+                                Width = 34,
+                                Height = 34,
+                                Foreground = accentBrush,
+                                HorizontalAlignment = HorizontalAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = string.IsNullOrWhiteSpace(renderItem.Item.FileExtension) ? "ARQ" : renderItem.Item.FileExtension,
+                                Margin = new Thickness(0, 8, 0, 0),
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                TextAlignment = TextAlignment.Center
+                            }
+                        }
+                    }
+                }
+            };
+
+            if (renderItem.IsImagePreviewCandidate)
+            {
+                var cachedSource = TryGetFilesHubThumbnailFromCache(renderItem.ThumbnailCacheKey);
+                if (cachedSource != null)
+                {
+                    image.Source = cachedSource;
+                    image.Visibility = Visibility.Visible;
+                    placeholder.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    _ = LoadFilesHubThumbnailIntoImageAsync(renderItem, image, placeholder, renderSequence);
+                }
+            }
+
+            return new Border
+            {
+                Height = 118,
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Child = new Grid
+                {
+                    Children =
+                    {
+                        placeholder,
+                        image
+                    }
+                }
+            };
+        }
+
+        private Button CreateFilesHubIconActionButton(PackIconMaterialKind iconKind, string tooltip, RoutedEventHandler clickHandler, object tag, bool isEnabled, Brush foreground)
+        {
+            var button = new Button
+            {
+                Width = 30,
+                Height = 30,
+                Margin = new Thickness(4, 0, 0, 0),
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = foreground,
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip,
+                Tag = tag,
+                IsEnabled = isEnabled,
+                Content = new PackIconMaterial
+                {
+                    Kind = iconKind,
+                    Width = 16,
+                    Height = 16,
+                    Foreground = foreground,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            button.Click += clickHandler;
+            return button;
+        }
+
+        private string BuildFilesHubTileSubtitle(FilesHubItem item, bool fileExists, bool isSynced)
+        {
+            var parts = new List<string>
+            {
+                FormatFilesHubSize(item.FileSizeBytes),
+                FormatRelativeDate(item.AddedAt)
+            };
+
+            if (!string.IsNullOrWhiteSpace(item.AssociationLabel))
+            {
+                parts.Add(item.AssociationLabel);
+            }
+
+            if (isSynced)
+            {
+                parts.Add($"v{Math.Max(1, item.RemoteVersion)}");
+            }
+            else if (!fileExists)
+            {
+                parts.Add("indisponivel");
+            }
+
+            return string.Join(" • ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+        }
+
+        private PackIconMaterialKind GetFilesHubTileIconKind(string extension)
+        {
+            if (IsFilesHubImageExtension(extension))
+            {
+                return PackIconMaterialKind.ImageOutline;
+            }
+
+            if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                return PackIconMaterialKind.FilePdfBox;
+            }
+
+            return PackIconMaterialKind.FileDocumentOutline;
+        }
+
+        private Border CreateFilesHubItemCard(FilesHubRenderItem renderItem, int renderSequence)
+        {
+            var item = renderItem.Item;
+            var accentColor = GetFilesHubAssociationAccentColor(item.AssociationType);
+            var accentBrush = new SolidColorBrush(accentColor);
+            var fileExists = renderItem.FileExists;
+            var isSynced = renderItem.IsSynced;
 
             var layout = new Grid();
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var leftStack = new StackPanel();
-            if (previewSource != null)
+            if (renderItem.IsImagePreviewCandidate)
             {
-                leftStack.Children.Add(new Border
-                {
-                    Height = 164,
-                    Margin = new Thickness(0, 0, 0, 14),
-                    Background = GetThemeBrush("CardBackgroundBrush"),
-                    BorderBrush = GetThemeBrush("CardBorderBrush"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(18),
-                    ClipToBounds = true,
-                    Child = new Grid
-                    {
-                        Children =
-                        {
-                            new Image
-                            {
-                                Source = previewSource,
-                                Stretch = Stretch.UniformToFill
-                            },
-                            new Border
-                            {
-                                HorizontalAlignment = HorizontalAlignment.Left,
-                                VerticalAlignment = VerticalAlignment.Top,
-                                Margin = new Thickness(12),
-                                Padding = new Thickness(10, 5, 10, 5),
-                                Background = new SolidColorBrush(Color.FromArgb(214, 15, 23, 42)),
-                                CornerRadius = new CornerRadius(999),
-                                Child = new TextBlock
-                                {
-                                    Text = "Prévia",
-                                    FontSize = 10,
-                                    FontWeight = FontWeights.Bold,
-                                    Foreground = Brushes.White
-                                }
-                            }
-                        }
-                    }
-                });
+                leftStack.Children.Add(CreateFilesHubThumbnailHost(renderItem, accentBrush, renderSequence));
             }
 
             leftStack.Children.Add(new TextBlock
@@ -3005,6 +3534,197 @@ namespace MeuApp
                 CornerRadius = new CornerRadius(18),
                 Child = layout
             };
+        }
+
+        private Border CreateFilesHubThumbnailHost(FilesHubRenderItem renderItem, Brush accentBrush, int renderSequence)
+        {
+            var image = new Image
+            {
+                Stretch = Stretch.UniformToFill,
+                Visibility = Visibility.Collapsed,
+                CacheMode = new BitmapCache()
+            };
+            RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.LowQuality);
+
+            var placeholder = new Grid
+            {
+                Background = CreateSoftAccentBrush(accentBrush, 18),
+                Children =
+                {
+                    new StackPanel
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Children =
+                        {
+                            new PackIconMaterial
+                            {
+                                Kind = PackIconMaterialKind.ImageOutline,
+                                Width = 30,
+                                Height = 30,
+                                Foreground = accentBrush,
+                                HorizontalAlignment = HorizontalAlignment.Center
+                            },
+                            new TextBlock
+                            {
+                                Text = "Miniatura em cache",
+                                Margin = new Thickness(0, 8, 0, 0),
+                                FontSize = 11,
+                                FontWeight = FontWeights.SemiBold,
+                                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                                TextAlignment = TextAlignment.Center
+                            }
+                        }
+                    }
+                }
+            };
+
+            var previewGrid = new Grid
+            {
+                Children =
+                {
+                    placeholder,
+                    image,
+                    new Border
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Margin = new Thickness(12),
+                        Padding = new Thickness(10, 5, 10, 5),
+                        Background = new SolidColorBrush(Color.FromArgb(214, 15, 23, 42)),
+                        CornerRadius = new CornerRadius(999),
+                        Child = new TextBlock
+                        {
+                            Text = "Prévia",
+                            FontSize = 10,
+                            FontWeight = FontWeights.Bold,
+                            Foreground = Brushes.White
+                        }
+                    }
+                }
+            };
+
+            var cachedSource = TryGetFilesHubThumbnailFromCache(renderItem.ThumbnailCacheKey);
+            if (cachedSource != null)
+            {
+                image.Source = cachedSource;
+                image.Visibility = Visibility.Visible;
+                placeholder.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                _ = LoadFilesHubThumbnailIntoImageAsync(renderItem, image, placeholder, renderSequence);
+            }
+
+            return new Border
+            {
+                Height = 164,
+                Margin = new Thickness(0, 0, 0, 14),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(18),
+                ClipToBounds = true,
+                Child = previewGrid
+            };
+        }
+
+        private ImageSource? TryGetFilesHubThumbnailFromCache(string cacheKey)
+        {
+            if (string.IsNullOrWhiteSpace(cacheKey))
+            {
+                return null;
+            }
+
+            if (_filesHubThumbnailCache.TryGetValue(cacheKey, out var entry))
+            {
+                entry.LastAccessUtc = DateTime.UtcNow;
+                return entry.Source;
+            }
+
+            return null;
+        }
+
+        private async Task LoadFilesHubThumbnailIntoImageAsync(FilesHubRenderItem renderItem, Image image, UIElement placeholder, int renderSequence)
+        {
+            if (renderItem == null ||
+                string.IsNullOrWhiteSpace(renderItem.Item.StoredFilePath) ||
+                string.IsNullOrWhiteSpace(renderItem.ThumbnailCacheKey))
+            {
+                return;
+            }
+
+            try
+            {
+                var source = await GetFilesHubThumbnailAsync(renderItem.Item.StoredFilePath, renderItem.ThumbnailCacheKey);
+                if (source == null ||
+                    renderSequence != _filesHubRenderSequence ||
+                    FilesContent.Visibility != Visibility.Visible ||
+                    image.Dispatcher.HasShutdownStarted)
+                {
+                    return;
+                }
+
+                image.Source = source;
+                image.Visibility = Visibility.Visible;
+                placeholder.Visibility = Visibility.Collapsed;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"Falha ao carregar miniatura do hub: {ex.Message}");
+            }
+        }
+
+        private Task<ImageSource?> GetFilesHubThumbnailAsync(string filePath, string cacheKey)
+        {
+            var cachedSource = TryGetFilesHubThumbnailFromCache(cacheKey);
+            if (cachedSource != null)
+            {
+                return Task.FromResult<ImageSource?>(cachedSource);
+            }
+
+            return _filesHubThumbnailTasks.GetOrAdd(cacheKey, _ => LoadFilesHubThumbnailAsync(filePath, cacheKey));
+        }
+
+        private async Task<ImageSource?> LoadFilesHubThumbnailAsync(string filePath, string cacheKey)
+        {
+            try
+            {
+                var source = await Task.Run(() => (ImageSource?)TryCreateDecodedBitmapImage(filePath, FilesHubThumbnailDecodePixelWidth));
+                if (source != null)
+                {
+                    _filesHubThumbnailCache[cacheKey] = new FilesHubThumbnailCacheEntry
+                    {
+                        Source = source,
+                        LastAccessUtc = DateTime.UtcNow
+                    };
+                    TrimFilesHubThumbnailCache();
+                }
+
+                return source;
+            }
+            finally
+            {
+                _filesHubThumbnailTasks.TryRemove(cacheKey, out _);
+            }
+        }
+
+        private void TrimFilesHubThumbnailCache()
+        {
+            var overflow = _filesHubThumbnailCache.Count - FilesHubThumbnailCacheLimit;
+            if (overflow <= 0)
+            {
+                return;
+            }
+
+            foreach (var cacheKey in _filesHubThumbnailCache
+                .OrderBy(entry => entry.Value.LastAccessUtc)
+                .Take(overflow)
+                .Select(entry => entry.Key)
+                .ToList())
+            {
+                _filesHubThumbnailCache.TryRemove(cacheKey, out _);
+            }
         }
 
         private Button CreateFilesHubActionButton(string label, Brush background, Brush foreground, Brush borderBrush, RoutedEventHandler clickHandler, object? tag = null, double minWidth = 124)
@@ -3301,7 +4021,7 @@ namespace MeuApp
 
             if (IsFilesHubImageExtension(extension))
             {
-                return CreateFilesHubImagePreview(item.StoredFilePath);
+                return await CreateFilesHubImagePreviewAsync(item.StoredFilePath);
             }
 
             if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
@@ -3339,17 +4059,15 @@ namespace MeuApp
                 "Esse formato ainda nao tem visualizacao interna completa no hub. O arquivo continua guardado, mas o viewer atual cobre imagem, PDF, texto e documentos Office mais comuns.");
         }
 
-        private UIElement CreateFilesHubImagePreview(string filePath)
+        private async Task<UIElement> CreateFilesHubImagePreviewAsync(string filePath)
         {
-            var bitmap = new BitmapImage();
-            bitmap.BeginInit();
-            bitmap.CacheOption = BitmapCacheOption.OnLoad;
-            bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
-            bitmap.EndInit();
-
-            if (bitmap.CanFreeze)
+            var bitmap = await Task.Run(() => (ImageSource?)TryCreateDecodedBitmapImage(filePath, FilesHubPreviewImageDecodePixelWidth));
+            if (bitmap == null)
             {
-                bitmap.Freeze();
+                return CreateFilesHubPreviewMessage(
+                    PackIconMaterialKind.AlertCircleOutline,
+                    "Imagem indisponivel",
+                    "O arquivo existe, mas a miniatura em alta nao pode ser decodificada agora. Tente abrir novamente ou reimporte a imagem.");
             }
 
             var image = new Image
@@ -8416,40 +9134,31 @@ namespace MeuApp
         {
             var root = new Grid();
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             var header = CreateTeamWorkspaceHeader(team);
             root.Children.Add(header);
             Grid.SetRow(header, 0);
 
-            var metrics = CreateTeamWorkspaceMetrics(team);
-            root.Children.Add(metrics);
-            Grid.SetRow(metrics, 1);
-
-            var highlights = CreateTeamWorkspaceHighlights(team);
-            root.Children.Add(highlights);
-            Grid.SetRow(highlights, 2);
-
             var contentGrid = new Grid
             {
-                Margin = new Thickness(22, 0, 22, 22)
+                Margin = new Thickness(18, 18, 18, 18),
+                MinHeight = 440
             };
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.2, GridUnitType.Star) });
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 0 });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(_isTeamWorkspaceDetailsPanelOpen ? 14 : 10) });
+            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var boardPanel = CreateTeamBoardPanel(team);
             contentGrid.Children.Add(boardPanel);
             Grid.SetColumn(boardPanel, 0);
 
-            var sidePanel = CreateTeamWorkspaceSidebar(team);
+            var sidePanel = CreateTeamWorkspaceDetailsPanel(team);
             contentGrid.Children.Add(sidePanel);
             Grid.SetColumn(sidePanel, 2);
 
             root.Children.Add(contentGrid);
-            Grid.SetRow(contentGrid, 3);
+            Grid.SetRow(contentGrid, 1);
 
             return root;
         }
@@ -8458,24 +9167,25 @@ namespace MeuApp
         {
             var border = new Border
             {
-                Padding = new Thickness(22, 22, 22, 18),
+                Padding = new Thickness(18, 18, 18, 16),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1)
             };
 
             var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             var backButton = CreateTeamWorkspaceActionButton("Voltar", Color.FromRgb(100, 116, 139), CloseTeamWorkspace_Click, PackIconMaterialKind.ArrowLeft);
-            backButton.Margin = new Thickness(0, 0, 12, 10);
+            backButton.Margin = new Thickness(0, 0, 10, 0);
             backButton.VerticalAlignment = VerticalAlignment.Top;
             grid.Children.Add(backButton);
 
-            var logoBadge = CreateTeamLogoBadge(team, 84, circular: true, fontSize: 24);
-            logoBadge.Margin = new Thickness(0, 0, 18, 0);
+            var logoBadge = CreateTeamLogoBadge(team, 64, circular: true, fontSize: 20);
+            logoBadge.Margin = new Thickness(0, 0, 14, 0);
             logoBadge.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(logoBadge, 1);
             grid.Children.Add(logoBadge);
@@ -8488,16 +9198,18 @@ namespace MeuApp
             {
                 Text = team.TeamName,
                 FontFamily = GetAppDisplayFontFamily(),
-                FontSize = 22,
-                FontWeight = FontWeights.ExtraBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush")
+                FontSize = 20,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
             });
             titleStack.Children.Add(new TextBlock
             {
                 Text = $"{team.Course} • {team.ClassName} • ID {team.ClassId}",
                 FontSize = 12,
                 Margin = new Thickness(0, 6, 0, 0),
-                Foreground = GetThemeBrush("SecondaryTextBrush")
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
             });
             titleStack.Children.Add(new TextBlock
             {
@@ -8505,10 +9217,11 @@ namespace MeuApp
                 FontSize = 12,
                 Margin = new Thickness(0, 6, 0, 0),
                 Foreground = GetThemeBrush("AccentBrush"),
-                FontWeight = FontWeights.SemiBold
+                FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap
             });
 
-            var metadataWrap = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+            var metadataWrap = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
             metadataWrap.Children.Add(CreateStaticTeamChip(
                 string.IsNullOrWhiteSpace(team.AcademicTerm) ? "Sem semestre" : $"Semestre {team.AcademicTerm}",
                 GetThemeBrush("AccentMutedBrush"),
@@ -8532,8 +9245,9 @@ namespace MeuApp
 
             var actions = new WrapPanel
             {
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 14, 0, 0)
             };
 
             actions.Children.Add(CreateTeamWorkspaceActionButton("Copiar codigo", Color.FromRgb(14, 165, 233), CopyTeamCode_Click, PackIconMaterialKind.ContentCopy));
@@ -8559,11 +9273,337 @@ namespace MeuApp
                 actions.Children.Add(CreateTeamWorkspaceActionButton("Apagar equipe", Color.FromRgb(220, 38, 38), DeleteActiveTeamWorkspace, PackIconMaterialKind.DeleteOutline));
             }
 
-            Grid.SetColumn(actions, 3);
+            Grid.SetRow(actions, 1);
+            Grid.SetColumn(actions, 1);
+            Grid.SetColumnSpan(actions, 2);
             grid.Children.Add(actions);
 
             border.Child = grid;
             return border;
+        }
+
+        private UIElement CreateTeamWorkspaceDetailsPanel(TeamWorkspaceInfo team)
+        {
+            if (!_isTeamWorkspaceDetailsPanelOpen)
+            {
+                return CreateTeamWorkspaceDetailsRail();
+            }
+
+            var border = new Border
+            {
+                Width = 360,
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(14)
+            };
+
+            var stack = new StackPanel();
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Detalhes da equipe",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Resumo, pessoas, prazos e materiais.",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            header.Children.Add(titleStack);
+
+            var closeButton = CreateTeamWorkspacePanelIconButton(PackIconMaterialKind.ChevronRight, "Recolher detalhes");
+            closeButton.Click += ToggleTeamWorkspaceDetailsPanel_Click;
+            Grid.SetColumn(closeButton, 1);
+            header.Children.Add(closeButton);
+            stack.Children.Add(header);
+
+            stack.Children.Add(CreateTeamWorkspaceInsightsSection(team));
+            stack.Children.Add(CreateTeamWorkspaceHighlightsSection(team));
+
+            var sidebar = CreateTeamWorkspaceSidebar(team);
+            stack.Children.Add(sidebar);
+
+            border.Child = stack;
+            return border;
+        }
+
+        private Border CreateTeamWorkspaceDetailsRail()
+        {
+            var border = new Border
+            {
+                Width = 54,
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(7)
+            };
+
+            var stack = new StackPanel
+            {
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            var openButton = CreateTeamWorkspacePanelIconButton(PackIconMaterialKind.ChevronLeft, "Abrir detalhes");
+            openButton.Click += ToggleTeamWorkspaceDetailsPanel_Click;
+            stack.Children.Add(openButton);
+            stack.Children.Add(new Border
+            {
+                Width = 28,
+                Height = 1,
+                Margin = new Thickness(0, 12, 0, 12),
+                Background = GetThemeBrush("CardBorderBrush")
+            });
+            stack.Children.Add(new PackIconMaterial
+            {
+                Kind = PackIconMaterialKind.CardsOutline,
+                Width = 20,
+                Height = 20,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
+            border.Child = stack;
+            return border;
+        }
+
+        private Button CreateTeamWorkspacePanelIconButton(PackIconMaterialKind iconKind, string tooltip)
+        {
+            return new Button
+            {
+                Width = 36,
+                Height = 36,
+                Padding = new Thickness(0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = tooltip,
+                Content = new PackIconMaterial
+                {
+                    Kind = iconKind,
+                    Width = 18,
+                    Height = 18,
+                    Foreground = GetThemeBrush("PrimaryTextBrush")
+                }
+            };
+        }
+
+        private Border CreateTeamWorkspaceInsightsSection(TeamWorkspaceInfo team)
+        {
+            var overdueCount = team.TaskColumns.SelectMany(column => column.Cards).Count(card => card.DueDate.HasValue && card.DueDate.Value.Date < DateTime.Today);
+            var completedMilestones = team.Milestones.Count(milestone => string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase));
+            var studentCount = GetStudentTeamMembers(team).Count;
+            var facultyCount = GetFacultyMembers(team).Count;
+
+            var border = CreateTeamWorkspaceCompactSection("Resumo", "Indicadores rápidos ficam aqui, fora do caminho do quadro.");
+            var content = (StackPanel)border.Child;
+            content.Children.Add(CreateTeamInsightRow("Discentes", studentCount.ToString(), "execucao do projeto", PackIconMaterialKind.AccountGroupOutline, Color.FromRgb(37, 99, 235)));
+            content.Children.Add(CreateTeamInsightRow("Docencia", facultyCount.ToString(), "orientacao e governanca", PackIconMaterialKind.AccountGroupOutline, Color.FromRgb(124, 58, 237)));
+            content.Children.Add(CreateTeamInsightRow("Tarefas", team.TaskColumns.Sum(column => column.Cards.Count).ToString(), "cards no board", PackIconMaterialKind.ClipboardTextOutline, Color.FromRgb(16, 185, 129)));
+            content.Children.Add(CreateTeamInsightRow("Progresso", $"{CalculateTeamProgressPercentage(team)}%", "fluxo concluido", PackIconMaterialKind.Refresh, Color.FromRgb(14, 165, 233)));
+            content.Children.Add(CreateTeamInsightRow("Atrasos", overdueCount.ToString(), "itens fora do prazo", PackIconMaterialKind.AlertCircleOutline, Color.FromRgb(220, 38, 38)));
+            content.Children.Add(CreateTeamInsightRow("Entregas", $"{completedMilestones}/{team.Milestones.Count}", "marcos academicos", PackIconMaterialKind.FlagCheckered, Color.FromRgb(168, 85, 247)));
+            return border;
+        }
+
+        private Border CreateTeamWorkspaceHighlightsSection(TeamWorkspaceInfo team)
+        {
+            var border = CreateTeamWorkspaceCompactSection("Contexto", "UCs ativas e proximos prazos.");
+            var content = (StackPanel)border.Child;
+
+            var ucWrap = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) };
+            if (team.Ucs.Count == 0)
+            {
+                ucWrap.Children.Add(CreateStaticTeamChip("Sem UC vinculada", GetThemeBrush("MutedCardBackgroundBrush"), GetThemeBrush("SecondaryTextBrush")));
+            }
+            else
+            {
+                foreach (var uc in team.Ucs)
+                {
+                    ucWrap.Children.Add(CreateStaticTeamChip(uc, GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+                }
+            }
+            content.Children.Add(ucWrap);
+
+            var upcomingCards = team.TaskColumns
+                .SelectMany(column => column.Cards.Select(card => new { Column = column, Card = card }))
+                .Where(item => item.Card.DueDate.HasValue)
+                .OrderBy(item => item.Card.DueDate)
+                .Take(4)
+                .ToList();
+
+            if (upcomingCards.Count == 0)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Sem prazos registrados no board.",
+                    FontSize = 11,
+                    Foreground = GetThemeBrush("SecondaryTextBrush"),
+                    TextWrapping = TextWrapping.Wrap
+                });
+            }
+            else
+            {
+                foreach (var item in upcomingCards)
+                {
+                    content.Children.Add(CreateTeamDeadlineRow(item.Card.Title, $"{item.Column.Title} • {FormatRelativeDate(item.Card.DueDate!.Value)}", item.Card.DueDate.Value.Date < DateTime.Today));
+                }
+            }
+
+            return border;
+        }
+
+        private Border CreateTeamWorkspaceCompactSection(string title, string subtitle)
+        {
+            var border = new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 0, 12),
+                Child = new StackPanel()
+            };
+
+            var stack = (StackPanel)border.Child;
+            stack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+
+            return border;
+        }
+
+        private Border CreateTeamInsightRow(string title, string value, string subtitle, PackIconMaterialKind iconKind, Color accentColor)
+        {
+            var accentBrush = new SolidColorBrush(accentColor);
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            row.Children.Add(new Border
+            {
+                Width = 30,
+                Height = 30,
+                Background = CreateSoftAccentBrush(accentBrush, 18),
+                CornerRadius = new CornerRadius(4),
+                Child = new PackIconMaterial
+                {
+                    Kind = iconKind,
+                    Width = 16,
+                    Height = 16,
+                    Foreground = accentBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            });
+
+            var textStack = new StackPanel
+            {
+                Margin = new Thickness(10, 0, 10, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            textStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush")
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                FontSize = 10,
+                Foreground = GetThemeBrush("SecondaryTextBrush")
+            });
+            Grid.SetColumn(textStack, 1);
+            row.Children.Add(textStack);
+
+            row.Children.Add(new TextBlock
+            {
+                Text = value,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            Grid.SetColumn(row.Children[row.Children.Count - 1], 2);
+
+            return new Border
+            {
+                Padding = new Thickness(0, 10, 0, 9),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Child = row
+            };
+        }
+
+        private Border CreateTeamDeadlineRow(string title, string subtitle, bool isLate)
+        {
+            var accent = isLate ? GetThemeBrush("DangerBrush") : GetThemeBrush("AccentBrush");
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            row.Children.Add(new Border
+            {
+                Width = 3,
+                Height = 34,
+                Background = accent,
+                CornerRadius = new CornerRadius(2),
+                Margin = new Thickness(0, 2, 10, 2)
+            });
+
+            var textStack = new StackPanel();
+            textStack.Children.Add(new TextBlock
+            {
+                Text = title,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = subtitle,
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 10,
+                Foreground = isLate ? GetThemeBrush("DangerBrush") : GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
+            });
+            Grid.SetColumn(textStack, 1);
+            row.Children.Add(textStack);
+
+            return new Border
+            {
+                Padding = new Thickness(0, 8, 0, 0),
+                Child = row
+            };
         }
 
         private UIElement CreateTeamWorkspaceMetrics(TeamWorkspaceInfo team)
@@ -8696,9 +9736,9 @@ namespace MeuApp
                 Margin = new Thickness(0, 0, 12, 12),
                 Padding = new Thickness(16),
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = new SolidColorBrush(accent),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16)
+                CornerRadius = new CornerRadius(10)
             };
 
             var stack = new StackPanel();
@@ -8810,17 +9850,18 @@ namespace MeuApp
 
         private Button CreateTeamWorkspaceActionButton(string text, Color backgroundColor, RoutedEventHandler onClick, PackIconMaterialKind? iconKind = null)
         {
-            var backgroundBrush = new SolidColorBrush(backgroundColor);
+            var accentBrush = new SolidColorBrush(backgroundColor);
             var button = new Button
             {
                 Content = iconKind.HasValue
-                    ? CreateIconLabelContent(text, iconKind.Value, Brushes.White, Brushes.White, 14, 12, FontWeights.SemiBold)
+                    ? CreateIconLabelContent(text, iconKind.Value, accentBrush, GetThemeBrush("PrimaryTextBrush"), 14, 12, FontWeights.SemiBold)
                     : text,
-                Background = backgroundBrush,
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(16, 10, 16, 10),
-                Margin = new Thickness(10, 0, 0, 10),
+                Background = GetThemeBrush("CardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(12, 8, 12, 8),
+                Margin = new Thickness(0, 0, 8, 8),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand
             };
@@ -8832,46 +9873,45 @@ namespace MeuApp
         {
             var panel = new Border
             {
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
-                Padding = new Thickness(18)
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(14)
             };
 
             var stack = new StackPanel();
 
-            var header = new Grid { Margin = new Thickness(0, 0, 0, 14) };
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
 
             var headerText = new StackPanel();
             headerText.Children.Add(new TextBlock
             {
-                Text = _activeTeamBoardView == TeamBoardView.Csd ? "Modelo CSD" : "Workspace de entregas",
-                FontSize = 18,
+                Text = _activeTeamBoardView == TeamBoardView.Csd ? "CSD" : "Plano de trabalho",
+                FontSize = 17,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
             headerText.Children.Add(new TextBlock
             {
                 Text = _activeTeamBoardView == TeamBoardView.Trello
-                    ? "Quadro estilo Trello com cards arrastaveis, atribuicoes e prazos."
+                    ? "Quadro responsivo com colunas, tarefas, responsaveis e prazos."
                     : _activeTeamBoardView == TeamBoardView.Kanban
                         ? "Visao operacional focada em gargalos, fluxo e atrasos."
-                        : "Mapa de certezas, suposicoes e duvidas para apoiar decisoes do projeto.",
+                        : "Certezas, suposicoes e duvidas para apoiar decisoes do projeto.",
                 FontSize = 12,
                 Margin = new Thickness(0, 6, 0, 0),
-                Foreground = GetThemeBrush("SecondaryTextBrush")
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
             });
             header.Children.Add(headerText);
 
             var actionWrap = new WrapPanel
             {
-                HorizontalAlignment = HorizontalAlignment.Right
+                Margin = new Thickness(0, 12, 0, 0)
             };
             actionWrap.Children.Add(CreateTeamBoardModeButton("Trello", TeamBoardView.Trello));
-            actionWrap.Children.Add(CreateTeamBoardModeButton("KANBAN", TeamBoardView.Kanban));
+            actionWrap.Children.Add(CreateTeamBoardModeButton("Kanban", TeamBoardView.Kanban));
             actionWrap.Children.Add(CreateTeamBoardModeButton("CSD", TeamBoardView.Csd));
 
             var addButton = new Button
@@ -8880,8 +9920,8 @@ namespace MeuApp
                 Background = GetThemeBrush("AccentBrush"),
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
-                Padding = new Thickness(16, 10, 16, 10),
-                Margin = new Thickness(10, 0, 0, 10),
+                Padding = new Thickness(13, 8, 13, 8),
+                Margin = new Thickness(0, 0, 8, 8),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand
             };
@@ -8890,7 +9930,6 @@ namespace MeuApp
                 : (s, e) => OpenCreateTaskDialog(team);
             actionWrap.Children.Add(addButton);
 
-            Grid.SetColumn(actionWrap, 1);
             header.Children.Add(actionWrap);
             stack.Children.Add(header);
 
@@ -8908,12 +9947,12 @@ namespace MeuApp
             var button = new Button
             {
                 Content = label,
-                Background = isActive ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBackgroundBrush"),
-                Foreground = isActive ? Brushes.White : GetThemeBrush("PrimaryTextBrush"),
+                Background = isActive ? GetThemeBrush("AccentMutedBrush") : Brushes.Transparent,
+                Foreground = isActive ? GetThemeBrush("AccentBrush") : GetThemeBrush("PrimaryTextBrush"),
                 BorderBrush = isActive ? GetThemeBrush("AccentBrush") : GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                Padding = new Thickness(14, 8, 14, 8),
-                Margin = new Thickness(0, 0, 10, 10),
+                Padding = new Thickness(12, 7, 12, 7),
+                Margin = new Thickness(0, 0, 8, 8),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand,
                 Tag = view
@@ -8937,49 +9976,12 @@ namespace MeuApp
             var isKanban = _activeTeamBoardView == TeamBoardView.Kanban;
 
             var stack = new StackPanel();
-
-            var overview = new Border
-            {
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = isKanban
-                    ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
-                    : GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(18),
-                Margin = new Thickness(0, 0, 0, 16)
-            };
-
-            var overviewWrap = new WrapPanel();
-            overviewWrap.Children.Add(CreateBoardOverviewMetric(
-                isKanban ? "Fluxo" : "Visao geral",
-                totalCards.ToString(),
-                isKanban ? "Itens circulando entre etapas" : "Total de tarefas",
-                isKanban ? Color.FromRgb(14, 165, 233) : Color.FromRgb(37, 99, 235)));
-            overviewWrap.Children.Add(CreateBoardOverviewMetric("Em risco", overdueCards.ToString(), overdueCards == 1 ? "Prazo vencido" : "Prazos vencidos", Color.FromRgb(220, 38, 38)));
-            overviewWrap.Children.Add(CreateBoardOverviewMetric(
-                isKanban ? "Saidas" : "Concluidas",
-                completedCards.ToString(),
-                isKanban ? "Itens finalizados no fluxo" : "Ja entregues",
-                Color.FromRgb(16, 185, 129)));
-            overviewWrap.Children.Add(CreateBoardOverviewMetric(
-                isKanban ? "Responsaveis" : "Com responsavel",
-                assignedCards.ToString(),
-                isKanban ? "Cards com dono definido" : "Cards com dono",
-                Color.FromRgb(168, 85, 247)));
-            overview.Child = overviewWrap;
-            stack.Children.Add(overview);
-
-            stack.Children.Add(new TextBlock
-            {
-                Text = isKanban
-                    ? "O modo Kanban agora prioriza leitura operacional: etapas empilhadas, resumo por faixa e cards mais compactos para enxergar gargalos rapidamente."
-                    : "O modo Trello ficou mais editorial: colunas amplas, cards com mais respiro e leitura mais clara de prioridade, prazo e responsaveis.",
-                FontSize = 12,
-                Margin = new Thickness(2, 0, 0, 14),
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = GetThemeBrush("SecondaryTextBrush")
-            });
+            stack.Children.Add(CreateTeamBoardStatusStrip(
+                totalCards,
+                overdueCards,
+                completedCards,
+                assignedCards,
+                isKanban));
 
             stack.Children.Add(isKanban
                 ? CreateKanbanTaskBoardView(team)
@@ -8988,21 +9990,85 @@ namespace MeuApp
             return stack;
         }
 
-        private UIElement CreateTrelloTaskBoardView(TeamWorkspaceInfo team)
+        private UIElement CreateTeamBoardStatusStrip(int totalCards, int overdueCards, int completedCards, int assignedCards, bool isKanban)
         {
-            var columnsWrap = new WrapPanel
+            var wrap = new WrapPanel
+            {
+                Margin = new Thickness(0, 0, 0, 12)
+            };
+
+            wrap.Children.Add(CreateTeamBoardStatusPill(isKanban ? "Fluxo" : "Tarefas", totalCards.ToString(), Color.FromRgb(37, 99, 235)));
+            wrap.Children.Add(CreateTeamBoardStatusPill("Risco", overdueCards.ToString(), Color.FromRgb(220, 38, 38)));
+            wrap.Children.Add(CreateTeamBoardStatusPill(isKanban ? "Saidas" : "Concluidas", completedCards.ToString(), Color.FromRgb(16, 185, 129)));
+            wrap.Children.Add(CreateTeamBoardStatusPill("Com dono", assignedCards.ToString(), Color.FromRgb(168, 85, 247)));
+
+            return wrap;
+        }
+
+        private Border CreateTeamBoardStatusPill(string label, string value, Color accent)
+        {
+            var accentBrush = new SolidColorBrush(accent);
+            var content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                ItemWidth = 360,
-                Margin = new Thickness(0, 0, -16, 0)
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            content.Children.Add(new Border
+            {
+                Width = 3,
+                Height = 22,
+                Background = accentBrush,
+                CornerRadius = new CornerRadius(2),
+                Margin = new Thickness(0, 0, 8, 0)
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = value,
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = label,
+                FontSize = 11,
+                Margin = new Thickness(6, 1, 0, 0),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            return new Border
+            {
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 7, 10, 7),
+                Margin = new Thickness(0, 0, 8, 8),
+                Child = content
+            };
+        }
+
+        private UIElement CreateTrelloTaskBoardView(TeamWorkspaceInfo team)
+        {
+            var columnsStack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal
             };
 
             foreach (var column in team.TaskColumns)
             {
-                columnsWrap.Children.Add(CreateTaskBoardColumn(team, column, false));
+                columnsStack.Children.Add(CreateTaskBoardColumn(team, column, false));
             }
 
-            return columnsWrap;
+            return new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                CanContentScroll = false,
+                Content = columnsStack
+            };
         }
 
         private UIElement CreateKanbanTaskBoardView(TeamWorkspaceInfo team)
@@ -9027,12 +10093,13 @@ namespace MeuApp
 
             var columnBorder = new Border
             {
-                Width = 344,
-                Margin = new Thickness(0, 0, 16, 16),
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = new SolidColorBrush(column.AccentColor),
+                Width = compactCards ? double.NaN : 296,
+                MinWidth = compactCards ? 0 : 296,
+                Margin = new Thickness(0, 0, 12, 12),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
+                CornerRadius = new CornerRadius(8),
                 AllowDrop = true,
                 Tag = column
             };
@@ -9042,15 +10109,15 @@ namespace MeuApp
             var stack = new StackPanel();
             stack.Children.Add(new Border
             {
-                Height = 6,
+                Height = 3,
                 Background = new SolidColorBrush(column.AccentColor),
-                CornerRadius = new CornerRadius(20, 20, 0, 0)
+                CornerRadius = new CornerRadius(8, 8, 0, 0)
             });
 
             var headerSection = new Border
             {
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                Padding = new Thickness(16, 14, 16, 14),
+                Background = Brushes.Transparent,
+                Padding = new Thickness(12, 12, 12, 10),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(0, 0, 0, 1)
             };
@@ -9063,20 +10130,23 @@ namespace MeuApp
             header.Children.Add(new TextBlock
             {
                 Text = column.Title,
-                FontSize = 15,
+                FontSize = 14,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = GetThemeBrush("PrimaryTextBrush")
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                TextWrapping = TextWrapping.Wrap
             });
 
             var countBadge = new Border
             {
-                Background = new SolidColorBrush(column.AccentColor),
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(8, 3, 8, 3),
+                Background = CreateSoftAccentBrush(new SolidColorBrush(column.AccentColor), 18),
+                BorderBrush = new SolidColorBrush(column.AccentColor),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 2, 7, 2),
                 Child = new TextBlock
                 {
                     Text = column.Cards.Count.ToString(),
-                    Foreground = Brushes.White,
+                    Foreground = new SolidColorBrush(column.AccentColor),
                     FontSize = 10,
                     FontWeight = FontWeights.Bold
                 }
@@ -9099,7 +10169,7 @@ namespace MeuApp
 
             var cardsHost = new StackPanel
             {
-                Margin = new Thickness(14, 14, 14, 14)
+                Margin = new Thickness(10, 10, 10, 10)
             };
 
             foreach (var card in column.Cards.OrderBy(task => task.DueDate ?? DateTime.MaxValue))
@@ -9114,8 +10184,8 @@ namespace MeuApp
                     Background = GetThemeBrush("MutedCardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(14),
-                    Padding = new Thickness(16),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(12),
                     Margin = new Thickness(0, 2, 0, 0),
                     Child = new StackPanel
                     {
@@ -9130,11 +10200,11 @@ namespace MeuApp
                             },
                             new Button
                             {
-                                Content = "Criar primeira tarefa",
+                                Content = "Criar tarefa",
                                 Background = GetThemeBrush("AccentBrush"),
                                 Foreground = Brushes.White,
                                 BorderThickness = new Thickness(0),
-                                Padding = new Thickness(12, 8, 12, 8),
+                                Padding = new Thickness(10, 7, 10, 7),
                                 Margin = new Thickness(0, 10, 0, 0),
                                 FontWeight = FontWeights.SemiBold,
                                 Cursor = Cursors.Hand,
@@ -9163,62 +10233,57 @@ namespace MeuApp
             var lane = new Border
             {
                 Background = GetThemeBrush("CardBackgroundBrush"),
-                BorderBrush = new SolidColorBrush(column.AccentColor),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
-                Margin = new Thickness(0, 0, 0, 16),
-                Padding = new Thickness(18)
-            };
-
-            var layout = new Grid();
-            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
-            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
-            layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            var leftRail = new Border
-            {
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(16)
+                CornerRadius = new CornerRadius(8),
+                Margin = new Thickness(0, 0, 0, 12),
+                Padding = new Thickness(12)
             };
 
-            var leftStack = new StackPanel();
-            leftStack.Children.Add(new Border
+            var layout = new StackPanel();
+            layout.Children.Add(new Border
             {
-                Width = 42,
-                Height = 8,
-                CornerRadius = new CornerRadius(999),
+                Height = 3,
                 Background = new SolidColorBrush(column.AccentColor),
-                Margin = new Thickness(0, 0, 0, 12)
+                CornerRadius = new CornerRadius(2),
+                Margin = new Thickness(0, 0, 0, 10)
             });
-            leftStack.Children.Add(new TextBlock
+
+            var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(new TextBlock
             {
                 Text = column.Title,
-                FontSize = 18,
-                FontWeight = FontWeights.Bold,
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
                 Foreground = GetThemeBrush("PrimaryTextBrush")
             });
-            leftStack.Children.Add(new TextBlock
+            titleStack.Children.Add(new TextBlock
             {
                 Text = overdueCount > 0
-                    ? $"{overdueCount} item(ns) exigindo atencao imediata."
+                    ? $"{overdueCount} item(ns) exigem atencao."
                     : "Fluxo estavel nesta etapa.",
-                FontSize = 12,
-                Margin = new Thickness(0, 8, 0, 14),
+                FontSize = 11,
+                Margin = new Thickness(0, 4, 0, 0),
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = GetThemeBrush("SecondaryTextBrush")
             });
-            leftStack.Children.Add(CreateBoardOverviewMetric("Cards", column.Cards.Count.ToString(), "Volume atual", column.AccentColor));
-            leftStack.Children.Add(CreateBoardOverviewMetric("Atrasos", overdueCount.ToString(), "Itens vencidos", Color.FromRgb(220, 38, 38)));
-            leftRail.Child = leftStack;
-            layout.Children.Add(leftRail);
+            header.Children.Add(titleStack);
+
+            var countWrap = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+            countWrap.Children.Add(CreateTeamBoardStatusPill("Cards", column.Cards.Count.ToString(), column.AccentColor));
+            countWrap.Children.Add(CreateTeamBoardStatusPill("Atrasos", overdueCount.ToString(), Color.FromRgb(220, 38, 38)));
+            Grid.SetColumn(countWrap, 1);
+            header.Children.Add(countWrap);
+            layout.Children.Add(header);
 
             var cardsWrap = new WrapPanel
             {
                 Orientation = Orientation.Horizontal,
-                Margin = new Thickness(0, 0, -12, -12)
+                Margin = new Thickness(0, 0, -10, -10)
             };
 
             foreach (var card in column.Cards.OrderBy(task => task.DueDate ?? DateTime.MaxValue))
@@ -9230,12 +10295,12 @@ namespace MeuApp
             {
                 cardsWrap.Children.Add(new Border
                 {
-                    Width = 260,
+                    Width = 240,
                     Background = GetThemeBrush("MutedCardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(16),
-                    Padding = new Thickness(16),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(12),
                     Child = new StackPanel
                     {
                         Children =
@@ -9249,12 +10314,12 @@ namespace MeuApp
                             },
                             new Button
                             {
-                                Content = "Criar tarefa nesta etapa",
+                                Content = "Criar tarefa",
                                 Background = new SolidColorBrush(column.AccentColor),
                                 Foreground = Brushes.White,
                                 BorderThickness = new Thickness(0),
-                                Padding = new Thickness(12, 8, 12, 8),
-                                Margin = new Thickness(0, 12, 0, 0),
+                                Padding = new Thickness(10, 7, 10, 7),
+                                Margin = new Thickness(0, 10, 0, 0),
                                 FontWeight = FontWeights.SemiBold,
                                 Cursor = Cursors.Hand,
                                 Tag = team
@@ -9270,7 +10335,6 @@ namespace MeuApp
                 }
             }
 
-            Grid.SetColumn(cardsWrap, 2);
             layout.Children.Add(cardsWrap);
 
             lane.Child = layout;
@@ -9300,13 +10364,13 @@ namespace MeuApp
             {
                 Background = isOverdue
                     ? CreateSoftAccentBrush(dangerBrush, 24)
-                    : GetElevatedSurfaceBrush(),
+                    : GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = isOverdue ? dangerBrush : GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = compactMode ? new Thickness(14) : new Thickness(16),
-                Margin = new Thickness(0, 0, 0, 12),
-                Width = compactMode ? 256 : double.NaN,
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, compactMode ? 10 : 0, 10),
+                Width = compactMode ? 240 : double.NaN,
                 Cursor = Cursors.Hand,
                 Tag = dragInfo
             };
@@ -9314,14 +10378,17 @@ namespace MeuApp
             cardBorder.GiveFeedback += BoardDragPreview_GiveFeedback;
 
             var stack = new StackPanel();
-            stack.Children.Add(new TextBlock
+            if (compactMode)
             {
-                Text = column.Title.ToUpperInvariant(),
-                FontSize = 10,
-                FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(column.AccentColor),
-                Margin = new Thickness(0, 0, 0, 6)
-            });
+                stack.Children.Add(new TextBlock
+                {
+                    Text = column.Title.ToUpperInvariant(),
+                    FontSize = 10,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(column.AccentColor),
+                    Margin = new Thickness(0, 0, 0, 6)
+                });
+            }
             stack.Children.Add(new TextBlock
             {
                 Text = card.Title,
@@ -9344,44 +10411,45 @@ namespace MeuApp
             {
                 Margin = new Thickness(0, 10, 0, 0)
             };
-            chips.Children.Add(CreateStaticTeamChip(card.Priority, new SolidColorBrush(priorityColor), Brushes.White));
+            chips.Children.Add(CreateTaskBoardMetaPill(card.Priority, new SolidColorBrush(priorityColor), CreateSoftAccentBrush(new SolidColorBrush(priorityColor), 16), new SolidColorBrush(priorityColor)));
 
             if (card.DueDate.HasValue)
             {
-                chips.Children.Add(CreateStaticTeamChip(
+                chips.Children.Add(CreateTaskBoardMetaPill(
                     isOverdue ? $"Atrasado {FormatRelativeDate(card.DueDate.Value)}" : $"Prazo {FormatRelativeDate(card.DueDate.Value)}",
-                    isOverdue ? new SolidColorBrush(Color.FromRgb(220, 38, 38)) : GetThemeBrush("AccentMutedBrush"),
-                    isOverdue ? Brushes.White : GetThemeBrush("AccentBrush")));
+                    isOverdue ? GetThemeBrush("DangerBrush") : GetThemeBrush("AccentBrush"),
+                    isOverdue ? CreateSoftAccentBrush(GetThemeBrush("DangerBrush"), 18) : GetThemeBrush("AccentMutedBrush"),
+                    isOverdue ? GetThemeBrush("DangerBrush") : GetThemeBrush("AccentBrush")));
             }
 
             if (card.EstimatedHours > 0)
             {
-                chips.Children.Add(CreateStaticTeamChip($"{card.EstimatedHours}h", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill($"{card.EstimatedHours}h", GetThemeBrush("SecondaryTextBrush")));
             }
 
             if (card.WorkloadPoints > 0)
             {
-                chips.Children.Add(CreateStaticTeamChip($"{card.WorkloadPoints} pts", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill($"{card.WorkloadPoints} pts", GetThemeBrush("SecondaryTextBrush")));
             }
 
             if (!string.IsNullOrWhiteSpace(card.RequiredRole) && !string.Equals(card.RequiredRole, "student", StringComparison.OrdinalIgnoreCase))
             {
-                chips.Children.Add(CreateStaticTeamChip(TeamPermissionService.GetRoleLabel(card.RequiredRole), GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill(TeamPermissionService.GetRoleLabel(card.RequiredRole), GetThemeBrush("SecondaryTextBrush")));
             }
 
             if (card.RequiresProfessorReview)
             {
-                chips.Children.Add(CreateStaticTeamChip("Revisão docente", GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill("Revisao docente", GetThemeBrush("AccentBrush"), GetThemeBrush("AccentMutedBrush"), GetThemeBrush("AccentBrush")));
             }
 
             if (card.Comments.Count > 0)
             {
-                chips.Children.Add(CreateStaticTeamChip($"{card.Comments.Count} comentário(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill($"{card.Comments.Count} comentario(s)", GetThemeBrush("SecondaryTextBrush")));
             }
 
             if (card.Attachments.Count > 0)
             {
-                chips.Children.Add(CreateStaticTeamChip($"{card.Attachments.Count} anexo(s)", GetThemeBrush("CardBackgroundBrush"), GetThemeBrush("PrimaryTextBrush")));
+                chips.Children.Add(CreateTaskBoardMetaPill($"{card.Attachments.Count} anexo(s)", GetThemeBrush("SecondaryTextBrush")));
             }
 
             stack.Children.Add(chips);
@@ -9402,12 +10470,7 @@ namespace MeuApp
                 stack.Children.Add(CreateTaskAssigneesPanel(assignedMembers, compactMode));
             }
 
-            var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
-            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
+            var footer = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
             footer.Children.Add(new TextBlock
             {
                 Text = $"Criado em {card.CreatedAt:dd/MM}",
@@ -9415,6 +10478,7 @@ namespace MeuApp
                 Foreground = GetThemeBrush("TertiaryTextBrush")
             });
 
+            var actionWrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
             if (CanCurrentUserComment(team) || CanCurrentUserUploadFiles(team))
             {
                 var collaborateButton = new Button
@@ -9426,12 +10490,12 @@ namespace MeuApp
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold,
                     Cursor = Cursors.Hand,
-                    Padding = new Thickness(6, 0, 0, 0),
+                    Padding = new Thickness(0, 0, 8, 0),
+                    Margin = new Thickness(0, 0, 8, 4),
                     Tag = Tuple.Create(team, column, card)
                 };
                 collaborateButton.Click += OpenTaskCollaboration_Click;
-                Grid.SetColumn(collaborateButton, 1);
-                footer.Children.Add(collaborateButton);
+                actionWrap.Children.Add(collaborateButton);
             }
 
             if (CanCurrentUserEditProjectSettings(team))
@@ -9445,12 +10509,12 @@ namespace MeuApp
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold,
                     Cursor = Cursors.Hand,
-                    Padding = new Thickness(8, 0, 0, 0),
+                    Padding = new Thickness(0, 0, 8, 0),
+                    Margin = new Thickness(0, 0, 8, 4),
                     Tag = Tuple.Create(team, column, card)
                 };
                 editButton.Click += EditTeamTask_Click;
-                Grid.SetColumn(editButton, 2);
-                footer.Children.Add(editButton);
+                actionWrap.Children.Add(editButton);
 
                 var deleteButton = new Button
                 {
@@ -9461,17 +10525,43 @@ namespace MeuApp
                     FontSize = 10,
                     FontWeight = FontWeights.SemiBold,
                     Cursor = Cursors.Hand,
-                    Padding = new Thickness(8, 0, 0, 0),
+                    Padding = new Thickness(0, 0, 8, 0),
+                    Margin = new Thickness(0, 0, 8, 4),
                     Tag = Tuple.Create(team, column, card)
                 };
                 deleteButton.Click += DeleteTeamTask_Click;
-                Grid.SetColumn(deleteButton, 3);
-                footer.Children.Add(deleteButton);
+                actionWrap.Children.Add(deleteButton);
+            }
+
+            if (actionWrap.Children.Count > 0)
+            {
+                footer.Children.Add(actionWrap);
             }
 
             stack.Children.Add(footer);
             cardBorder.Child = stack;
             return cardBorder;
+        }
+
+        private Border CreateTaskBoardMetaPill(string text, Brush foreground, Brush? background = null, Brush? borderBrush = null)
+        {
+            return new Border
+            {
+                Background = background ?? GetThemeBrush("MutedCardBackgroundBrush"),
+                BorderBrush = borderBrush ?? GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(7, 3, 7, 3),
+                Margin = new Thickness(0, 0, 5, 5),
+                Child = new TextBlock
+                {
+                    Text = text,
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = foreground,
+                    TextWrapping = TextWrapping.NoWrap
+                }
+            };
         }
 
         private WrapPanel CreateTaskAssigneesPanel(List<UserInfo> assignedMembers, bool compactMode)
@@ -9525,7 +10615,7 @@ namespace MeuApp
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(999),
+                CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(6, 4, 10, 4),
                 Margin = new Thickness(0, 0, 8, 8),
                 Child = content
@@ -9538,10 +10628,10 @@ namespace MeuApp
             {
                 Width = 160,
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = new SolidColorBrush(accentColor),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(14),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12),
                 Margin = new Thickness(0, 0, 12, 12),
                 Child = new StackPanel
                 {
@@ -9578,9 +10668,11 @@ namespace MeuApp
             return new Border
             {
                 Background = background,
-                CornerRadius = new CornerRadius(14),
-                Padding = new Thickness(10, 5, 10, 5),
-                Margin = new Thickness(0, 0, 8, 8),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 4, 8, 4),
+                Margin = new Thickness(0, 0, 6, 6),
                 Child = new TextBlock
                 {
                     Text = text,
@@ -9593,11 +10685,20 @@ namespace MeuApp
 
         private UIElement CreateCsdBoardView(TeamWorkspaceInfo team)
         {
-            var wrap = new WrapPanel();
-            wrap.Children.Add(CreateCsdColumn(team, "Certezas", team.CsdBoard.Certainties, Color.FromRgb(37, 99, 235)));
-            wrap.Children.Add(CreateCsdColumn(team, "Suposicoes", team.CsdBoard.Assumptions, Color.FromRgb(245, 158, 11)));
-            wrap.Children.Add(CreateCsdColumn(team, "Duvidas", team.CsdBoard.Doubts, Color.FromRgb(168, 85, 247)));
-            return wrap;
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Horizontal
+            };
+            stack.Children.Add(CreateCsdColumn(team, "Certezas", team.CsdBoard.Certainties, Color.FromRgb(37, 99, 235)));
+            stack.Children.Add(CreateCsdColumn(team, "Suposicoes", team.CsdBoard.Assumptions, Color.FromRgb(245, 158, 11)));
+            stack.Children.Add(CreateCsdColumn(team, "Duvidas", team.CsdBoard.Doubts, Color.FromRgb(168, 85, 247)));
+
+            return new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = stack
+            };
         }
 
         private Border CreateCsdColumn(TeamWorkspaceInfo team, string title, List<string> notes, Color accent)
@@ -9609,7 +10710,7 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = new SolidColorBrush(accent),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
+                CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(14),
                 AllowDrop = true,
                 Tag = Tuple.Create(team, title)
@@ -9634,7 +10735,7 @@ namespace MeuApp
                     Background = GetThemeBrush("MutedCardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(14),
+                    CornerRadius = new CornerRadius(6),
                     Padding = new Thickness(12),
                     Margin = new Thickness(0, 10, 0, 0),
                     Cursor = Cursors.Hand,
@@ -10382,7 +11483,7 @@ namespace MeuApp
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(14),
                 Margin = new Thickness(0, 10, 0, 0)
             };
@@ -10540,9 +11641,9 @@ namespace MeuApp
             return new Border
             {
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
-                BorderBrush = new SolidColorBrush(accent),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(14),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(12, 10, 12, 10),
                 Margin = new Thickness(0, 0, 8, 8),
                 Child = new StackPanel
@@ -10628,9 +11729,9 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(16),
-                Margin = new Thickness(0, 0, 0, 14),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 0, 12),
                 Child = new StackPanel()
             };
 
@@ -10657,17 +11758,18 @@ namespace MeuApp
 
         private Button CreateSidebarButton(string text, Color color, RoutedEventHandler onClick, PackIconMaterialKind? iconKind = null)
         {
-            var backgroundBrush = new SolidColorBrush(color);
+            var accentBrush = new SolidColorBrush(color);
             var button = new Button
             {
                 Content = iconKind.HasValue
-                    ? CreateIconLabelContent(text, iconKind.Value, Brushes.White, Brushes.White, 14, 12, FontWeights.SemiBold)
+                    ? CreateIconLabelContent(text, iconKind.Value, accentBrush, GetThemeBrush("PrimaryTextBrush"), 14, 12, FontWeights.SemiBold)
                     : text,
-                Background = backgroundBrush,
-                Foreground = Brushes.White,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(12, 8, 12, 8),
-                Margin = new Thickness(0, 12, 10, 0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("PrimaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(10, 7, 10, 7),
+                Margin = new Thickness(0, 10, 8, 0),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand
             };
@@ -10681,25 +11783,15 @@ namespace MeuApp
 
             var activeQuery = NormalizeTeamValue(TeamListSearchBox?.Text ?? string.Empty);
             var teamsToRender = ResolveVisibleTeamListResults();
-            var teachingClassesToRender = ResolveVisibleTeachingClasses(activeQuery);
-            var shouldShowTeachingClasses = teachingClassesToRender.Count > 0 || CurrentViewerCanManageTeachingClasses();
-
-            if (shouldShowTeachingClasses)
-            {
-                TeamListPanel.Children.Add(CreateTeachingClassesSectionCard(teachingClassesToRender, activeQuery));
-            }
 
             if (teamsToRender.Count == 0)
             {
-                if (!shouldShowTeachingClasses)
-                {
-                    TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
-                        string.IsNullOrWhiteSpace(activeQuery)
-                            ? CurrentViewerCanUseProfessorDiscovery()
-                                ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
-                                : "Nenhuma equipe de projeto carregada ainda para sua conta."
-                            : $"Nenhuma equipe de projeto encontrada para \"{activeQuery}\"."));
-                }
+                TeamListPanel.Children.Add(CreateTeamsListDiscoveryHintCard(
+                    string.IsNullOrWhiteSpace(activeQuery)
+                        ? CurrentViewerCanUseProfessorDiscovery()
+                            ? "Use a busca desta aba para localizar equipes e projetos de qualquer aluno, mesmo que ainda não estejam carregados localmente."
+                            : "Nenhuma equipe de projeto carregada ainda para sua conta."
+                        : $"Nenhuma equipe de projeto encontrada para \"{activeQuery}\"."));
 
                 RenderProfileProjectSelection(_currentProfile);
                 RenderCalendarAgenda();
@@ -10723,7 +11815,7 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(20),
+                CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(18),
                 Margin = new Thickness(0, 0, 0, 12)
             };
@@ -10962,7 +12054,7 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = accentBrush,
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(20),
                 Margin = new Thickness(0, 0, 0, 16),
                 Child = new StackPanel
@@ -11032,16 +12124,17 @@ namespace MeuApp
             {
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(18, 0, 0, 0)
+                Margin = new Thickness(12, 0, 0, 0),
+                MaxWidth = 260
             };
 
             var openButton = new Button
             {
-                Content = "Abrir turma",
+                Content = "Abrir",
                 Background = accentBrush,
                 Foreground = Brushes.White,
                 BorderThickness = new Thickness(0),
-                Padding = new Thickness(14, 10, 14, 10),
+                Padding = new Thickness(12, 8, 12, 8),
                 Margin = new Thickness(0, 0, 8, 8),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand,
@@ -11052,12 +12145,12 @@ namespace MeuApp
 
             var copyButton = new Button
             {
-                Content = "Copiar código",
+                Content = "Código",
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 Foreground = GetThemeBrush("PrimaryTextBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                Padding = new Thickness(14, 10, 14, 10),
+                Padding = new Thickness(12, 8, 12, 8),
                 Margin = new Thickness(0, 0, 8, 8),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = Cursors.Hand,
@@ -11070,12 +12163,12 @@ namespace MeuApp
             {
                 var addStudentButton = new Button
                 {
-                    Content = "Adicionar aluno",
+                    Content = "Aluno",
                     Background = GetThemeBrush("CardBackgroundBrush"),
                     Foreground = accentBrush,
                     BorderBrush = accentBrush,
                     BorderThickness = new Thickness(1),
-                    Padding = new Thickness(14, 10, 14, 10),
+                    Padding = new Thickness(12, 8, 12, 8),
                     Margin = new Thickness(0, 0, 0, 8),
                     FontWeight = FontWeights.SemiBold,
                     Cursor = Cursors.Hand,
@@ -11095,7 +12188,7 @@ namespace MeuApp
                 Background = GetThemeBrush("MutedCardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
+                CornerRadius = new CornerRadius(8),
                 Child = contentGrid
             };
         }
@@ -11729,11 +12822,10 @@ namespace MeuApp
         {
             TeamEntryOptionsPopup.IsOpen = false;
             var hasProjectTeams = _teamWorkspaces.Count > 0;
-            var hasTeachingClasses = _teachingClasses.Count > 0;
-            var hasTeachingAccess = hasTeachingClasses || CurrentViewerCanManageTeachingClasses();
+            var canUseProfessorDiscovery = CurrentViewerCanUseProfessorDiscovery();
             var hasActiveWorkspace = _activeTeamWorkspace != null;
 
-            TeamsEmptyStateCard.Visibility = !hasProjectTeams && !hasTeachingAccess && _teamEntryMode == TeamEntryMode.None && !hasActiveWorkspace
+            TeamsEmptyStateCard.Visibility = !hasProjectTeams && !canUseProfessorDiscovery && _teamEntryMode == TeamEntryMode.None && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamJoinCard.Visibility = _teamEntryMode == TeamEntryMode.Join && !hasActiveWorkspace
@@ -11742,7 +12834,7 @@ namespace MeuApp
             TeamCreationCard.Visibility = _teamEntryMode == TeamEntryMode.Create && !hasActiveWorkspace
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-            TeamListCard.Visibility = !hasActiveWorkspace && (hasProjectTeams || CurrentViewerCanUseProfessorDiscovery() || hasTeachingAccess)
+            TeamListCard.Visibility = !hasActiveWorkspace && (hasProjectTeams || canUseProfessorDiscovery)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             TeamWorkspaceCard.Visibility = hasActiveWorkspace ? Visibility.Visible : Visibility.Collapsed;
@@ -15826,6 +16918,7 @@ namespace MeuApp
         {
             _activeTeamWorkspace = team;
             _activeTeamBoardView = TeamBoardView.Trello;
+            _isTeamWorkspaceDetailsPanelOpen = false;
             TeamWorkspaceHost.Content = CreateTeamWorkspaceLoadingState(team);
 
             if (navigateToTeams)
@@ -15913,6 +17006,8 @@ namespace MeuApp
 
             if (_currentProfile == null)
             {
+                ProfessorDashboardHeaderPanel.Visibility = Visibility.Visible;
+                ProfessorDashboardHost.Margin = new Thickness(0, 0, 0, 24);
                 ProfessorDashboardStatusText.Text = "Entre com um perfil válido para abrir a área de Docência.";
                 ProfessorDashboardHost.Children.Add(CreateSearchSlideInfoCard(
                     "Docência indisponível",
@@ -15927,6 +17022,9 @@ namespace MeuApp
             var canManageTeachingClasses = CurrentViewerCanManageTeachingClasses();
 
             SynchronizeTeachingClassWorkspaceState();
+            var shouldExpandTeachingClassWorkspace = _activeTeachingClass != null && !_teachingClassComposerOpen;
+            ProfessorDashboardHeaderPanel.Visibility = shouldExpandTeachingClassWorkspace ? Visibility.Collapsed : Visibility.Visible;
+            ProfessorDashboardHost.Margin = shouldExpandTeachingClassWorkspace ? new Thickness(0) : new Thickness(0, 0, 0, 24);
 
             if (_teachingClassComposerOpen)
             {
@@ -17437,7 +18535,7 @@ namespace MeuApp
                 Background = GetTeachingClassTeamsSurfaceBrush(),
                 BorderBrush = GetTeachingClassTeamsBorderBrush(),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(18, 12, 18, 0)
+                Padding = new Thickness(14, 10, 14, 0)
             };
 
             var layout = new Grid();
@@ -17449,14 +18547,14 @@ namespace MeuApp
             {
                 Orientation = Orientation.Horizontal,
                 VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 0, 20, 0)
+                Margin = new Thickness(0, 0, 14, 0)
             };
             var badge = CreateTeamLogoBadge(teachingClass.IconPreviewImageDataUri, teachingClass.ClassName, 36, false, 13, 1);
             badge.Margin = new Thickness(0, 0, 10, 0);
             identity.Children.Add(badge);
             identity.Children.Add(new StackPanel
             {
-                MaxWidth = 280,
+                MaxWidth = 230,
                 Children =
                 {
                     new TextBlock
@@ -17520,7 +18618,7 @@ namespace MeuApp
             {
                 Orientation = Orientation.Horizontal,
                 VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(18, 0, 0, 0)
+                Margin = new Thickness(12, 0, 0, 0)
             };
 
             var refreshButton = CreateTeachingClassTopIconButton(PackIconMaterialKind.Refresh, "Atualizar turma");
@@ -17562,9 +18660,9 @@ namespace MeuApp
             var foreground = isActive ? accentBrush : GetTeachingClassTeamsSecondaryTextBrush();
             var button = new Button
             {
-                MinWidth = 108,
-                Padding = new Thickness(12, 10, 12, 0),
-                Margin = new Thickness(0, 0, 4, 0),
+                MinWidth = 94,
+                Padding = new Thickness(9, 9, 9, 0),
+                Margin = new Thickness(0, 0, 2, 0),
                 Background = Brushes.Transparent,
                 BorderBrush = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
@@ -18889,7 +19987,7 @@ namespace MeuApp
 
             var commandBar = new Grid
             {
-                Margin = new Thickness(22, 18, 22, 12)
+                Margin = new Thickness(18, 14, 18, 10)
             };
             commandBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             commandBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -18936,7 +20034,7 @@ namespace MeuApp
 
             var sectionStack = new StackPanel
             {
-                Margin = new Thickness(22, 14, 22, 22)
+                Margin = new Thickness(18, 12, 18, 18)
             };
             sectionStack.Children.Add(new StackPanel
             {
@@ -18965,8 +20063,8 @@ namespace MeuApp
 
             var cardsWrap = new WrapPanel
             {
-                Margin = new Thickness(0, 18, 0, 0),
-                ItemWidth = 330,
+                Margin = new Thickness(0, 14, 0, 0),
+                ItemWidth = 300,
                 Orientation = Orientation.Horizontal
             };
 
@@ -19040,9 +20138,9 @@ namespace MeuApp
 
             var button = new Button
             {
-                Width = 320,
-                MinHeight = 154,
-                Margin = new Thickness(0, 0, 20, 20),
+                Width = 288,
+                MinHeight = 142,
+                Margin = new Thickness(0, 0, 12, 16),
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
@@ -19065,7 +20163,7 @@ namespace MeuApp
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var logo = CreateTeachingClassTileBadge(teachingClass, 72);
+            var logo = CreateTeachingClassTileBadge(teachingClass, 58);
             logo.Margin = new Thickness(0, 0, 12, 0);
             mainGrid.Children.Add(logo);
 
@@ -19080,7 +20178,7 @@ namespace MeuApp
                 FontWeight = FontWeights.Bold,
                 Foreground = GetTeachingClassTeamsPrimaryTextBrush(),
                 TextWrapping = TextWrapping.Wrap,
-                MaxHeight = 54,
+                MaxHeight = 44,
                 LineHeight = 18
             });
             titleStack.Children.Add(new TextBlock
@@ -19113,7 +20211,7 @@ namespace MeuApp
             var bottomRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Margin = new Thickness(20, 16, 20, 14)
+                Margin = new Thickness(16, 14, 16, 12)
             };
 
             void AddBottomIcon(PackIconMaterialKind kind, string tooltip)
@@ -19295,7 +20393,7 @@ namespace MeuApp
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(20),
                 Child = new StackPanel
                 {
@@ -19365,7 +20463,7 @@ namespace MeuApp
                 Width = 34,
                 Height = 34,
                 Margin = new Thickness(12, 0, 0, 0),
-                CornerRadius = new CornerRadius(17),
+                CornerRadius = new CornerRadius(6),
                 Background = isSelected ? accentBrush : GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = isSelected ? Brushes.Transparent : GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
@@ -19387,7 +20485,7 @@ namespace MeuApp
                 Background = isSelected ? selectionBrush : GetThemeBrush("MutedCardBackgroundBrush"),
                 BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(18),
+                CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(16),
                 Child = contentGrid
             };
@@ -19904,10 +21002,10 @@ namespace MeuApp
             var canManage = CanManageTeachingClass(teachingClass);
             var shellGrid = new Grid
             {
-                MinHeight = 760,
+                MinHeight = 720,
                 Background = GetTeachingClassTeamsBackgroundBrush()
             };
-            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(288) });
+            shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(260) });
             shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
             shellGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -19929,8 +21027,8 @@ namespace MeuApp
             {
                 Background = GetTeachingClassTeamsBackgroundBrush(),
                 BorderBrush = GetTeachingClassTeamsBorderBrush(),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(0),
                 ClipToBounds = true,
                 Child = shellGrid
             };
@@ -21135,11 +22233,11 @@ namespace MeuApp
             var card = new Border
             {
                 Margin = new Thickness(0, 0, 0, 12),
-                Padding = new Thickness(16),
+                Padding = new Thickness(14),
                 Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8)
+                CornerRadius = new CornerRadius(6)
             };
 
             var stack = new StackPanel();
@@ -21272,7 +22370,7 @@ namespace MeuApp
                     Background = GetThemeBrush("MutedCardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(8),
+                    CornerRadius = new CornerRadius(6),
                     Child = new StackPanel
                     {
                         Children =
@@ -21336,7 +22434,7 @@ namespace MeuApp
                     Background = GetThemeBrush("CardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(8),
+                    CornerRadius = new CornerRadius(6),
                     Child = linkCard
                 });
             }
@@ -21379,7 +22477,7 @@ namespace MeuApp
                         Background = GetThemeBrush("CardBackgroundBrush"),
                         BorderBrush = GetThemeBrush("CardBorderBrush"),
                         BorderThickness = new Thickness(1),
-                        CornerRadius = new CornerRadius(8),
+                        CornerRadius = new CornerRadius(6),
                         Child = attachmentGrid
                     });
                 }
@@ -21407,11 +22505,11 @@ namespace MeuApp
                 var reactionPickerHost = new Border
                 {
                     Margin = new Thickness(10, 0, 0, 0),
-                    Padding = new Thickness(10, 8, 10, 8),
-                    Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                    Padding = new Thickness(8, 7, 8, 7),
+                    Background = GetThemeBrush("CardBackgroundBrush"),
                     BorderBrush = GetThemeBrush("CardBorderBrush"),
                     BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(999),
+                    CornerRadius = new CornerRadius(6),
                     Visibility = Visibility.Collapsed,
                     Opacity = 0,
                     RenderTransformOrigin = new Point(0, 0.5),
@@ -22090,11 +23188,13 @@ namespace MeuApp
             return new Border
             {
                 Margin = new Thickness(0, 0, 8, 8),
-                Padding = new Thickness(10, 6, 10, 6),
-                Background = isCurrentReaction ? CreateSoftAccentBrush(accent, 40) : CreateSoftAccentBrush(accent, 24),
-                BorderBrush = isCurrentReaction ? accent : GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(999),
+                Padding = new Thickness(9, 5, 9, 5),
+                Background = isCurrentReaction
+                    ? GetThemeBrush("MutedCardBackgroundBrush")
+                    : GetThemeBrush("CardBackgroundBrush"),
+                BorderBrush = accent,
+                BorderThickness = new Thickness(isCurrentReaction ? 2 : 1),
+                CornerRadius = new CornerRadius(5),
                 Child = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -22105,6 +23205,7 @@ namespace MeuApp
                             Text = emoji,
                             FontSize = 14,
                             FontFamily = GetAppEmojiFontFamily(),
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
                             VerticalAlignment = VerticalAlignment.Center
                         },
                         new TextBlock
@@ -22112,8 +23213,8 @@ namespace MeuApp
                             Text = count.ToString(),
                             Margin = new Thickness(6, 0, 0, 0),
                             FontSize = 11,
-                            FontWeight = FontWeights.SemiBold,
-                            Foreground = isCurrentReaction ? accent : GetThemeBrush("PrimaryTextBrush"),
+                            FontWeight = FontWeights.Bold,
+                            Foreground = GetThemeBrush("PrimaryTextBrush"),
                             VerticalAlignment = VerticalAlignment.Center
                         }
                     }
@@ -22136,18 +23237,22 @@ namespace MeuApp
                 {
                     Width = size,
                     Height = size,
-                    CornerRadius = new CornerRadius(size / 2),
-                    Background = isSelected ? CreateSoftAccentBrush(accentBrush, 42) : CreateSoftAccentBrush(accentBrush, 24),
-                    BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
-                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(6),
+                    Background = isSelected
+                        ? GetThemeBrush("MutedCardBackgroundBrush")
+                        : GetThemeBrush("CardBackgroundBrush"),
+                    BorderBrush = accentBrush,
+                    BorderThickness = new Thickness(isSelected ? 2 : 1),
                     Child = new TextBlock
                     {
                         Text = emoji,
-                        FontSize = size >= 44 ? 17 : 15,
+                        FontSize = size >= 44 ? 18 : 16,
                         FontFamily = GetAppEmojiFontFamily(),
+                        Foreground = GetThemeBrush("PrimaryTextBrush"),
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
-                        TextAlignment = TextAlignment.Center
+                        TextAlignment = TextAlignment.Center,
+                        Opacity = 1
                     }
                 }
             };
@@ -27111,6 +28216,12 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             RenderTeamWorkspace();
         }
 
+        private void ToggleTeamWorkspaceDetailsPanel_Click(object sender, RoutedEventArgs e)
+        {
+            _isTeamWorkspaceDetailsPanelOpen = !_isTeamWorkspaceDetailsPanelOpen;
+            RenderTeamWorkspace();
+        }
+
         private void TeamTaskCard_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton != MouseButtonState.Pressed || sender is not Border border || border.Tag is not TeamTaskDragInfo dragInfo)
@@ -28868,11 +29979,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             var stack = new StackPanel();
             stack.Children.Add(new Border
             {
-                Width = 46,
-                Height = 5,
-                CornerRadius = new CornerRadius(999),
-                Background = accentBrush,
-                Margin = new Thickness(0, 0, 0, 12)
+                Width = 30,
+                Height = 3,
+                CornerRadius = new CornerRadius(3),
+                Background = CreateSoftAccentBrush(accentBrush, 70),
+                Margin = new Thickness(0, 0, 0, 10)
             });
             stack.Children.Add(new TextBlock
             {
@@ -28905,11 +30016,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             return new Border
             {
                 Margin = margin ?? new Thickness(0, 0, 0, 16),
-                Padding = new Thickness(18),
-                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Padding = new Thickness(16),
+                Background = GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(22),
+                CornerRadius = new CornerRadius(10),
                 Child = stack
             };
         }
@@ -28966,9 +30077,9 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 MinHeight = 82,
                 Margin = new Thickness(0, 0, 12, 12),
                 Padding = new Thickness(14),
-                Background = isSelected ? CreateSoftAccentBrush(accentBrush, 34) : GetThemeBrush("CardBackgroundBrush"),
+                Background = isSelected ? CreateSoftAccentBrush(accentBrush, 28) : GetThemeBrush("CardBackgroundBrush"),
                 BorderBrush = isSelected ? accentBrush : GetThemeBrush("CardBorderBrush"),
-                BorderThickness = new Thickness(isSelected ? 2 : 1),
+                BorderThickness = new Thickness(1),
                 HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 VerticalContentAlignment = VerticalAlignment.Stretch,
                 Cursor = Cursors.Hand,
@@ -29072,11 +30183,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             return new Border
             {
                 Margin = margin ?? new Thickness(0, 14, 0, 0),
-                Padding = new Thickness(14),
-                Background = CreateSoftAccentBrush(accentBrush, 24),
-                BorderBrush = accentBrush,
+                Padding = new Thickness(12),
+                Background = CreateSoftAccentBrush(accentBrush, 18),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(16),
+                CornerRadius = new CornerRadius(8),
                 Child = new TextBlock
                 {
                     Text = text,
@@ -32070,6 +33181,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
         private void ApplyAppTheme()
         {
             var highContrastEnabled = AccessibilityPreferences.HighContrastEnabled;
+            App.ApplyGlobalTheme(AccessibilityPreferences.Current);
 
             SetThemeBrush("WindowBackgroundBrush", highContrastEnabled
                 ? Color.FromRgb(3, 7, 18)
@@ -32137,6 +33249,24 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             SetThemeBrush("DangerBrush", highContrastEnabled
                 ? Color.FromRgb(248, 113, 113)
                 : _appDarkModeEnabled ? Color.FromRgb(248, 113, 113) : Color.FromRgb(220, 38, 38));
+            SetThemeBrush("ChatIconBrush", highContrastEnabled
+                ? Color.FromRgb(94, 234, 212)
+                : _appDarkModeEnabled ? Color.FromRgb(45, 212, 191) : Color.FromRgb(15, 118, 110));
+            SetThemeBrush("ConnectionsIconBrush", highContrastEnabled
+                ? Color.FromRgb(125, 211, 252)
+                : _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(2, 132, 199));
+            SetThemeBrush("TeamsIconBrush", highContrastEnabled
+                ? Color.FromRgb(147, 197, 253)
+                : _appDarkModeEnabled ? Color.FromRgb(96, 165, 250) : Color.FromRgb(37, 99, 235));
+            SetThemeBrush("CalendarIconBrush", highContrastEnabled
+                ? Color.FromRgb(253, 186, 116)
+                : _appDarkModeEnabled ? Color.FromRgb(251, 146, 60) : Color.FromRgb(234, 88, 12));
+            SetThemeBrush("FilesIconBrush", highContrastEnabled
+                ? Color.FromRgb(196, 181, 253)
+                : _appDarkModeEnabled ? Color.FromRgb(167, 139, 250) : Color.FromRgb(124, 58, 237));
+            SetThemeBrush("SettingsIconBrush", highContrastEnabled
+                ? Color.FromRgb(203, 213, 225)
+                : _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(100, 116, 139));
             SetThemeBrush("ToggleTrackOffBrush", highContrastEnabled
                 ? Color.FromRgb(71, 85, 105)
                 : _appDarkModeEnabled ? Color.FromRgb(51, 65, 85) : Color.FromRgb(203, 213, 225));
@@ -32144,6 +33274,18 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 ? Color.FromRgb(14, 165, 233)
                 : _appDarkModeEnabled ? Color.FromRgb(56, 189, 248) : Color.FromRgb(37, 99, 235));
             SetThemeBrush("ToggleThumbBrush", Colors.White);
+            SetThemeBrush("ScrollBarTrackBrush", highContrastEnabled
+                ? Color.FromRgb(3, 7, 18)
+                : _appDarkModeEnabled ? Color.FromRgb(15, 23, 42) : Color.FromRgb(241, 243, 245));
+            SetThemeBrush("ScrollBarThumbBrush", highContrastEnabled
+                ? Color.FromRgb(125, 211, 252)
+                : _appDarkModeEnabled ? Color.FromRgb(71, 85, 105) : Color.FromRgb(168, 176, 189));
+            SetThemeBrush("ScrollBarThumbHoverBrush", highContrastEnabled
+                ? Color.FromRgb(186, 230, 253)
+                : _appDarkModeEnabled ? Color.FromRgb(100, 116, 139) : Color.FromRgb(127, 137, 150));
+            SetThemeBrush("ScrollBarThumbPressedBrush", highContrastEnabled
+                ? Color.FromRgb(224, 242, 254)
+                : _appDarkModeEnabled ? Color.FromRgb(148, 163, 184) : Color.FromRgb(100, 116, 139));
 
             Background = GetThemeBrush("WindowBackgroundBrush");
 
@@ -32232,6 +33374,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             if (conversation == null)
                 return;
 
+            if (IsAiAssistantConversation(conversation))
+            {
+                return;
+            }
+
             try
             {
                 DebugHelper.WriteLine($"[LoadConversationMessages] Carregando mensagens para {conversation.ContactName}");
@@ -32299,6 +33446,19 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             return !string.IsNullOrWhiteSpace(contactId)
                 && !string.IsNullOrWhiteSpace(currentUserId)
                 && string.Equals(contactId, currentUserId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsAiAssistantConversation(Conversation? conversation)
+        {
+            return conversation != null
+                && string.Equals(conversation.ContactId, AiAssistantContactId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsAiAssistantMessage(ChatMessage? message)
+        {
+            return message != null
+                && (string.Equals(message.SenderId, AiAssistantContactId, StringComparison.OrdinalIgnoreCase)
+                    || (message.MessageType ?? string.Empty).StartsWith("ai", StringComparison.OrdinalIgnoreCase));
         }
 
         private Conversation CreateSelfConversationSnapshot()
@@ -32372,6 +33532,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
         private void EnsureSelectedConversationEntry(List<Conversation> conversations)
         {
             if (_selectedConversation == null || string.IsNullOrWhiteSpace(_selectedConversation.ContactId))
+            {
+                return;
+            }
+
+            if (IsAiAssistantConversation(_selectedConversation))
             {
                 return;
             }
@@ -32612,6 +33777,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             var header = new Border
@@ -32709,6 +33875,10 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             layout.Children.Add(header);
             Grid.SetRow(header, 0);
 
+            var aiAssistantCard = CreateAiAssistantSidebarCard(isLoading);
+            layout.Children.Add(aiAssistantCard);
+            Grid.SetRow(aiAssistantCard, 1);
+
             var searchShell = new Border
             {
                 Margin = new Thickness(18, 16, 18, 12),
@@ -32763,7 +33933,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             searchGrid.Children.Add(searchBox);
             searchShell.Child = searchGrid;
             layout.Children.Add(searchShell);
-            Grid.SetRow(searchShell, 1);
+            Grid.SetRow(searchShell, 2);
 
             Button CreateFilterButton(string label, bool isActive, Action action)
             {
@@ -32820,7 +33990,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
             filtersStrip.Child = filtersGrid;
             layout.Children.Add(filtersStrip);
-            Grid.SetRow(filtersStrip, 2);
+            Grid.SetRow(filtersStrip, 3);
 
             var summaryStrip = new Border
             {
@@ -32877,7 +34047,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
             summaryStrip.Child = summaryGrid;
             layout.Children.Add(summaryStrip);
-            Grid.SetRow(summaryStrip, 3);
+            Grid.SetRow(summaryStrip, 4);
 
             var listStack = new StackPanel
             {
@@ -32932,10 +34102,153 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 Content = listStack
             };
             layout.Children.Add(scrollViewer);
-            Grid.SetRow(scrollViewer, 4);
+            Grid.SetRow(scrollViewer, 5);
 
             sidebar.Child = layout;
             return sidebar;
+        }
+
+        private Border CreateAiAssistantSidebarCard(bool isLoading)
+        {
+            var isSelected = IsAiAssistantConversation(_selectedConversation);
+            var background = _appDarkModeEnabled
+                ? isSelected
+                    ? new SolidColorBrush(Color.FromRgb(15, 43, 64))
+                    : new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                : isSelected
+                    ? new SolidColorBrush(Color.FromRgb(239, 246, 255))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            var borderBrush = _appDarkModeEnabled
+                ? isSelected
+                    ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                    : new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : isSelected
+                    ? new SolidColorBrush(Color.FromRgb(147, 197, 253))
+                    : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var primaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(241, 245, 249))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var secondaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(71, 85, 105));
+            var accentBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+
+            var card = new Border
+            {
+                Margin = new Thickness(18, 16, 18, 12),
+                Padding = new Thickness(14),
+                Background = background,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(14),
+                Cursor = isLoading ? Cursors.Arrow : Cursors.Hand
+            };
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var mark = CreateOpenAiCodexMark(44, accentBrush, isSelected);
+            mark.Margin = new Thickness(0, 0, 12, 0);
+            Grid.SetColumn(mark, 0);
+            grid.Children.Add(mark);
+
+            var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            textStack.Children.Add(new TextBlock
+            {
+                Text = "Chat com IA",
+                FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = primaryText
+            });
+            textStack.Children.Add(new TextBlock
+            {
+                Text = _aiAssistantRequestInFlight
+                    ? "OpenAI/Codex esta respondendo..."
+                    : "OpenAI/Codex para estudo e projetos",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = secondaryText,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            Grid.SetColumn(textStack, 1);
+            grid.Children.Add(textStack);
+
+            var arrow = CreateMaterialIcon(PackIconMaterialKind.ChevronRight, isSelected ? accentBrush : secondaryText, 18);
+            arrow.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(arrow, 2);
+            grid.Children.Add(arrow);
+
+            card.Child = grid;
+            if (!isLoading)
+            {
+                card.MouseLeftButtonUp += (_, __) =>
+                {
+                    _selectedConversation = _aiAssistantConversation;
+                    RefreshChatsUI();
+                };
+            }
+
+            return card;
+        }
+
+        private Grid CreateOpenAiCodexMark(double size, Brush accentBrush, bool selected = false)
+        {
+            var surfaceBrush = _appDarkModeEnabled
+                ? selected
+                    ? new SolidColorBrush(Color.FromRgb(8, 47, 73))
+                    : new SolidColorBrush(Color.FromRgb(30, 41, 59))
+                : selected
+                    ? new SolidColorBrush(Color.FromRgb(219, 234, 254))
+                    : new SolidColorBrush(Color.FromRgb(255, 255, 255));
+
+            var grid = new Grid
+            {
+                Width = size,
+                Height = size
+            };
+
+            var avatar = new Ellipse
+            {
+                Width = size,
+                Height = size,
+                Fill = surfaceBrush,
+                Stroke = accentBrush,
+                StrokeThickness = 1.2
+            };
+
+            try
+            {
+                avatar.Fill = new ImageBrush
+                {
+                    ImageSource = CreateFrozenBitmapImage(new Uri("pack://application:,,,/img/ChoasICO.png", UriKind.Absolute)),
+                    Stretch = Stretch.UniformToFill,
+                    AlignmentX = AlignmentX.Center,
+                    AlignmentY = AlignmentY.Center
+                };
+            }
+            catch
+            {
+                grid.Children.Add(avatar);
+                grid.Children.Add(CreateMaterialIcon(PackIconMaterialKind.AutoFix, accentBrush, Math.Max(17, size * 0.43)));
+                grid.Children.Add(new TextBlock
+                {
+                    Text = "AI",
+                    Margin = new Thickness(0, size * 0.5, 0, 0),
+                    FontSize = Math.Max(8, size * 0.2),
+                    FontWeight = FontWeights.ExtraBold,
+                    Foreground = accentBrush,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                return grid;
+            }
+
+            grid.Children.Add(avatar);
+            return grid;
         }
 
         private Border CreateConversationButton(Conversation conv)
@@ -33237,8 +34550,274 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             return panel;
         }
 
+        private Border CreateAiAssistantWorkspace(Conversation conv)
+        {
+            var panelBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(17, 27, 33))
+                : new SolidColorBrush(Colors.White);
+            var borderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(32, 44, 51))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var primaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(233, 237, 239))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var secondaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(134, 150, 160))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+            var canvasBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(12, 19, 24))
+                : new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            var inputBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(47, 61, 69))
+                : new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            var accentBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+
+            var panel = new Border
+            {
+                Background = panelBackground,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(24)
+            };
+
+            var mainGrid = new Grid();
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var header = new Border
+            {
+                Padding = new Thickness(18, 16, 18, 16),
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(0, 0, 0, 1)
+            };
+
+            var headerGrid = new Grid();
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var mark = CreateOpenAiCodexMark(46, accentBrush, true);
+            mark.Margin = new Thickness(0, 0, 14, 0);
+            Grid.SetColumn(mark, 0);
+            headerGrid.Children.Add(mark);
+
+            var titleStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = "Choas IA",
+                FontSize = 16,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = primaryText
+            });
+            titleStack.Children.Add(new TextBlock
+            {
+                Text = _aiAssistantRequestInFlight
+                    ? "Respondendo com contexto acadêmico..."
+                    : $"OpenAI/Codex • {_teamWorkspaces.Count} projeto(s) em contexto local",
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 11,
+                Foreground = secondaryText,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            });
+            Grid.SetColumn(titleStack, 1);
+            headerGrid.Children.Add(titleStack);
+
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var clearButton = CreateHeaderIconButton(PackIconMaterialKind.DeleteOutline, "Limpar conversa com a IA", secondaryText);
+            clearButton.Click += (_, __) =>
+            {
+                if (_aiAssistantRequestInFlight)
+                {
+                    return;
+                }
+
+                conv.Messages.Clear();
+                RefreshConversationSummary(conv);
+                RefreshChatsUI();
+            };
+            actions.Children.Add(clearButton);
+            Grid.SetColumn(actions, 2);
+            headerGrid.Children.Add(actions);
+
+            header.Child = headerGrid;
+            Grid.SetRow(header, 0);
+            mainGrid.Children.Add(header);
+
+            TextBox? inputBox = null;
+            var suggestions = new Border
+            {
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(0, 0, 0, 1),
+                Padding = new Thickness(18, 12, 18, 12)
+            };
+
+            var chips = new WrapPanel();
+            var researchButton = CreateComposerChipButton("Pesquisar tema", PackIconMaterialKind.Magnify, new SolidColorBrush(Color.FromRgb(14, 165, 233)));
+            researchButton.Click += (_, __) => PrefillChatComposer(inputBox, "Pesquisar sobre: ", true);
+            chips.Children.Add(researchButton);
+
+            var projectsButton = CreateComposerChipButton("Meus projetos", PackIconMaterialKind.AccountGroupOutline, new SolidColorBrush(Color.FromRgb(16, 185, 129)));
+            projectsButton.Click += (_, __) => PrefillChatComposer(inputBox, "Resuma meus projetos ativos e sugira prioridades para esta semana.", true);
+            chips.Children.Add(projectsButton);
+
+            var appHelpButton = CreateComposerChipButton("Como usar o Choas", PackIconMaterialKind.FileQuestionOutline, new SolidColorBrush(Color.FromRgb(99, 102, 241)));
+            appHelpButton.Click += (_, __) => PrefillChatComposer(inputBox, "Como eu uso o Choas para organizar equipes, arquivos e entregas?", true);
+            chips.Children.Add(appHelpButton);
+
+            var planButton = CreateComposerChipButton("Planejar entrega", PackIconMaterialKind.FlagCheckered, new SolidColorBrush(Color.FromRgb(245, 158, 11)));
+            planButton.Click += (_, __) => PrefillChatComposer(inputBox, "Me ajude a planejar a próxima entrega do projeto integrador.", true);
+            chips.Children.Add(planButton);
+
+            suggestions.Child = chips;
+            Grid.SetRow(suggestions, 1);
+            mainGrid.Children.Add(suggestions);
+
+            var messagesHost = new Border { Background = canvasBackground };
+            if (conv.Messages.Count == 0)
+            {
+                var emptyState = new StackPanel
+                {
+                    Width = 430,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var emptyMark = CreateOpenAiCodexMark(78, accentBrush, true);
+                emptyMark.HorizontalAlignment = HorizontalAlignment.Center;
+                emptyState.Children.Add(emptyMark);
+                emptyState.Children.Add(new TextBlock
+                {
+                    Text = "Pergunte sobre estudo, pesquisa ou seus projetos",
+                    Margin = new Thickness(0, 22, 0, 8),
+                    FontSize = 22,
+                    FontWeight = FontWeights.ExtraBold,
+                    Foreground = primaryText,
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap
+                });
+                emptyState.Children.Add(new TextBlock
+                {
+                    Text = "A IA recebe um resumo dos projetos carregados no app e evita assuntos fora do contexto acadêmico.",
+                    FontSize = 12,
+                    Foreground = secondaryText,
+                    TextAlignment = TextAlignment.Center,
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 20
+                });
+                messagesHost.Child = emptyState;
+            }
+            else
+            {
+                var messagesList = new StackPanel { Orientation = Orientation.Vertical };
+                foreach (var message in conv.Messages.OrderBy(message => message.Timestamp))
+                {
+                    messagesList.Children.Add(CreateMessageBubble(conv, message));
+                }
+
+                if (_aiAssistantRequestInFlight)
+                {
+                    messagesList.Children.Add(CreateAiAssistantTypingBubble());
+                }
+
+                var scrollViewer = new ScrollViewer
+                {
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = messagesList,
+                    Padding = new Thickness(18, 20, 18, 20),
+                    Background = canvasBackground
+                };
+                scrollViewer.Loaded += (_, __) => scrollViewer.ScrollToEnd();
+                messagesHost.Child = scrollViewer;
+            }
+            Grid.SetRow(messagesHost, 2);
+            mainGrid.Children.Add(messagesHost);
+
+            var composer = new Border
+            {
+                Background = panelBackground,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(16, 14, 16, 16)
+            };
+
+            var composerGrid = new Grid();
+            composerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            composerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            inputBox = new TextBox
+            {
+                Background = inputBackground,
+                Foreground = primaryText,
+                BorderBrush = inputBackground,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 12, 14, 12),
+                FontSize = 13,
+                MinHeight = 48,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
+                TextWrapping = TextWrapping.Wrap,
+                AcceptsReturn = true,
+                MaxHeight = 112,
+                IsEnabled = !_aiAssistantRequestInFlight
+            };
+            inputBox.KeyDown += async (_, e) =>
+            {
+                if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift)
+                {
+                    e.Handled = true;
+                    await SendAiAssistantMessageAsync(conv, inputBox);
+                }
+            };
+            Grid.SetColumn(inputBox, 0);
+            composerGrid.Children.Add(inputBox);
+
+            var sendButton = new Button
+            {
+                Content = _aiAssistantRequestInFlight ? "..." : "➤",
+                Background = _aiAssistantRequestInFlight
+                    ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                    : accentBrush,
+                Foreground = Brushes.White,
+                FontSize = 16,
+                Width = 52,
+                Height = 42,
+                BorderThickness = new Thickness(0),
+                Cursor = _aiAssistantRequestInFlight ? Cursors.Arrow : Cursors.Hand,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                IsEnabled = !_aiAssistantRequestInFlight,
+                ToolTip = "Enviar para a IA"
+            };
+            sendButton.Click += async (_, __) => await SendAiAssistantMessageAsync(conv, inputBox);
+            Grid.SetColumn(sendButton, 1);
+            composerGrid.Children.Add(sendButton);
+
+            composer.Child = composerGrid;
+            Grid.SetRow(composer, 3);
+            mainGrid.Children.Add(composer);
+
+            panel.Child = mainGrid;
+            return panel;
+        }
+
         private Border CreateChatWorkspace(Conversation conv)
         {
+            if (IsAiAssistantConversation(conv))
+            {
+                return CreateAiAssistantWorkspace(conv);
+            }
+
             var panelBackground = _appDarkModeEnabled
                 ? new SolidColorBrush(Color.FromRgb(17, 27, 33))
                 : new SolidColorBrush(Colors.White);
@@ -33728,6 +35307,257 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
             AppendMessagesToConversation(conv, messageToAppend);
             return true;
+        }
+
+        private async Task SendAiAssistantMessageAsync(Conversation conv, TextBox inputBox)
+        {
+            if (!IsAiAssistantConversation(conv) || inputBox == null || _aiAssistantRequestInFlight)
+            {
+                return;
+            }
+
+            var messageText = inputBox.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(messageText))
+            {
+                return;
+            }
+
+            _aiAssistantRequestInFlight = true;
+            inputBox.Clear();
+            AppendMessagesToConversation(conv, CreateAiAssistantUserMessage(messageText));
+
+            try
+            {
+                if (IsClearlyOutOfScopeAiPrompt(messageText))
+                {
+                    AppendMessagesToConversation(conv, CreateAiAssistantResponseMessage(
+                        "Esse chat é focado em estudo, pesquisa acadêmica, projetos integradores e uso do Choas.\n\nPosso ajudar a montar um plano de estudo, revisar uma entrega, explicar uma funcionalidade do app ou pesquisar um tema ligado ao seu projeto."));
+                    return;
+                }
+
+                if (_teamService != null)
+                {
+                    await LoadTeamsFromDatabaseAsync();
+                }
+
+                var request = BuildAiAssistantChatRequest(messageText);
+                var result = await _aiAssistantChatService.SendAsync(request);
+                var assistantText = result.Success
+                    ? result.Content
+                    : BuildAiAssistantFailureMessage(result);
+
+                AppendMessagesToConversation(conv, CreateAiAssistantResponseMessage(assistantText, result.Success ? "ai" : "ai-error"));
+            }
+            finally
+            {
+                _aiAssistantRequestInFlight = false;
+                RefreshChatsUI();
+            }
+        }
+
+        private ChatMessage CreateAiAssistantUserMessage(string content)
+        {
+            return new ChatMessage
+            {
+                MessageId = Guid.NewGuid().ToString("N"),
+                DocumentId = Guid.NewGuid().ToString("N"),
+                SenderId = _currentProfile?.UserId ?? "self",
+                SenderName = _currentProfile?.Name ?? "Você",
+                Content = content,
+                MessageType = "text",
+                Timestamp = DateTime.Now,
+                IsOwn = true
+            };
+        }
+
+        private ChatMessage CreateAiAssistantResponseMessage(string content, string messageType = "ai")
+        {
+            return new ChatMessage
+            {
+                MessageId = Guid.NewGuid().ToString("N"),
+                DocumentId = Guid.NewGuid().ToString("N"),
+                SenderId = AiAssistantContactId,
+                SenderName = AiAssistantDisplayName,
+                Content = content,
+                MessageType = messageType,
+                Timestamp = DateTime.Now,
+                IsOwn = false
+            };
+        }
+
+        private AiAssistantChatRequest BuildAiAssistantChatRequest(string messageText)
+        {
+            return new AiAssistantChatRequest
+            {
+                Message = messageText,
+                Instructions = BuildAiAssistantInstructions(),
+                Context = BuildAiAssistantContext(),
+                Messages = _aiAssistantConversation.Messages
+                    .OrderBy(message => message.Timestamp)
+                    .TakeLast(14)
+                    .Select(message => new AiAssistantChatMessage
+                    {
+                        Role = IsAiAssistantMessage(message) ? "assistant" : "user",
+                        Content = message.Content ?? string.Empty
+                    })
+                    .Where(message => !string.IsNullOrWhiteSpace(message.Content))
+                    .ToList()
+            };
+        }
+
+        private string BuildAiAssistantInstructions()
+        {
+            return "Você é o Choas IA, assistente acadêmico dentro do aplicativo Choas. Responda em pt-BR. Ajude com estudo, pesquisa, projetos integradores, equipes, entregas, tarefas, arquivos e dúvidas sobre funcionalidades do app. Use o contexto de projetos recebido, mas não invente dados que não estejam no contexto. Se o pedido fugir claramente do ambiente acadêmico ou do projeto, recuse de forma breve e redirecione para estudo/projeto. Evite markdown pesado: use títulos curtos, parágrafos claros, listas simples e links completos quando forem úteis.";
+        }
+
+        private AiAssistantContext BuildAiAssistantContext()
+        {
+            var normalizedRole = TeamPermissionService.NormalizeRole(_currentProfile?.Role);
+            return new AiAssistantContext
+            {
+                CurrentDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.GetCultureInfo("pt-BR")),
+                ScopePolicy = "Responder apenas a estudo, pesquisa acadêmica, projetos integradores, organização de equipe, uso do Choas e assuntos necessários para essas tarefas.",
+                User = new AiAssistantUserContext
+                {
+                    UserId = _currentProfile?.UserId ?? string.Empty,
+                    Name = _currentProfile?.Name ?? string.Empty,
+                    Role = normalizedRole,
+                    RoleLabel = TeamPermissionService.GetRoleLabel(normalizedRole),
+                    Course = _currentProfile?.Course ?? string.Empty,
+                    Registration = _currentProfile?.Registration ?? string.Empty
+                },
+                AppCapabilities = new List<string>
+                {
+                    "Chats diretos e chat próprio para notas",
+                    "Equipes com board de tarefas, marcos, arquivos e CSD",
+                    "Turmas/docência com mural, atividades e reações",
+                    "Calendário acadêmico",
+                    "Tela de arquivos organizada por associações"
+                },
+                Projects = BuildAiAssistantProjectContexts()
+            };
+        }
+
+        private List<AiAssistantProjectContext> BuildAiAssistantProjectContexts()
+        {
+            return _teamWorkspaces
+                .Where(team => team != null)
+                .OrderByDescending(team => team.UpdatedAt == default ? team.CreatedAt : team.UpdatedAt)
+                .Take(8)
+                .Select(team =>
+                {
+                    var openTasks = (team.TaskColumns ?? new List<TeamTaskColumnInfo>())
+                        .Where(column => !column.Title.Contains("Conclu", StringComparison.OrdinalIgnoreCase))
+                        .SelectMany(column => (column.Cards ?? new List<TeamTaskCardInfo>())
+                            .Select(card => FormatAiAssistantTaskContext(column, card)))
+                        .Where(text => !string.IsNullOrWhiteSpace(text))
+                        .Take(6)
+                        .ToList();
+
+                    var milestones = (team.Milestones ?? new List<TeamMilestoneInfo>())
+                        .Where(milestone => !string.Equals(milestone.Status, "Concluida", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(milestone => milestone.DueDate ?? DateTime.MaxValue)
+                        .Take(5)
+                        .Select(FormatAiAssistantMilestoneContext)
+                        .Where(text => !string.IsNullOrWhiteSpace(text))
+                        .ToList();
+
+                    return new AiAssistantProjectContext
+                    {
+                        TeamId = team.TeamId,
+                        TeamName = team.TeamName,
+                        Course = team.Course,
+                        ClassName = team.ClassName,
+                        AcademicTerm = team.AcademicTerm,
+                        UserRole = TeamPermissionService.GetRoleLabel(GetCurrentUserRole(team)),
+                        Status = team.ProjectStatus,
+                        Progress = Math.Clamp(team.ProjectProgress, 0, 100),
+                        Deadline = team.ProjectDeadline.HasValue ? team.ProjectDeadline.Value.ToString("dd/MM/yyyy", CultureInfo.GetCultureInfo("pt-BR")) : string.Empty,
+                        AcademicBrief = BuildSafeAcademicAssistantBrief(team),
+                        UpcomingMilestones = milestones,
+                        OpenTasks = openTasks,
+                        Doubts = (team.CsdBoard?.Doubts ?? new List<string>())
+                            .Where(item => !string.IsNullOrWhiteSpace(item))
+                            .Take(5)
+                            .ToList()
+                    };
+                })
+                .ToList();
+        }
+
+        private string BuildSafeAcademicAssistantBrief(TeamWorkspaceInfo team)
+        {
+            try
+            {
+                return AcademicRiskEngine.BuildAcademicAssistantBrief(team);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[AI Context] Falha ao montar resumo academico de {team?.TeamName}: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        private static string FormatAiAssistantTaskContext(TeamTaskColumnInfo column, TeamTaskCardInfo card)
+        {
+            if (card == null || string.IsNullOrWhiteSpace(card.Title))
+            {
+                return string.Empty;
+            }
+
+            var due = card.DueDate.HasValue
+                ? $" prazo {card.DueDate.Value:dd/MM/yyyy}"
+                : string.Empty;
+            var priority = string.IsNullOrWhiteSpace(card.Priority) ? string.Empty : $" prioridade {card.Priority}";
+            return $"{column.Title}: {card.Title}{due}{priority}".Trim();
+        }
+
+        private static string FormatAiAssistantMilestoneContext(TeamMilestoneInfo milestone)
+        {
+            if (milestone == null || string.IsNullOrWhiteSpace(milestone.Title))
+            {
+                return string.Empty;
+            }
+
+            var due = milestone.DueDate.HasValue
+                ? $" prazo {milestone.DueDate.Value:dd/MM/yyyy}"
+                : string.Empty;
+            return $"{milestone.Title} ({milestone.Status}{due})";
+        }
+
+        private bool IsClearlyOutOfScopeAiPrompt(string prompt)
+        {
+            var text = (prompt ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            string[] academicSignals =
+            {
+                "estudo", "projeto", "pesquisa", "aula", "turma", "equipe", "tarefa", "entrega", "choas",
+                "arquivo", "calendario", "disciplina", "programacao", "software", "faculdade", "trabalho",
+                "atividade", "professor", "docencia", "aluno", "aprendizagem"
+            };
+            if (academicSignals.Any(signal => text.Contains(signal, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            string[] offTopicSignals =
+            {
+                "futebol", "placar", "campeonato", "libertadores", "brasileirao", "aposta", "odds",
+                "novela", "fofoca", "celebridade", "horoscopo"
+            };
+            return offTopicSignals.Any(signal => text.Contains(signal, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string BuildAiAssistantFailureMessage(AiAssistantChatResult result)
+        {
+            var endpoint = string.IsNullOrWhiteSpace(result.EndpointUrl)
+                ? "endpoint configurado"
+                : result.EndpointUrl;
+            return $"A integração com a IA ainda não respondeu pelo {endpoint}.\n\nVerifique se a rota do Vercel está publicada e aceitando POST JSON. O app já envia mensagem, histórico recente e contexto acadêmico.\n\nErro recebido: {result.ErrorMessage}";
         }
 
         private async Task SendConversationAttachmentsAsync(Conversation conv, TextBox? inputBox, string title, string filter)
@@ -35287,8 +37117,467 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             };
         }
 
+        private Border CreateAiAssistantTypingBubble()
+        {
+            var accentBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+            var textBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(203, 213, 225))
+                : new SolidColorBrush(Color.FromRgb(71, 85, 105));
+
+            var container = new Border
+            {
+                Margin = new Thickness(0, 6, 0, 6),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                MaxWidth = 560
+            };
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            var mark = CreateOpenAiCodexMark(34, accentBrush, true);
+            mark.Margin = new Thickness(0, 0, 8, 0);
+            row.Children.Add(mark);
+            row.Children.Add(new Border
+            {
+                Padding = new Thickness(14, 10, 14, 10),
+                CornerRadius = new CornerRadius(16, 16, 16, 4),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(32, 44, 51))
+                    : new SolidColorBrush(Colors.White),
+                BorderBrush = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                    : new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock
+                {
+                    Text = "Pensando com o contexto dos projetos...",
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = textBrush
+                }
+            });
+
+            container.Child = row;
+            return container;
+        }
+
+        private Border CreateAiAssistantMessageBubble(ChatMessage msg)
+        {
+            var accentBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(56, 189, 248))
+                : new SolidColorBrush(Color.FromRgb(37, 99, 235));
+            var bubbleBackground = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(32, 44, 51))
+                : new SolidColorBrush(Colors.White);
+            var borderBrush = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                : new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            var primaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(233, 237, 239))
+                : new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            var secondaryText = _appDarkModeEnabled
+                ? new SolidColorBrush(Color.FromRgb(148, 163, 184))
+                : new SolidColorBrush(Color.FromRgb(100, 116, 139));
+
+            var container = new Border
+            {
+                Margin = new Thickness(0, 8, 0, 8),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Padding = new Thickness(0, 0, 36, 0)
+            };
+
+            var row = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var mark = CreateOpenAiCodexMark(36, accentBrush, true);
+            mark.Margin = new Thickness(0, 0, 10, 0);
+            Grid.SetColumn(mark, 0);
+            row.Children.Add(mark);
+
+            var bubble = new Border
+            {
+                Background = bubbleBackground,
+                BorderBrush = borderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(16, 16, 16, 4),
+                Padding = new Thickness(16, 13, 16, 12),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                MaxWidth = 620
+            };
+
+            var stack = new StackPanel { Orientation = Orientation.Vertical };
+            var titleRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = AiAssistantDisplayName,
+                FontSize = 12,
+                FontWeight = FontWeights.ExtraBold,
+                Foreground = accentBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            titleRow.Children.Add(new Border
+            {
+                Margin = new Thickness(8, 0, 0, 0),
+                Padding = new Thickness(8, 2, 8, 2),
+                CornerRadius = new CornerRadius(10),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(239, 246, 255)),
+                Child = new TextBlock
+                {
+                    Text = "OpenAI/Codex",
+                    FontSize = 9,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = accentBrush
+                }
+            });
+            stack.Children.Add(titleRow);
+
+            var content = CreateAiAssistantRichContent(msg.Content, primaryText, secondaryText, accentBrush);
+            content.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 10, 0, 0));
+            stack.Children.Add(content);
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = msg.Timestamp.ToString("HH:mm"),
+                FontSize = 10,
+                Foreground = secondaryText,
+                Margin = new Thickness(0, 8, 0, 0),
+                TextAlignment = TextAlignment.Right
+            });
+
+            bubble.Child = stack;
+            Grid.SetColumn(bubble, 1);
+            row.Children.Add(bubble);
+            container.Child = row;
+            return container;
+        }
+
+        private FrameworkElement CreateAiAssistantRichContent(string content, Brush primaryText, Brush secondaryText, Brush linkBrush)
+        {
+            var stack = new StackPanel { Orientation = Orientation.Vertical };
+            var normalized = (content ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+            var paragraphLines = new List<string>();
+            var codeBuilder = new StringBuilder();
+            var inCodeBlock = false;
+
+            void FlushParagraph()
+            {
+                if (paragraphLines.Count == 0)
+                {
+                    return;
+                }
+
+                var paragraph = string.Join(" ", paragraphLines.Select(line => line.Trim()).Where(line => !string.IsNullOrWhiteSpace(line))).Trim();
+                paragraphLines.Clear();
+                if (string.IsNullOrWhiteSpace(paragraph))
+                {
+                    return;
+                }
+
+                var block = CreateAiAssistantInlineTextBlock(paragraph, primaryText, linkBrush, 13, FontWeights.Normal);
+                block.Margin = new Thickness(0, stack.Children.Count == 0 ? 0 : 8, 0, 0);
+                stack.Children.Add(block);
+            }
+
+            void FlushCodeBlock()
+            {
+                var code = codeBuilder.ToString().TrimEnd();
+                codeBuilder.Clear();
+                if (string.IsNullOrWhiteSpace(code))
+                {
+                    return;
+                }
+
+                stack.Children.Add(CreateAiAssistantCodeBlock(code, primaryText, secondaryText));
+            }
+
+            foreach (var rawLine in normalized.Split('\n'))
+            {
+                var line = rawLine.TrimEnd();
+                var trimmed = line.Trim();
+
+                if (trimmed.StartsWith("```", StringComparison.Ordinal))
+                {
+                    if (inCodeBlock)
+                    {
+                        FlushCodeBlock();
+                        inCodeBlock = false;
+                    }
+                    else
+                    {
+                        FlushParagraph();
+                        inCodeBlock = true;
+                    }
+
+                    continue;
+                }
+
+                if (inCodeBlock)
+                {
+                    codeBuilder.AppendLine(line);
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(trimmed))
+                {
+                    FlushParagraph();
+                    continue;
+                }
+
+                if (IsAiHeadingLine(trimmed))
+                {
+                    FlushParagraph();
+                    var heading = CreateAiAssistantInlineTextBlock(StripAiHeadingPrefix(trimmed), primaryText, linkBrush, 14, FontWeights.ExtraBold);
+                    heading.Margin = new Thickness(0, stack.Children.Count == 0 ? 0 : 12, 0, 0);
+                    stack.Children.Add(heading);
+                    continue;
+                }
+
+                if (IsAiBulletLine(trimmed) || IsAiNumberedLine(trimmed))
+                {
+                    FlushParagraph();
+                    var marker = IsAiNumberedLine(trimmed) ? GetAiListMarker(trimmed) : "•";
+                    var text = IsAiNumberedLine(trimmed) ? StripAiNumberedPrefix(trimmed) : StripAiBulletPrefix(trimmed);
+                    stack.Children.Add(CreateAiAssistantListRow(marker, text, primaryText, linkBrush));
+                    continue;
+                }
+
+                paragraphLines.Add(trimmed);
+            }
+
+            FlushParagraph();
+            if (inCodeBlock)
+            {
+                FlushCodeBlock();
+            }
+
+            if (stack.Children.Count == 0)
+            {
+                stack.Children.Add(new TextBlock
+                {
+                    Text = "Resposta vazia.",
+                    FontSize = 13,
+                    Foreground = secondaryText
+                });
+            }
+
+            return stack;
+        }
+
+        private TextBlock CreateAiAssistantInlineTextBlock(string text, Brush foreground, Brush linkBrush, double fontSize, FontWeight fontWeight)
+        {
+            var block = new TextBlock
+            {
+                FontSize = fontSize,
+                FontWeight = fontWeight,
+                Foreground = foreground,
+                TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.None,
+                LineHeight = Math.Max(18, fontSize + 7)
+            };
+            AppendAiAssistantInlines(block.Inlines, text, foreground, linkBrush);
+            return block;
+        }
+
+        private Grid CreateAiAssistantListRow(string marker, string text, Brush foreground, Brush linkBrush)
+        {
+            var row = new Grid
+            {
+                Margin = new Thickness(0, 6, 0, 0)
+            };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.Children.Add(new TextBlock
+            {
+                Text = marker,
+                Width = 22,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = linkBrush,
+                VerticalAlignment = VerticalAlignment.Top
+            });
+
+            var textBlock = CreateAiAssistantInlineTextBlock(text, foreground, linkBrush, 13, FontWeights.Normal);
+            Grid.SetColumn(textBlock, 1);
+            row.Children.Add(textBlock);
+            return row;
+        }
+
+        private Border CreateAiAssistantCodeBlock(string code, Brush primaryText, Brush secondaryText)
+        {
+            return new Border
+            {
+                Margin = new Thickness(0, 10, 0, 0),
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(12),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(241, 245, 249)),
+                BorderBrush = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(51, 65, 85))
+                    : new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock
+                {
+                    Text = AddSoftBreaksToLongTokens(code),
+                    FontFamily = new FontFamily("Consolas"),
+                    FontSize = 12,
+                    Foreground = primaryText,
+                    TextWrapping = TextWrapping.Wrap,
+                    TextTrimming = TextTrimming.None,
+                    LineHeight = 18
+                }
+            };
+        }
+
+        private void AppendAiAssistantInlines(InlineCollection inlines, string text, Brush textBrush, Brush linkBrush)
+        {
+            var value = text ?? string.Empty;
+            var regex = new Regex(@"\[(?<title>[^\]]+)\]\((?<mdurl>https?://[^\s\)]+)\)|(?<url>https?://[^\s<]+)", RegexOptions.IgnoreCase);
+            var currentIndex = 0;
+
+            foreach (Match match in regex.Matches(value))
+            {
+                if (match.Index > currentIndex)
+                {
+                    inlines.Add(new Run(AddSoftBreaksToLongTokens(CleanAiMarkdownFragment(value[currentIndex..match.Index]))) { Foreground = textBrush });
+                }
+
+                var url = match.Groups["mdurl"].Success
+                    ? match.Groups["mdurl"].Value
+                    : match.Groups["url"].Value;
+                url = TrimAiAssistantLinkUrl(url);
+                var title = match.Groups["title"].Success
+                    ? AddSoftBreaksToLongTokens(CleanAiMarkdownFragment(match.Groups["title"].Value))
+                    : BuildAiAssistantLinkLabel(url);
+
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    var hyperlink = new Hyperlink(new Run(title))
+                    {
+                        NavigateUri = uri,
+                        Foreground = linkBrush,
+                        TextDecorations = TextDecorations.Underline,
+                        FontWeight = FontWeights.SemiBold
+                    };
+                    hyperlink.RequestNavigate += (_, __) => OpenConversationExternalLink(url);
+                    inlines.Add(hyperlink);
+                }
+                else
+                {
+                    inlines.Add(new Run(title) { Foreground = textBrush });
+                }
+
+                currentIndex = match.Index + match.Length;
+            }
+
+            if (currentIndex < value.Length)
+            {
+                inlines.Add(new Run(AddSoftBreaksToLongTokens(CleanAiMarkdownFragment(value[currentIndex..]))) { Foreground = textBrush });
+            }
+        }
+
+        private static string BuildAiAssistantLinkLabel(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                return AddSoftBreaksToLongTokens(url);
+            }
+
+            var host = uri.Host.Replace("www.", string.Empty, StringComparison.OrdinalIgnoreCase);
+            var path = uri.AbsolutePath.Trim('/');
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return host;
+            }
+
+            var label = $"{host}/{path}";
+            return label.Length <= 56
+                ? AddSoftBreaksToLongTokens(label)
+                : AddSoftBreaksToLongTokens(label[..53] + "...");
+        }
+
+        private static string AddSoftBreaksToLongTokens(string text)
+        {
+            return Regex.Replace(text ?? string.Empty, @"\S{34,}", match =>
+            {
+                var value = match.Value;
+                var builder = new StringBuilder(value.Length + (value.Length / 24));
+                for (var index = 0; index < value.Length; index++)
+                {
+                    builder.Append(value[index]);
+                    if ((index + 1) % 24 == 0 && index < value.Length - 1)
+                    {
+                        builder.Append('\u200B');
+                    }
+                }
+
+                return builder.ToString();
+            });
+        }
+
+        private static bool IsAiHeadingLine(string text)
+        {
+            return Regex.IsMatch(text ?? string.Empty, @"^#{1,6}\s+\S+");
+        }
+
+        private static string StripAiHeadingPrefix(string text)
+        {
+            return CleanAiMarkdownFragment(Regex.Replace(text ?? string.Empty, @"^#{1,6}\s+", string.Empty));
+        }
+
+        private static bool IsAiBulletLine(string text)
+        {
+            return Regex.IsMatch(text ?? string.Empty, @"^[-*•]\s+\S+");
+        }
+
+        private static string StripAiBulletPrefix(string text)
+        {
+            return CleanAiMarkdownFragment(Regex.Replace(text ?? string.Empty, @"^[-*•]\s+", string.Empty));
+        }
+
+        private static bool IsAiNumberedLine(string text)
+        {
+            return Regex.IsMatch(text ?? string.Empty, @"^\d+[\.)]\s+\S+");
+        }
+
+        private static string GetAiListMarker(string text)
+        {
+            var match = Regex.Match(text ?? string.Empty, @"^(?<marker>\d+)[\.)]\s+");
+            return match.Success ? match.Groups["marker"].Value + "." : "•";
+        }
+
+        private static string StripAiNumberedPrefix(string text)
+        {
+            return CleanAiMarkdownFragment(Regex.Replace(text ?? string.Empty, @"^\d+[\.)]\s+", string.Empty));
+        }
+
+        private static string CleanAiMarkdownFragment(string text)
+        {
+            return (text ?? string.Empty)
+                .Replace("**", string.Empty)
+                .Replace("__", string.Empty)
+                .Replace("`", string.Empty);
+        }
+
+        private static string TrimAiAssistantLinkUrl(string url)
+        {
+            return (url ?? string.Empty).Trim().TrimEnd('.', ',', ';', ':', '!', '?', ')', ']');
+        }
+
         private Border CreateMessageBubble(Conversation conv, ChatMessage msg)
         {
+            if (IsAiAssistantMessage(msg))
+            {
+                return CreateAiAssistantMessageBubble(msg);
+            }
+
             var ownBubbleBackground = _appDarkModeEnabled
                 ? new SolidColorBrush(Color.FromRgb(0, 92, 75))
                 : new SolidColorBrush(Color.FromRgb(219, 234, 254));
@@ -35407,7 +37696,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
             bubble.Child = stack;
 
-            if (msg.IsOwn)
+            if (msg.IsOwn && !IsAiAssistantConversation(conv))
             {
                 var actionsMenu = CreateMessageActionsContextMenu(conv, msg);
                 bubble.ContextMenu = actionsMenu;
@@ -35546,7 +37835,8 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                     Child = new Image
                     {
                         Source = previewSource,
-                        Height = 180,
+                        Width = ConversationAttachmentPreviewWidth,
+                        Height = ConversationAttachmentPreviewHeight,
                         Stretch = Stretch.UniformToFill
                     }
                 });
@@ -35633,29 +37923,12 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 ? new SolidColorBrush(Color.FromArgb(204, 255, 255, 255))
                 : GetThemeBrush("SecondaryTextBrush");
 
-            var previewSources = groupMessages
-                .Select(message => TryCreateConversationAttachmentDisplaySource(message, preferLocalFile: false, decodePixelWidth: 420))
-                .Where(source => source != null)
-                .Cast<ImageSource>()
-                .ToList();
-
-            var previewSurface = new Border
-            {
-                Height = groupMessages.Count > 3 ? 228 : 208,
-                CornerRadius = new CornerRadius(14),
-                Background = GetThemeBrush("CardBackgroundBrush"),
-                ClipToBounds = true,
-                Cursor = Cursors.Hand,
-                Child = CreateProfileGalleryMetadataPreview(previewSources, isAlbum: true)
-            };
-            previewSurface.MouseLeftButtonUp += (_, __) => OpenConversationMediaGallery(groupMessages, anchorMessage);
-
             var content = new StackPanel
             {
                 Orientation = Orientation.Vertical,
                 Margin = new Thickness(0, ShouldShowConversationMessageText(anchorMessage) ? 8 : 0, 0, 0)
             };
-            content.Children.Add(previewSurface);
+            content.Children.Add(CreateConversationMediaGroupPreview(groupMessages, anchorMessage));
             content.Children.Add(new TextBlock
             {
                 Text = groupMessages.Count == 2 ? "2 fotos enviadas em galeria" : $"{groupMessages.Count} fotos enviadas em galeria",
@@ -35702,6 +37975,221 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 BorderThickness = new Thickness(1),
                 Child = content
             };
+        }
+
+        private UIElement CreateConversationMediaGroupPreview(IReadOnlyList<ChatMessage> groupMessages, ChatMessage anchorMessage)
+        {
+            var safeMessages = (groupMessages ?? Array.Empty<ChatMessage>())
+                .Where(message => message != null && message.IsImageAttachment)
+                .OrderBy(message => message.MediaGroupIndex)
+                .ThenBy(message => message.Timestamp)
+                .ToList();
+            var visibleMessages = safeMessages.Take(4).ToList();
+            var previewHeight = safeMessages.Count == 2
+                ? ConversationMediaGroupTwoPreviewHeight
+                : ConversationMediaGroupPreviewHeight;
+            var surface = new Border
+            {
+                Width = ConversationMediaGroupPreviewWidth,
+                Height = previewHeight,
+                MaxWidth = ConversationMediaGroupPreviewWidth,
+                CornerRadius = new CornerRadius(12),
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(15, 23, 42))
+                    : new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                ClipToBounds = true,
+                SnapsToDevicePixels = true
+            };
+
+            if (visibleMessages.Count <= 1)
+            {
+                surface.Child = CreateConversationMediaGroupTile(
+                    visibleMessages.FirstOrDefault(),
+                    safeMessages,
+                    anchorMessage,
+                    new CornerRadius(12),
+                    new Thickness(0));
+                return surface;
+            }
+
+            var grid = new Grid
+            {
+                Width = ConversationMediaGroupPreviewWidth,
+                Height = previewHeight,
+                ClipToBounds = true
+            };
+
+            if (visibleMessages.Count == 2)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 12), new Thickness(0, 0, ConversationMediaGroupPreviewGap, 0)),
+                    row: 0,
+                    column: 0);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 12, 0), new Thickness(0)),
+                    row: 0,
+                    column: 1);
+            }
+            else if (visibleMessages.Count == 3)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 12), new Thickness(0, 0, ConversationMediaGroupPreviewGap, 0)),
+                    row: 0,
+                    column: 0,
+                    rowSpan: 2);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 0, 0), new Thickness(0, 0, 0, ConversationMediaGroupPreviewGap)),
+                    row: 0,
+                    column: 1);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[2], safeMessages, anchorMessage, new CornerRadius(0, 0, 12, 0), new Thickness(0)),
+                    row: 1,
+                    column: 1);
+            }
+            else
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 0), new Thickness(0, 0, ConversationMediaGroupPreviewGap, ConversationMediaGroupPreviewGap)),
+                    row: 0,
+                    column: 0);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 0, 0), new Thickness(0, 0, 0, ConversationMediaGroupPreviewGap)),
+                    row: 0,
+                    column: 1);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(visibleMessages[2], safeMessages, anchorMessage, new CornerRadius(0, 0, 0, 12), new Thickness(0, 0, ConversationMediaGroupPreviewGap, 0)),
+                    row: 1,
+                    column: 0);
+                AddConversationMediaGroupTile(
+                    grid,
+                    CreateConversationMediaGroupTile(
+                        visibleMessages[3],
+                        safeMessages,
+                        anchorMessage,
+                        new CornerRadius(0, 0, 12, 0),
+                        new Thickness(0),
+                        safeMessages.Count > 4 ? $"+{safeMessages.Count - 4}" : null),
+                    row: 1,
+                    column: 1);
+            }
+
+            surface.Child = grid;
+            return surface;
+        }
+
+        private Border CreateConversationMediaGroupTile(
+            ChatMessage? message,
+            IReadOnlyList<ChatMessage> groupMessages,
+            ChatMessage anchorMessage,
+            CornerRadius cornerRadius,
+            Thickness margin,
+            string? overlayText = null)
+        {
+            var source = message == null
+                ? null
+                : TryCreateConversationAttachmentDisplaySource(message, preferLocalFile: false, decodePixelWidth: 360);
+            var tile = new Border
+            {
+                Margin = margin,
+                CornerRadius = cornerRadius,
+                Background = _appDarkModeEnabled
+                    ? new SolidColorBrush(Color.FromRgb(30, 41, 59))
+                    : new SolidColorBrush(Color.FromRgb(203, 213, 225)),
+                ClipToBounds = true,
+                Cursor = Cursors.Hand,
+                SnapsToDevicePixels = true
+            };
+
+            var tileContent = new Grid { ClipToBounds = true };
+            if (source != null)
+            {
+                tileContent.Children.Add(new Image
+                {
+                    Source = source,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
+                });
+            }
+            else
+            {
+                tileContent.Children.Add(new TextBlock
+                {
+                    Text = "Imagem",
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = _appDarkModeEnabled
+                        ? new SolidColorBrush(Color.FromRgb(203, 213, 225))
+                        : new SolidColorBrush(Color.FromRgb(71, 85, 105)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(overlayText))
+            {
+                tileContent.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(168, 15, 23, 42)),
+                    Child = new TextBlock
+                    {
+                        Text = overlayText,
+                        FontSize = 24,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                });
+            }
+
+            var targetMessage = message ?? anchorMessage;
+            tile.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                OpenConversationMediaGallery(groupMessages, targetMessage);
+            };
+            tile.Child = tileContent;
+            return tile;
+        }
+
+        private static void AddConversationMediaGroupTile(Grid grid, UIElement tile, int row, int column, int rowSpan = 1, int columnSpan = 1)
+        {
+            Grid.SetRow(tile, row);
+            Grid.SetColumn(tile, column);
+            if (rowSpan > 1)
+            {
+                Grid.SetRowSpan(tile, rowSpan);
+            }
+
+            if (columnSpan > 1)
+            {
+                Grid.SetColumnSpan(tile, columnSpan);
+            }
+
+            grid.Children.Add(tile);
         }
 
         private List<ChatMessage> GetConversationMediaGroupMessages(Conversation conv, ChatMessage anchorMessage)
@@ -36124,6 +38612,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             try
             {
                 DebugHelper.WriteLine("[LoadActiveConversations] Carregando conversas ativas do Firebase");
+                var keepAiAssistantSelected = IsAiAssistantConversation(_selectedConversation);
 
                 var chatService = new ChatService(_idToken, _currentProfile?.UserId ?? "");
                 var conversations = await chatService.LoadConversationsAsync();
@@ -36132,7 +38621,11 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
                 _conversations = conversations;
 
-                if (_selectedConversation != null)
+                if (keepAiAssistantSelected)
+                {
+                    _selectedConversation = _aiAssistantConversation;
+                }
+                else if (_selectedConversation != null)
                 {
                     _selectedConversation = _conversations.FirstOrDefault(c => c.ContactId == _selectedConversation.ContactId);
                 }
@@ -37629,7 +40122,7 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             var lastMessage = conv.Messages.OrderBy(message => message.Timestamp).LastOrDefault();
             if (lastMessage == null)
             {
-                conv.LastMessage = "Nenhuma mensagem";
+                conv.LastMessage = IsAiAssistantConversation(conv) ? AiAssistantPreviewText : "Nenhuma mensagem";
                 conv.LastMessageTime = DateTime.Now;
                 conv.LastSenderId = string.Empty;
                 return;
@@ -37642,15 +40135,19 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
         private Window CreateStyledDialogWindow(string title, double width, double height, double? minHeight = null, bool canResize = false)
         {
-            return new Window
+            var workArea = SystemParameters.WorkArea;
+            var dialog = new Window
             {
                 Title = title,
-                Width = width,
-                Height = height,
-                MinHeight = minHeight ?? height,
+                Width = Math.Min(width, Math.Max(420, workArea.Width - 48)),
+                Height = Math.Min(height, Math.Max(360, workArea.Height - 48)),
+                MinWidth = Math.Min(Math.Max(420, width * 0.68), Math.Max(420, workArea.Width - 48)),
+                MinHeight = Math.Min(minHeight ?? height, Math.Max(320, workArea.Height - 48)),
+                MaxWidth = Math.Max(420, workArea.Width - 32),
+                MaxHeight = Math.Max(320, workArea.Height - 32),
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
-                ResizeMode = canResize ? ResizeMode.CanResize : ResizeMode.NoResize,
+                ResizeMode = canResize ? ResizeMode.CanResizeWithGrip : ResizeMode.CanMinimize,
                 ShowInTaskbar = false,
                 AllowsTransparency = true,
                 WindowStyle = WindowStyle.None,
@@ -37658,25 +40155,65 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
                 BorderThickness = new Thickness(0),
                 BorderBrush = Brushes.Transparent
             };
+
+            dialog.PreviewKeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Escape)
+                {
+                    dialog.Close();
+                    e.Handled = true;
+                }
+            };
+
+            return dialog;
         }
 
         private Border CreateStyledDialogShell(UIElement content, Thickness? padding = null)
         {
+            var body = new Grid();
+            body.Children.Add(content);
+
+            var closeButton = new Button
+            {
+                Width = 34,
+                Height = 34,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -10, -10, 0),
+                Padding = new Thickness(0),
+                Background = GetThemeBrush("MutedCardBackgroundBrush"),
+                Foreground = GetThemeBrush("SecondaryTextBrush"),
+                BorderBrush = GetThemeBrush("CardBorderBrush"),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand,
+                ToolTip = "Fechar",
+                Content = new PackIconMaterial
+                {
+                    Kind = PackIconMaterialKind.Close,
+                    Width = 16,
+                    Height = 16,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
+            closeButton.Click += (sender, _) => Window.GetWindow((DependencyObject)sender)?.Close();
+            body.Children.Add(closeButton);
+
             var shell = new Border
             {
-                Margin = new Thickness(14),
-                CornerRadius = new CornerRadius(28),
+                Margin = new Thickness(10),
+                CornerRadius = new CornerRadius(14),
                 Background = GetThemeBrush("SurfaceBrush"),
                 BorderBrush = GetThemeBrush("CardBorderBrush"),
                 BorderThickness = new Thickness(1),
-                Padding = padding ?? new Thickness(24),
+                Padding = padding ?? new Thickness(22),
                 SnapsToDevicePixels = true,
-                Child = content,
+                Child = body,
                 Effect = new System.Windows.Media.Effects.DropShadowEffect
                 {
-                    BlurRadius = 34,
-                    ShadowDepth = 12,
-                    Opacity = 0.18,
+                    BlurRadius = 22,
+                    ShadowDepth = 8,
+                    Opacity = _appDarkModeEnabled ? 0.32 : 0.14,
                     Color = Color.FromRgb(15, 23, 42)
                 }
             };
@@ -37700,28 +40237,30 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
 
         private StackPanel CreateDialogHeader(string eyebrow, string title, string description, Brush accentBrush)
         {
-            var header = new StackPanel { Margin = new Thickness(0, 0, 0, 18) };
+            var header = new StackPanel { Margin = new Thickness(0, 0, 42, 18) };
             header.Children.Add(new Border
             {
-                Background = accentBrush,
-                CornerRadius = new CornerRadius(999),
-                Padding = new Thickness(12, 5, 12, 5),
+                Background = CreateSoftAccentBrush(accentBrush, 26),
+                BorderBrush = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 4, 10, 4),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Child = new TextBlock
                 {
                     Text = eyebrow,
                     FontSize = 11,
                     FontWeight = FontWeights.Bold,
-                    Foreground = Brushes.White,
+                    Foreground = accentBrush,
                     TextAlignment = TextAlignment.Center
                 }
             });
             header.Children.Add(new TextBlock
             {
                 Text = title,
-                Margin = new Thickness(0, 14, 0, 0),
-                FontSize = 24,
-                FontWeight = FontWeights.ExtraBold,
+                Margin = new Thickness(0, 12, 0, 0),
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
                 Foreground = GetThemeBrush("PrimaryTextBrush"),
                 TextWrapping = TextWrapping.Wrap
             });
@@ -37744,9 +40283,9 @@ private Border CreateProfessorDashboardHero(ProfessorDashboardSnapshot snapshot)
             {
                 Content = label,
                 MinWidth = minWidth,
-                Height = 42,
+                Height = 40,
                 Margin = new Thickness(12, 0, 0, 0),
-                Padding = new Thickness(18, 0, 18, 0),
+                Padding = new Thickness(16, 0, 16, 0),
                 Background = background,
                 Foreground = foreground,
                 BorderBrush = borderBrush,

@@ -14,9 +14,14 @@
                     ShowInTaskbar="False"
                     ShowActivated="False"
                     ResizeMode="CanResize"
-                    WindowStartupLocation="Manual"
-                    Background="#07111F">
+    WindowStartupLocation="Manual"
+    Background="#07111F">
     <local:ChromeWindow.Resources>
+        <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#FF0B1220"/>
+        <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#FF475569"/>
+        <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#FF64748B"/>
+        <SolidColorBrush x:Key="ScrollBarThumbPressedBrush" Color="#FF94A3B8"/>
+
         <Style x:Key="ToolbarButtonStyle" TargetType="Button">
             <Setter Property="Margin" Value="0,0,8,0"/>
             <Setter Property="Padding" Value="12,8"/>

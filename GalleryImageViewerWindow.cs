@@ -109,6 +109,10 @@ namespace MeuApp
             WindowStartupLocation = owner == null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner;
             ResizeMode = ResizeMode.CanResize;
             Background = new SolidColorBrush(Color.FromRgb(4, 9, 18));
+            Resources["ScrollBarTrackBrush"] = new SolidColorBrush(Color.FromRgb(15, 23, 42));
+            Resources["ScrollBarThumbBrush"] = new SolidColorBrush(Color.FromRgb(71, 85, 105));
+            Resources["ScrollBarThumbHoverBrush"] = new SolidColorBrush(Color.FromRgb(100, 116, 139));
+            Resources["ScrollBarThumbPressedBrush"] = new SolidColorBrush(Color.FromRgb(148, 163, 184));
             KeyDown += OnViewerKeyDown;
 
             var root = new Grid { Margin = new Thickness(24) };

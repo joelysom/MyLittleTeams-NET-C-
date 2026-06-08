@@ -32,6 +32,12 @@ namespace MeuApp
 
         private const string SelfChatPlaceholderText = "Aqui é o Chat com você mesmo, pode deixar seus textos, anotações, fotos e aquivos.";
         private const string SelfChatPreviewText = "Seus lembretes, fotos e arquivos ficam aqui.";
+        private const double ChatAttachmentPreviewWidth = 304;
+        private const double ChatAttachmentPreviewHeight = 170;
+        private const double ChatMediaGroupPreviewWidth = 304;
+        private const double ChatMediaGroupPreviewHeight = 208;
+        private const double ChatMediaGroupTwoPreviewHeight = 168;
+        private const double ChatMediaGroupPreviewGap = 3;
 
         private UserProfile? _currentUser;
         private string _contactId = string.Empty;
@@ -743,11 +749,7 @@ namespace MeuApp
 
                 DebugHelper.WriteLine($"[LoadMessages] Criando {_messages.Count} controles de mensagem...");
 
-                foreach (var msg in _messages)
-                {
-                    var messageControl = CreateMessageControl(msg);
-                    MessagesList.Children.Add(messageControl);
-                }
+                RenderMessageControls();
 
                 UpdateSelfChatPlaceholderVisibility();
                 UpdateConversationSummaryFromMessages();
@@ -762,6 +764,22 @@ namespace MeuApp
                 DebugHelper.WriteLine($"[LoadMessages ERROR] {ex.GetType().Name}: {ex.Message}");
                 DebugHelper.WriteLine($"[LoadMessages ERROR StackTrace] {ex.StackTrace}");
                 throw;
+            }
+        }
+
+        private void RenderMessageControls()
+        {
+            MessagesList.Children.Clear();
+
+            var renderedMediaGroupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var msg in _messages.OrderBy(message => message.Timestamp))
+            {
+                if (msg.IsMediaGroupItem && !renderedMediaGroupIds.Add(msg.MediaGroupId))
+                {
+                    continue;
+                }
+
+                MessagesList.Children.Add(CreateMessageControl(msg));
             }
         }
 
@@ -932,7 +950,7 @@ namespace MeuApp
                         Text = msg.Content,
                         FontSize = 13,
                         Foreground = primaryTextBrush,
-                        TextWrapping = TextWrapping.WrapWithOverflow
+                        TextWrapping = TextWrapping.Wrap
                     });
                 }
 
@@ -989,6 +1007,11 @@ namespace MeuApp
 
         private UIElement CreateAttachmentContent(ChatMessage msg, Brush primaryTextBrush, Brush secondaryTextBrush)
         {
+            if (msg.IsMediaGroupItem && CreateMediaGroupContent(msg, primaryTextBrush, secondaryTextBrush) is UIElement mediaGroupContent)
+            {
+                return mediaGroupContent;
+            }
+
             var card = new Border
             {
                 Margin = new Thickness(0, ShouldShowMessageText(msg) ? 8 : 0, 0, 0),
@@ -1015,7 +1038,8 @@ namespace MeuApp
                     Child = new Image
                     {
                         Source = previewSource,
-                        Height = 170,
+                        Width = ChatAttachmentPreviewWidth,
+                        Height = ChatAttachmentPreviewHeight,
                         Stretch = Stretch.UniformToFill
                     }
                 });
@@ -1068,6 +1092,332 @@ namespace MeuApp
 
             card.Child = stack;
             return card;
+        }
+
+        private UIElement? CreateMediaGroupContent(ChatMessage anchorMessage, Brush primaryTextBrush, Brush secondaryTextBrush)
+        {
+            var groupMessages = GetMediaGroupMessages(anchorMessage);
+            if (groupMessages.Count <= 1)
+            {
+                return null;
+            }
+
+            var card = new Border
+            {
+                Margin = new Thickness(0, ShouldShowMessageText(anchorMessage) ? 8 : 0, 0, 0),
+                Padding = new Thickness(12),
+                CornerRadius = new CornerRadius(12),
+                Background = anchorMessage.IsOwn
+                    ? new SolidColorBrush(Color.FromArgb(36, 255, 255, 255))
+                    : GetThemeBrush("SearchBackgroundBrush", Color.FromRgb(248, 250, 252)),
+                BorderBrush = anchorMessage.IsOwn
+                    ? new SolidColorBrush(Color.FromArgb(70, 255, 255, 255))
+                    : GetThemeBrush("SearchBorderBrush", Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1)
+            };
+
+            var stack = new StackPanel { Orientation = Orientation.Vertical };
+            stack.Children.Add(CreateMediaGroupPreview(groupMessages, anchorMessage));
+            stack.Children.Add(new TextBlock
+            {
+                Text = groupMessages.Count == 2 ? "2 fotos enviadas em galeria" : $"{groupMessages.Count} fotos enviadas em galeria",
+                Margin = new Thickness(0, 10, 0, 0),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = secondaryTextBrush
+            });
+            stack.Children.Add(new TextBlock
+            {
+                Text = BuildMediaGroupLabel(groupMessages),
+                Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12,
+                Foreground = primaryTextBrush,
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 18
+            });
+
+            var openButton = new Button
+            {
+                Content = "Abrir galeria",
+                Margin = new Thickness(0, 10, 0, 0),
+                Padding = new Thickness(12, 6, 12, 6),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = anchorMessage.IsOwn
+                    ? new SolidColorBrush(Color.FromArgb(56, 255, 255, 255))
+                    : GetThemeBrush("AccentBrush", Color.FromRgb(0, 120, 212)),
+                Foreground = Brushes.White
+            };
+            openButton.Click += (_, __) => OpenMediaGallery(groupMessages, anchorMessage);
+            stack.Children.Add(openButton);
+
+            card.Child = stack;
+            return card;
+        }
+
+        private UIElement CreateMediaGroupPreview(IReadOnlyList<ChatMessage> groupMessages, ChatMessage anchorMessage)
+        {
+            var safeMessages = (groupMessages ?? Array.Empty<ChatMessage>())
+                .Where(message => message != null && message.IsImageAttachment)
+                .OrderBy(message => message.MediaGroupIndex)
+                .ThenBy(message => message.Timestamp)
+                .ToList();
+            var visibleMessages = safeMessages.Take(4).ToList();
+            var previewHeight = safeMessages.Count == 2
+                ? ChatMediaGroupTwoPreviewHeight
+                : ChatMediaGroupPreviewHeight;
+            var surface = new Border
+            {
+                Width = ChatMediaGroupPreviewWidth,
+                Height = previewHeight,
+                MaxWidth = ChatMediaGroupPreviewWidth,
+                CornerRadius = new CornerRadius(12),
+                Background = GetThemeBrush("SearchBorderBrush", Color.FromRgb(226, 232, 240)),
+                ClipToBounds = true,
+                SnapsToDevicePixels = true
+            };
+
+            if (visibleMessages.Count <= 1)
+            {
+                surface.Child = CreateMediaGroupTile(
+                    visibleMessages.FirstOrDefault(),
+                    safeMessages,
+                    anchorMessage,
+                    new CornerRadius(12),
+                    new Thickness(0));
+                return surface;
+            }
+
+            var grid = new Grid
+            {
+                Width = ChatMediaGroupPreviewWidth,
+                Height = previewHeight,
+                ClipToBounds = true
+            };
+
+            if (visibleMessages.Count == 2)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 12), new Thickness(0, 0, ChatMediaGroupPreviewGap, 0)), 0, 0);
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 12, 0), new Thickness(0)), 0, 1);
+            }
+            else if (visibleMessages.Count == 3)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.15, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 12), new Thickness(0, 0, ChatMediaGroupPreviewGap, 0)), 0, 0, rowSpan: 2);
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 0, 0), new Thickness(0, 0, 0, ChatMediaGroupPreviewGap)), 0, 1);
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[2], safeMessages, anchorMessage, new CornerRadius(0, 0, 12, 0), new Thickness(0)), 1, 1);
+            }
+            else
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[0], safeMessages, anchorMessage, new CornerRadius(12, 0, 0, 0), new Thickness(0, 0, ChatMediaGroupPreviewGap, ChatMediaGroupPreviewGap)), 0, 0);
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[1], safeMessages, anchorMessage, new CornerRadius(0, 12, 0, 0), new Thickness(0, 0, 0, ChatMediaGroupPreviewGap)), 0, 1);
+                AddMediaGroupTile(grid, CreateMediaGroupTile(visibleMessages[2], safeMessages, anchorMessage, new CornerRadius(0, 0, 0, 12), new Thickness(0, 0, ChatMediaGroupPreviewGap, 0)), 1, 0);
+                AddMediaGroupTile(
+                    grid,
+                    CreateMediaGroupTile(
+                        visibleMessages[3],
+                        safeMessages,
+                        anchorMessage,
+                        new CornerRadius(0, 0, 12, 0),
+                        new Thickness(0),
+                        safeMessages.Count > 4 ? $"+{safeMessages.Count - 4}" : null),
+                    1,
+                    1);
+            }
+
+            surface.Child = grid;
+            return surface;
+        }
+
+        private Border CreateMediaGroupTile(
+            ChatMessage? message,
+            IReadOnlyList<ChatMessage> groupMessages,
+            ChatMessage anchorMessage,
+            CornerRadius cornerRadius,
+            Thickness margin,
+            string? overlayText = null)
+        {
+            var source = message == null
+                ? null
+                : TryCreateAttachmentDisplaySource(message, preferLocalFile: false, decodePixelWidth: 360);
+            var tile = new Border
+            {
+                Margin = margin,
+                CornerRadius = cornerRadius,
+                Background = GetThemeBrush("SearchBorderBrush", Color.FromRgb(226, 232, 240)),
+                ClipToBounds = true,
+                Cursor = Cursors.Hand,
+                SnapsToDevicePixels = true
+            };
+
+            var content = new Grid { ClipToBounds = true };
+            if (source != null)
+            {
+                content.Children.Add(new Image
+                {
+                    Source = source,
+                    Stretch = Stretch.UniformToFill,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
+                });
+            }
+            else
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = "Imagem",
+                    FontSize = 12,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = GetThemeBrush("SecondaryTextBrush", Color.FromRgb(100, 116, 139)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(overlayText))
+            {
+                content.Children.Add(new Border
+                {
+                    Background = new SolidColorBrush(Color.FromArgb(168, 15, 23, 42)),
+                    Child = new TextBlock
+                    {
+                        Text = overlayText,
+                        FontSize = 22,
+                        FontWeight = FontWeights.Bold,
+                        Foreground = Brushes.White,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }
+                });
+            }
+
+            var targetMessage = message ?? anchorMessage;
+            tile.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                OpenMediaGallery(groupMessages, targetMessage);
+            };
+            tile.Child = content;
+            return tile;
+        }
+
+        private static void AddMediaGroupTile(Grid grid, UIElement tile, int row, int column, int rowSpan = 1, int columnSpan = 1)
+        {
+            Grid.SetRow(tile, row);
+            Grid.SetColumn(tile, column);
+            if (rowSpan > 1)
+            {
+                Grid.SetRowSpan(tile, rowSpan);
+            }
+
+            if (columnSpan > 1)
+            {
+                Grid.SetColumnSpan(tile, columnSpan);
+            }
+
+            grid.Children.Add(tile);
+        }
+
+        private List<ChatMessage> GetMediaGroupMessages(ChatMessage anchorMessage)
+        {
+            if (anchorMessage == null || string.IsNullOrWhiteSpace(anchorMessage.MediaGroupId))
+            {
+                return new List<ChatMessage>();
+            }
+
+            return _messages
+                .Where(message => message != null
+                    && !message.IsDeleted
+                    && message.IsImageAttachment
+                    && string.Equals(message.MediaGroupId, anchorMessage.MediaGroupId, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(message => message.MediaGroupIndex)
+                .ThenBy(message => message.Timestamp)
+                .ToList();
+        }
+
+        private static string BuildMediaGroupLabel(IReadOnlyList<ChatMessage> groupMessages)
+        {
+            if (groupMessages == null || groupMessages.Count == 0)
+            {
+                return "Galeria pronta para abrir.";
+            }
+
+            var firstName = groupMessages
+                .Select(message => message.AttachmentFileName)
+                .FirstOrDefault(fileName => !string.IsNullOrWhiteSpace(fileName));
+            if (groupMessages.Count == 1)
+            {
+                return string.IsNullOrWhiteSpace(firstName)
+                    ? "Imagem pronta para abrir."
+                    : firstName;
+            }
+
+            if (string.IsNullOrWhiteSpace(firstName))
+            {
+                return $"{groupMessages.Count} imagens prontas para abrir em sequência.";
+            }
+
+            return groupMessages.Count == 2
+                ? $"{firstName} e mais 1 imagem."
+                : $"{firstName} e mais {groupMessages.Count - 1} imagens.";
+        }
+
+        private void OpenMediaGallery(IReadOnlyList<ChatMessage> groupMessages, ChatMessage anchorMessage)
+        {
+            var viewerItems = BuildMediaGalleryItems(groupMessages);
+            if (viewerItems.Count == 0)
+            {
+                _ = OpenAttachmentAsync(anchorMessage);
+                return;
+            }
+
+            var initialIndex = Math.Max(0, Math.Min(anchorMessage.MediaGroupIndex, viewerItems.Count - 1));
+            var accentColor = (GetThemeBrush("AccentBrush", Color.FromRgb(0, 120, 212)) as SolidColorBrush)?.Color
+                ?? Color.FromRgb(0, 120, 212);
+            var viewer = new GalleryImageViewerWindow(
+                viewerItems,
+                initialIndex,
+                this,
+                accentColor,
+                allowAdjustment: false,
+                contextLabel: "Galeria do chat");
+            viewer.ShowDialog();
+        }
+
+        private List<GalleryViewerItem> BuildMediaGalleryItems(IReadOnlyList<ChatMessage> groupMessages)
+        {
+            var safeMessages = groupMessages ?? Array.Empty<ChatMessage>();
+            return safeMessages
+                .Select((message, index) => new
+                {
+                    Message = message,
+                    Index = index,
+                    Source = TryCreateAttachmentDisplaySource(message, preferLocalFile: true)
+                })
+                .Where(item => item.Source != null)
+                .Select(item => new GalleryViewerItem(
+                    string.IsNullOrWhiteSpace(item.Message.MessageId) ? item.Index.ToString() : item.Message.MessageId,
+                    item.Source!,
+                    string.IsNullOrWhiteSpace(item.Message.AttachmentFileName) ? $"Imagem {item.Index + 1}" : item.Message.AttachmentFileName,
+                    $"{item.Index + 1} de {Math.Max(1, safeMessages.Count)} • {item.Message.Timestamp:dd/MM HH:mm}",
+                    ShouldShowMessageText(item.Message) ? item.Message.Content : string.Empty))
+                .ToList();
         }
 
         private UIElement CreateLinkPreviewContent(ChatMessage msg, Brush primaryTextBrush, Brush secondaryTextBrush)
@@ -1128,18 +1478,163 @@ namespace MeuApp
 
         private ImageSource? TryCreateAttachmentPreviewSource(ChatMessage msg)
         {
-            if (msg == null || !msg.IsImageAttachment || string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) || !File.Exists(msg.AttachmentLocalPath))
+            return TryCreateAttachmentDisplaySource(msg, preferLocalFile: false, decodePixelWidth: 420);
+        }
+
+        private ImageSource? TryCreateAttachmentDisplaySource(ChatMessage msg, bool preferLocalFile, int decodePixelWidth = 0)
+        {
+            if (msg == null || !msg.IsImageAttachment)
+            {
+                return null;
+            }
+
+            if (preferLocalFile && !string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) && File.Exists(msg.AttachmentLocalPath))
+            {
+                var localSource = TryCreateDecodedBitmapImage(msg.AttachmentLocalPath, decodePixelWidth);
+                if (localSource != null)
+                {
+                    return localSource;
+                }
+            }
+
+            var previewSource = TryCreateImageSourceFromDataUri(msg.AttachmentPreviewDataUri);
+            if (previewSource != null)
+            {
+                return previewSource;
+            }
+
+            if (!preferLocalFile && !string.IsNullOrWhiteSpace(msg.AttachmentLocalPath) && File.Exists(msg.AttachmentLocalPath))
+            {
+                return TryCreateDecodedBitmapImage(msg.AttachmentLocalPath, decodePixelWidth);
+            }
+
+            return null;
+        }
+
+        private BitmapImage? TryCreateDecodedBitmapImage(string filePath, int decodePixelWidth = 0)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
             {
                 return null;
             }
 
             try
             {
-                return new BitmapImage(new Uri(msg.AttachmentLocalPath, UriKind.Absolute));
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.CreateOptions = BitmapCreateOptions.PreservePixelFormat;
+                if (decodePixelWidth > 0)
+                {
+                    bitmap.DecodePixelWidth = decodePixelWidth;
+                }
+
+                bitmap.UriSource = new Uri(filePath, UriKind.Absolute);
+                bitmap.EndInit();
+                if (bitmap.CanFreeze)
+                {
+                    bitmap.Freeze();
+                }
+
+                return bitmap;
             }
             catch (Exception ex)
             {
-                DebugHelper.WriteLine($"[ChatWindow.AttachmentPreview] Falha ao montar preview: {ex.Message}");
+                DebugHelper.WriteLine($"[ChatWindow.AttachmentPreview] Falha ao montar preview local: {ex.Message}");
+                return null;
+            }
+        }
+
+        private ImageSource? TryCreateImageSourceFromDataUri(string? dataUri)
+        {
+            if (string.IsNullOrWhiteSpace(dataUri))
+            {
+                return null;
+            }
+
+            try
+            {
+                var commaIndex = dataUri.IndexOf(',');
+                if (commaIndex < 0 || commaIndex >= dataUri.Length - 1)
+                {
+                    return null;
+                }
+
+                var bytes = Convert.FromBase64String(dataUri[(commaIndex + 1)..]);
+                using var memoryStream = new MemoryStream(bytes);
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.StreamSource = memoryStream;
+                bitmap.EndInit();
+
+                if (bitmap.CanFreeze)
+                {
+                    bitmap.Freeze();
+                }
+
+                return bitmap;
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatWindow.AttachmentPreview] Falha ao abrir data URI: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string? TryCreateCompressedImageDataUri(string filePath, int maxSide, int quality)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var stream = File.OpenRead(filePath);
+                var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                var source = decoder.Frames.FirstOrDefault();
+                if (source == null)
+                {
+                    return null;
+                }
+
+                return TryCreateCompressedImageDataUri(source, maxSide, quality);
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatWindow.AttachmentPreview] Falha ao gerar miniatura: {ex.Message}");
+                return null;
+            }
+        }
+
+        private string? TryCreateCompressedImageDataUri(BitmapSource source, int maxSide, int quality)
+        {
+            try
+            {
+                BitmapSource normalizedSource = source;
+                var largestSide = Math.Max(source.PixelWidth, source.PixelHeight);
+                if (largestSide > maxSide)
+                {
+                    var scale = (double)maxSide / largestSide;
+                    var transformed = new TransformedBitmap(source, new ScaleTransform(scale, scale));
+                    transformed.Freeze();
+                    normalizedSource = transformed;
+                }
+
+                var encoder = new JpegBitmapEncoder
+                {
+                    QualityLevel = Math.Clamp(quality, 40, 90)
+                };
+                encoder.Frames.Add(BitmapFrame.Create(normalizedSource));
+
+                using var memoryStream = new MemoryStream();
+                encoder.Save(memoryStream);
+                return $"data:image/jpeg;base64,{Convert.ToBase64String(memoryStream.ToArray())}";
+            }
+            catch (Exception ex)
+            {
+                DebugHelper.WriteLine($"[ChatWindow.AttachmentPreview] Falha ao comprimir miniatura: {ex.Message}");
                 return null;
             }
         }
@@ -1404,17 +1899,53 @@ namespace MeuApp
         {
             var sentMessages = new List<ChatMessage>();
             var failedFiles = new List<string>();
+            var selectedPaths = (filePaths ?? Array.Empty<string>())
+                .Where(filePath => !string.IsNullOrWhiteSpace(filePath))
+                .ToList();
+            var imagePaths = selectedPaths
+                .Where(filePath => string.Equals(ResolveAttachmentMessageType(filePath), "image", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var mediaGroupId = imagePaths.Count > 1
+                ? Guid.NewGuid().ToString("N")
+                : string.Empty;
 
-            foreach (var filePath in filePaths)
+            foreach (var filePath in selectedPaths)
             {
                 try
                 {
-                    var localMessage = CreateLocalAttachmentMessage(filePath);
+                    var messageType = ResolveAttachmentMessageType(filePath);
+                    var isGroupedImage = !string.IsNullOrWhiteSpace(mediaGroupId)
+                        && string.Equals(messageType, "image", StringComparison.OrdinalIgnoreCase);
+                    var mediaGroupIndex = isGroupedImage
+                        ? imagePaths.FindIndex(path => string.Equals(path, filePath, StringComparison.OrdinalIgnoreCase))
+                        : 0;
+                    var mediaGroupCount = isGroupedImage ? imagePaths.Count : 0;
+                    var draftMediaGroupId = isGroupedImage
+                        ? mediaGroupId
+                        : string.Empty;
+                    var previewDataUri = string.Equals(messageType, "image", StringComparison.OrdinalIgnoreCase)
+                        ? await Task.Run(() => TryCreateCompressedImageDataUri(filePath, 480, 74)) ?? string.Empty
+                        : string.Empty;
+
+                    var localMessage = CreateLocalAttachmentMessage(
+                        filePath,
+                        previewDataUri,
+                        draftMediaGroupId,
+                        Math.Max(0, mediaGroupIndex),
+                        mediaGroupCount);
                     ChatMessage messageToAppend = localMessage;
 
                     if (_chatService != null)
                     {
-                        var sendResult = await _chatService.SendAttachmentMessageAsync(_contactId, _contactName, localMessage.SenderName, filePath);
+                        var sendResult = await _chatService.SendAttachmentMessageAsync(
+                            _contactId,
+                            _contactName,
+                            localMessage.SenderName,
+                            filePath,
+                            attachmentPreviewDataUri: previewDataUri,
+                            mediaGroupId: localMessage.MediaGroupId,
+                            mediaGroupIndex: localMessage.MediaGroupIndex,
+                            mediaGroupCount: localMessage.MediaGroupCount);
                         if (!sendResult.Success)
                         {
                             failedFiles.Add($"{System.IO.Path.GetFileName(filePath)} ({sendResult.ErrorMessage})");
@@ -1462,7 +1993,12 @@ namespace MeuApp
                 MessageBoxImage.Warning);
         }
 
-        private ChatMessage CreateLocalAttachmentMessage(string filePath)
+        private ChatMessage CreateLocalAttachmentMessage(
+            string filePath,
+            string? previewDataUri = null,
+            string? mediaGroupId = null,
+            int mediaGroupIndex = 0,
+            int mediaGroupCount = 0)
         {
             var fileInfo = new FileInfo(filePath);
             var messageType = ResolveAttachmentMessageType(fileInfo.Name);
@@ -1477,7 +2013,11 @@ namespace MeuApp
                 AttachmentFileName = fileInfo.Name,
                 AttachmentContentType = GetAttachmentContentType(fileInfo.Name),
                 AttachmentLocalPath = fileInfo.FullName,
+                AttachmentPreviewDataUri = string.IsNullOrWhiteSpace(previewDataUri) ? string.Empty : previewDataUri.Trim(),
                 AttachmentSizeBytes = fileInfo.Exists ? fileInfo.Length : 0,
+                MediaGroupId = string.IsNullOrWhiteSpace(mediaGroupId) ? string.Empty : mediaGroupId.Trim(),
+                MediaGroupIndex = Math.Max(0, mediaGroupIndex),
+                MediaGroupCount = Math.Max(0, mediaGroupCount),
                 Timestamp = DateTime.Now,
                 IsOwn = true
             };
@@ -1502,9 +2042,9 @@ namespace MeuApp
             foreach (var message in appendedMessages)
             {
                 _messages.Add(message);
-                MessagesList.Children.Add(CreateMessageControl(message));
             }
 
+            RenderMessageControls();
             UpdateSelfChatPlaceholderVisibility();
             UpdateConversationSummaryFromMessages();
             MessagesScrollViewer.ScrollToEnd();
@@ -1530,11 +2070,7 @@ namespace MeuApp
 
                 localPath = downloadResult.LocalPath;
                 msg.AttachmentLocalPath = localPath;
-                MessagesList.Children.Clear();
-                foreach (var existingMessage in _messages)
-                {
-                    MessagesList.Children.Add(CreateMessageControl(existingMessage));
-                }
+                RenderMessageControls();
                 MessagesScrollViewer.ScrollToEnd();
             }
 

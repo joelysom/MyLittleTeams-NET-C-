@@ -234,7 +234,7 @@ namespace MeuApp
             return IntPtr.Zero;
         }
 
-        private static void UpdateMinMaxInfo(IntPtr hwnd, IntPtr lParam)
+        private void UpdateMinMaxInfo(IntPtr hwnd, IntPtr lParam)
         {
             var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
             var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
@@ -261,6 +261,28 @@ namespace MeuApp
             minMaxInfo.ptMaxSize.y = workArea.bottom - workArea.top;
             minMaxInfo.ptMaxTrackSize.x = minMaxInfo.ptMaxSize.x;
             minMaxInfo.ptMaxTrackSize.y = minMaxInfo.ptMaxSize.y;
+
+            var source = _hwndSource ?? PresentationSource.FromVisual(this) as HwndSource;
+            var transformToDevice = source?.CompositionTarget?.TransformToDevice ?? Matrix.Identity;
+            var minTrackWidth = double.IsNaN(MinWidth) || MinWidth <= 0
+                ? minMaxInfo.ptMinTrackSize.x
+                : (int)Math.Ceiling(MinWidth * transformToDevice.M11);
+            var minTrackHeight = double.IsNaN(MinHeight) || MinHeight <= 0
+                ? minMaxInfo.ptMinTrackSize.y
+                : (int)Math.Ceiling(MinHeight * transformToDevice.M22);
+
+            if (minMaxInfo.ptMaxTrackSize.x > 0)
+            {
+                minTrackWidth = Math.Min(minTrackWidth, minMaxInfo.ptMaxTrackSize.x);
+            }
+
+            if (minMaxInfo.ptMaxTrackSize.y > 0)
+            {
+                minTrackHeight = Math.Min(minTrackHeight, minMaxInfo.ptMaxTrackSize.y);
+            }
+
+            minMaxInfo.ptMinTrackSize.x = Math.Max(minMaxInfo.ptMinTrackSize.x, minTrackWidth);
+            minMaxInfo.ptMinTrackSize.y = Math.Max(minMaxInfo.ptMinTrackSize.y, minTrackHeight);
 
             Marshal.StructureToPtr(minMaxInfo, lParam, true);
         }

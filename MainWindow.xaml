@@ -5,6 +5,8 @@
                     xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
                     xmlns:local="clr-namespace:MeuApp"
                     Title="Choas Observatório de Projetos Integradores" Height="720" Width="1280"
+                    MinWidth="1180"
+                    MinHeight="700"
                     WindowState="Maximized"
                     ResizeMode="CanResize"
                     Background="{DynamicResource WindowBackgroundBrush}"
@@ -43,81 +45,7 @@
         <SolidColorBrush x:Key="ToggleTrackOnBrush" Color="#FF2563EB"/>
         <SolidColorBrush x:Key="ToggleThumbBrush" Color="#FFFFFFFF"/>
 
-        <Style x:Key="MainScrollBarThumbStyle" TargetType="Thumb">
-            <Setter Property="OverridesDefaultStyle" Value="True"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="ThumbBorder"
-                                Margin="2"
-                                CornerRadius="999"
-                                Background="{DynamicResource SearchBorderBrush}"/>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsDragging" Value="True">
-                                <Setter TargetName="ThumbBorder" Property="Background" Value="{DynamicResource ToggleTrackOnBrush}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <ControlTemplate x:Key="MainVerticalScrollBarTemplate" TargetType="ScrollBar">
-            <Grid Width="{TemplateBinding Width}" Background="Transparent">
-                <Border Margin="2,0"
-                        CornerRadius="999"
-                        Background="{DynamicResource SearchBackgroundBrush}"/>
-                <Track x:Name="PART_Track" IsDirectionReversed="True">
-                    <Track.DecreaseRepeatButton>
-                        <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
-                    </Track.DecreaseRepeatButton>
-                    <Track.Thumb>
-                        <Thumb Style="{StaticResource MainScrollBarThumbStyle}"/>
-                    </Track.Thumb>
-                    <Track.IncreaseRepeatButton>
-                        <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
-                    </Track.IncreaseRepeatButton>
-                </Track>
-            </Grid>
-        </ControlTemplate>
-
-        <ControlTemplate x:Key="MainHorizontalScrollBarTemplate" TargetType="ScrollBar">
-            <Grid Height="{TemplateBinding Height}" Background="Transparent">
-                <Border Margin="0,2"
-                        CornerRadius="999"
-                        Background="{DynamicResource SearchBackgroundBrush}"/>
-                <Track x:Name="PART_Track">
-                    <Track.DecreaseRepeatButton>
-                        <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/>
-                    </Track.DecreaseRepeatButton>
-                    <Track.Thumb>
-                        <Thumb Style="{StaticResource MainScrollBarThumbStyle}"/>
-                    </Track.Thumb>
-                    <Track.IncreaseRepeatButton>
-                        <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/>
-                    </Track.IncreaseRepeatButton>
-                </Track>
-            </Grid>
-        </ControlTemplate>
-
-        <Style TargetType="ScrollBar">
-            <Setter Property="Width" Value="10"/>
-            <Setter Property="Height" Value="10"/>
-            <Setter Property="Background" Value="Transparent"/>
-            <Style.Triggers>
-                <Trigger Property="Orientation" Value="Vertical">
-                    <Setter Property="Height" Value="Auto"/>
-                    <Setter Property="Template" Value="{StaticResource MainVerticalScrollBarTemplate}"/>
-                </Trigger>
-                <Trigger Property="Orientation" Value="Horizontal">
-                    <Setter Property="Width" Value="Auto"/>
-                    <Setter Property="Template" Value="{StaticResource MainHorizontalScrollBarTemplate}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <Style TargetType="ScrollBar" BasedOn="{StaticResource AppClassicScrollBarStyle}"/>
 
         <Style x:Key="DisplaySectionTitleStyle" TargetType="TextBlock">
             <Setter Property="FontFamily" Value="{StaticResource AppDisplayFontFamily}"/>
@@ -149,7 +77,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14">
+                                CornerRadius="10">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
@@ -183,7 +111,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="18"
+                                CornerRadius="10"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
@@ -225,7 +153,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14">
+                                CornerRadius="10">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -256,7 +184,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="16">
+                                CornerRadius="10">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
@@ -321,11 +249,12 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="12"
+                                CornerRadius="8"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="Center"/>
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
@@ -412,7 +341,7 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="12">
+                                    CornerRadius="8">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -458,7 +387,7 @@
                                         Background="{DynamicResource CardBackgroundBrush}"
                                         BorderBrush="{DynamicResource SearchBorderBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="16">
+                                        CornerRadius="10">
                                     <ScrollViewer Margin="6"
                                                   MaxHeight="260"
                                                   SnapsToDevicePixels="True">
@@ -504,11 +433,12 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="14"
+                                CornerRadius="8"
                                 SnapsToDevicePixels="True">
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                              VerticalAlignment="Center"/>
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -724,7 +654,7 @@
 
         <!-- SIDEBAR -->
         <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}" BorderBrush="{DynamicResource SidebarBorderBrush}" BorderThickness="0,0,1,0" ClipToBounds="False">
-            <Grid Margin="14,14,14,18">
+            <Grid x:Name="SidebarRootGrid" Margin="14,14,14,18">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -732,7 +662,8 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0"
+                <Border x:Name="SidebarBrandCard"
+                        Grid.Row="0"
                         Padding="14"
                         Background="{DynamicResource SurfaceBrush}"
                         BorderBrush="{DynamicResource CardBorderBrush}"
@@ -826,7 +757,7 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <iconPacks:PackIconMaterial Kind="MessageTextOutline" Width="18" Height="18" Foreground="{DynamicResource ChatIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                <iconPacks:PackIconMaterial x:Name="ChatsNavIcon" Kind="MessageTextOutline" Width="18" Height="18" Foreground="{DynamicResource ChatIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="ChatsNavLabel" Text="Chats" Style="{StaticResource SidebarNavLabelStyle}"/>
                             </StackPanel>
 
@@ -857,7 +788,7 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <iconPacks:PackIconMaterial Kind="HandshakeOutline" Width="18" Height="18" Foreground="{DynamicResource ConnectionsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                <iconPacks:PackIconMaterial x:Name="ConnectionsNavIcon" Kind="HandshakeOutline" Width="18" Height="18" Foreground="{DynamicResource ConnectionsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="ConnectionsNavLabel" Text="Conexões" Style="{StaticResource SidebarNavLabelStyle}"/>
                             </StackPanel>
 
@@ -882,41 +813,42 @@
 
                     <Button x:Name="TeamsNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Equipes" ToolTip="Equipes">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="AccountGroupOutline" Width="18" Height="18" Foreground="{DynamicResource TeamsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial x:Name="TeamsNavIcon" Kind="AccountGroupOutline" Width="18" Height="18" Foreground="{DynamicResource TeamsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="TeamsNavLabel" Text="Equipes" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
 
                     <Button x:Name="ProfessorNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Professor" ToolTip="Docência" Visibility="Collapsed">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial x:Name="ProfessorNavIcon" Kind="SchoolOutline" Width="18" Height="18" Foreground="{DynamicResource AccentBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="ProfessorNavLabel" Text="Docência" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
 
                     <Button x:Name="CalendarNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Calendario" ToolTip="Calendário">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="CalendarMonthOutline" Width="18" Height="18" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial x:Name="CalendarNavIcon" Kind="CalendarMonthOutline" Width="18" Height="18" Foreground="{DynamicResource CalendarIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="CalendarNavLabel" Text="Calendário" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
 
                     <Button x:Name="FilesNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Arquivos" ToolTip="Arquivos">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="FolderOutline" Width="18" Height="18" Foreground="{DynamicResource FilesIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial x:Name="FilesNavIcon" Kind="FolderOutline" Width="18" Height="18" Foreground="{DynamicResource FilesIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="FilesNavLabel" Text="Arquivos" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
 
                     <Button x:Name="SettingsNavButton" Style="{StaticResource SidebarNavButtonStyle}" Click="NavButton_Click" Tag="Configuracoes" ToolTip="Configurações">
                         <StackPanel Orientation="Horizontal">
-                            <iconPacks:PackIconMaterial Kind="CogOutline" Width="18" Height="18" Foreground="{DynamicResource SettingsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                            <iconPacks:PackIconMaterial x:Name="SettingsNavIcon" Kind="CogOutline" Width="18" Height="18" Foreground="{DynamicResource SettingsIconBrush}" Margin="0,0,12,0" VerticalAlignment="Center"/>
                             <TextBlock x:Name="SettingsNavLabel" Text="Configurações" Style="{StaticResource SidebarNavLabelStyle}"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
 
-                <Border Grid.Row="3"
+                <Border x:Name="SidebarProfileCard"
+                        Grid.Row="3"
                         Margin="0,16,0,0"
                         Background="{DynamicResource SurfaceBrush}"
                         BorderBrush="{DynamicResource CardBorderBrush}"
@@ -946,14 +878,15 @@
                 </Border>
 
                 <Button x:Name="SidebarRestoreHandle"
-                        Grid.RowSpan="4"
-                        HorizontalAlignment="Right"
+                        Grid.Row="1"
+                        Style="{StaticResource IconSurfaceButtonStyle}"
+                        HorizontalAlignment="Center"
                         VerticalAlignment="Top"
-                        Margin="0,84,-20,0"
-                        Width="30"
-                        Height="72"
-                        Background="{DynamicResource AccentBrush}"
-                        Foreground="White"
+                        Margin="0,12,0,14"
+                        Width="46"
+                        Height="38"
+                        Background="{DynamicResource AccentMutedBrush}"
+                        Foreground="{DynamicResource AccentBrush}"
                         BorderThickness="0"
                         Cursor="Hand"
                         Visibility="Collapsed"
@@ -962,7 +895,7 @@
                     <iconPacks:PackIconMaterial Kind="ChevronDoubleRight"
                                                 Width="16"
                                                 Height="16"
-                                                Foreground="White"
+                                                Foreground="{DynamicResource AccentBrush}"
                                                 HorizontalAlignment="Center"
                                                 VerticalAlignment="Center"/>
                 </Button>
@@ -1056,9 +989,9 @@
                             <Border x:Name="TeamsEmptyStateCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="24" Margin="0,0,0,14">
                                 <StackPanel HorizontalAlignment="Center" Width="420">
                                     <TextBlock Text="Sem equipes ativas" FontSize="22" FontWeight="ExtraBold" Foreground="{DynamicResource PrimaryTextBrush}" TextAlignment="Center" Margin="0,0,0,10"/>
-                                    <TextBlock Text="Quando voce criar ou ingressar em uma equipe de projeto ou turma por codigo, o contexto correspondente aparecera aqui." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,18"/>
+                                    <TextBlock Text="Quando voce criar ou ingressar em uma equipe de projeto, o contexto correspondente aparecera aqui." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,18"/>
                                     <Border Background="{DynamicResource MutedCardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="14" Padding="16">
-                                        <TextBlock Text="Use o botão de nova equipe no canto superior para criar uma equipe de projeto ou cole um código para o app encaminhar você para Equipes ou Docência, conforme o destino correto." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
+                                        <TextBlock Text="Use o botao de nova equipe no canto superior para criar um projeto ou ingressar em um grupo existente." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
                                     </Border>
                                 </StackPanel>
                             </Border>
@@ -1333,8 +1266,8 @@
 
                             <Border x:Name="TeamListCard" Background="{DynamicResource CardBackgroundBrush}" BorderBrush="{DynamicResource CardBorderBrush}" BorderThickness="1" CornerRadius="18" Padding="22" Margin="0,0,0,14" Visibility="Collapsed">
                                 <StackPanel>
-                                    <TextBlock Text="Turmas e equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
-                                    <TextBlock Text="Abra uma turma para mural, alunos e atividades, ou selecione uma equipe de projeto para detalhes, materiais e paineis de gestao." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
+                                    <TextBlock Text="Equipes cadastradas" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"/>
+                                    <TextBlock Text="Selecione uma equipe de projeto para detalhes, materiais e paineis de gestao." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,6,0,16" TextWrapping="Wrap"/>
                                     <TextBox x:Name="TeamListSearchBox"
                                              Height="42"
                                              Padding="12,10"
@@ -1402,7 +1335,7 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <StackPanel Orientation="Vertical" Margin="0,0,0,18">
+                        <StackPanel x:Name="ProfessorDashboardHeaderPanel" Orientation="Vertical" Margin="0,0,0,18">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <iconPacks:PackIconMaterial Kind="SchoolOutline" Width="20" Height="20" Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="Docência" Style="{StaticResource DisplaySectionTitleStyle}"/>
@@ -1455,7 +1388,7 @@
                                     <iconPacks:PackIconMaterial Kind="FolderOutline" Width="20" Height="20" Foreground="{DynamicResource FilesIconBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
                                     <TextBlock Text="Arquivos" Style="{StaticResource DisplaySectionTitleStyle}"/>
                                 </StackPanel>
-                                <TextBlock Text="Monte sua mochila de materiais, marque o contexto e deixe o CHOAS lembrar onde cada peça entra." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
+                                <TextBlock Text="Organize seus materiais em grade, por contexto, com prévia rápida e ações diretas." FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"/>
                                 <TextBlock x:Name="FilesStatusText" Text="" FontSize="12" Margin="0,8,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Visibility="Collapsed"/>
                             </StackPanel>
 
@@ -1475,17 +1408,61 @@
                         </Grid>
 
                         <Grid Grid.Row="1">
-                            <ScrollViewer VerticalAlignment="Stretch" VerticalScrollBarVisibility="Auto">
-                                <StackPanel x:Name="FilesHubScrollStack" Margin="0,0,0,316">
-                                    <WrapPanel x:Name="FilesHubSummaryHost" Margin="0,0,0,12"/>
-                                    <StackPanel x:Name="FilesHubBodyHost" Orientation="Vertical"/>
-                                </StackPanel>
-                            </ScrollViewer>
+                            <Grid x:Name="FilesHubScrollStack" Margin="0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <WrapPanel x:Name="FilesHubSummaryHost" Margin="0,0,0,12"/>
+
+                                <ListBox x:Name="FilesHubVirtualList"
+                                         Grid.Row="1"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="0"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         VirtualizingPanel.IsVirtualizing="True"
+                                         VirtualizingPanel.VirtualizationMode="Recycling"
+                                         VirtualizingPanel.ScrollUnit="Pixel">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <VirtualizingStackPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="{x:Type ListBoxItem}">
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="Margin" Value="0"/>
+                                            <Setter Property="Focusable" Value="False"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="BorderThickness" Value="0"/>
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                                                        <ContentPresenter/>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <ContentControl Content="{Binding Content}"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
 
                             <Border x:Name="FilesChoasHost"
+                                    Visibility="Collapsed"
+                                    Width="0"
+                                    Height="0"
                                     HorizontalAlignment="Left"
                                     VerticalAlignment="Bottom"
-                                    Margin="0,0,0,16"
+                                    Margin="0"
                                     Background="Transparent"/>
                         </Grid>
                     </Grid>
